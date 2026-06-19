@@ -211,7 +211,7 @@ async function addToken(){
     <p class="mb-4 text-xs text-slate-400">Create a reusable enrollment token, then run the agent anywhere with it. Servers register themselves automatically (great for k8s DaemonSets).</p>
     <div class="space-y-2">
       <select id="tkNs" class="input">${opts}</select>
-      <input id="tkName" class="input" placeholder="token name (e.g. prod-nodes)">
+      <input id="tkName" class="input" maxlength="32" placeholder="token name (e.g. prod-nodes)">
       <div class="flex justify-end gap-2 pt-1"><button class="btn-ghost" onclick="closeModal()">Cancel</button><button class="btn" onclick="createToken()">Create token</button></div>
     </div>`);
 }
@@ -805,6 +805,20 @@ pub async fn server_detail(
     .into_response()
 }
 
+/// Masks a token for display: first 8 + last 4 chars (full value only in the copy
+/// button). 8 leading chars so a shared prefix doesn't hide the distinguishing part.
+fn mask_token(t: &str) -> String {
+    let n = t.chars().count();
+    if n <= 14 {
+        let keep = n.saturating_sub(4).min(4);
+        let first: String = t.chars().take(keep).collect();
+        return format!("{first}{}", "•".repeat(n - keep));
+    }
+    let first: String = t.chars().take(8).collect();
+    let last: String = t.chars().skip(n - 4).collect();
+    format!("{first}…{last}")
+}
+
 fn chart_card(id: &str, title: &str, desc: &str) -> Markup {
     html! {
         div class="card" id={(id) "-card"} {
@@ -1164,7 +1178,7 @@ pub async fn manage_servers(State(state): State<AppState>, user: Option<CurrentU
             h2 class="mb-3 text-sm font-semibold text-slate-300" { "Enrollment tokens" }
             form data-url="/api/namespaces/__NS__/tokens" onsubmit="return jpost(event)" class="flex flex-wrap items-end gap-2" {
                 (ns_select(&nss))
-                input class="input max-w-[220px]" name="name" placeholder="token name (e.g. prod-nodes)" required {}
+                input class="input max-w-[220px]" name="name" placeholder="token name (e.g. prod-nodes)" maxlength="32" required {}
                 button class="btn" type="submit" { (icon("plus")) "Create token" }
             }
             p class="mt-2 text-xs text-slate-500" { "One token enrolls many servers — reuse it across a fleet / k8s DaemonSet." }
@@ -1179,10 +1193,10 @@ pub async fn manage_servers(State(state): State<AppState>, user: Option<CurrentU
                     @for (id, name, token, count, nsn) in &tokens {
                         tr {
                             td class="td text-slate-400" { (nsn) }
-                            td class="td font-medium" { (name) }
+                            td class="td font-medium" { span class="block max-w-[220px] truncate" title=(name) { (name) } }
                             td class="td" {
-                                code class="rounded bg-ink px-1.5 py-0.5 text-xs text-emerald-300" { (token) }
-                                button class="ml-1 text-slate-500 hover:text-slate-300" onclick=(format!("copyTxt('{token}')")) { (icon("copy")) }
+                                code class="rounded bg-ink px-1.5 py-0.5 text-xs text-emerald-300" title="hidden for security" { (mask_token(token)) }
+                                button class="ml-1 text-slate-500 hover:text-slate-300" title="Copy token" onclick=(format!("copyTxt('{token}')")) { (icon("copy")) }
                             }
                             td class="td" { (count) }
                             td class="td text-right" {

@@ -262,21 +262,22 @@ pub async fn create_token(
     Json(req): Json<CreateToken>,
 ) -> Result<Json<CreatedToken>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    let token = format!("tok_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let name = req.name.trim().to_string();
+    if name.is_empty() || name.chars().count() > 32 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    // Standardized 32-char token (UUIDv4, hex, ~122 bits of entropy).
+    let token = Uuid::new_v4().simple().to_string();
     let (id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO enrollment_tokens (namespace_id, name, token) VALUES ($1, $2, $3) RETURNING id",
     )
     .bind(ns)
-    .bind(&req.name)
+    .bind(&name)
     .bind(&token)
     .fetch_one(&state.config)
     .await
     .map_err(internal)?;
-    Ok(Json(CreatedToken {
-        id,
-        name: req.name,
-        token,
-    }))
+    Ok(Json(CreatedToken { id, name, token }))
 }
 
 #[derive(Serialize)]

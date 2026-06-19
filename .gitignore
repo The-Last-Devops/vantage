@@ -2,3 +2,5 @@
 .env
 *.log
 tooling/
+.secrets
+.gh-token

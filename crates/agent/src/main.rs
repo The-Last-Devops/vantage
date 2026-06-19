@@ -39,10 +39,14 @@ fn load_config() -> Result<Config> {
 
 /// Disk usage (used, total) in bytes for a path, via statvfs. Predictable in
 /// containers (unlike enumerating mounts, which sees the container's view).
+///
+/// statvfs field widths differ by platform (u64 on Linux, u32 on macOS), so the
+/// `as u64` casts are necessary on some targets even if redundant on others.
+#[allow(clippy::unnecessary_cast)]
 fn disk_usage(path: &str) -> (u64, u64) {
     match nix::sys::statvfs::statvfs(path) {
         Ok(s) => {
-            let frsize = s.fragment_size();
+            let frsize = s.fragment_size() as u64;
             let total = s.blocks() as u64 * frsize;
             let avail = s.blocks_available() as u64 * frsize;
             (total.saturating_sub(avail), total)
