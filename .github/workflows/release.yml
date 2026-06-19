@@ -11,6 +11,7 @@ permissions:
 jobs:
   # Linux binaries (hub + agent) attached to the GitHub Release.
   binaries:
+    name: Release binaries (linux-x86_64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +34,7 @@ jobs:
 
   # Multi-arch container images pushed to GHCR.
   images:
+    name: Image (${{ matrix.component }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
