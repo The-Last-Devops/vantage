@@ -129,7 +129,7 @@ fn navbar(user: &CurrentUser) -> Markup {
         nav class="border-b border-line bg-panel" {
             div class="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3" {
                 a href="/" class="mr-4 flex items-center gap-2 text-sm font-bold tracking-tight text-white" { (brand_mark()) "Last Monitor" }
-                a href="/" class="btn-ghost" { "Dashboard" }
+                a href="/" class="btn-ghost" { "Servers" }
                 a href="/monitors" class="btn-ghost" { "Monitors" }
                 // Manage with a hover-revealed submenu.
                 div class="group relative" {
@@ -351,7 +351,7 @@ pub async fn dashboard(State(_s): State<AppState>, user: Option<CurrentUser>) ->
         return Redirect::to("/login").into_response();
     };
     layout(
-        "Dashboard",
+        "Servers",
         Some(&user),
         html! {
             div class="mb-6" hx-get="/ui/hero" hx-trigger="load, every 5s" hx-swap="innerHTML" {
@@ -374,7 +374,7 @@ pub async fn dashboard(State(_s): State<AppState>, user: Option<CurrentUser>) ->
                             }
                         }
                     }
-                    button class="btn text-xs" onclick="addToken()" { (icon("plus")) "Add server" }
+                    button class="btn whitespace-nowrap text-xs" onclick="addToken()" { (icon("plus")) "Add server" }
                 }
             }
             div class="card overflow-x-auto p-0" {
@@ -387,7 +387,6 @@ pub async fn dashboard(State(_s): State<AppState>, user: Option<CurrentUser>) ->
                         th class="th col-net cursor-pointer select-none" onclick="sortBy('net')" { span class="inline-flex items-center gap-1" { "Network" (icon("sort")) } }
                         th class="th col-trend" { "Trend" }
                         th class="th col-agent" { "Agent" }
-                        th class="th" { "" }
                     } }
                     tbody id="srvBody" hx-get="/ui/servers" hx-trigger="load, every 2s" hx-swap="innerHTML" {
                         tr { td class="td" colspan="7" { "loading…" } }
@@ -568,6 +567,15 @@ pub async fn frag_hero(
     })
 }
 
+fn mon_chip(label: &str, value: &str, color: &str) -> Markup {
+    html! {
+        div class="rounded-xl border border-line bg-panel px-4 py-3" {
+            div class="text-[11px] text-slate-400" { (label) }
+            div class={"num mt-0.5 text-2xl font-semibold " (color)} { (value) }
+        }
+    }
+}
+
 fn hero_stat(label: &str, value: &str, suffix: Option<&str>, color: &str) -> Markup {
     html! {
         div {
@@ -590,7 +598,7 @@ pub async fn monitors_page(State(_s): State<AppState>, user: Option<CurrentUser>
         html! {
             div class="mb-3 flex items-center justify-between" {
                 h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400" { "Service monitors" }
-                button class="btn text-xs" onclick="addMonitor()" { (icon("plus")) "Add monitor" }
+                button class="btn whitespace-nowrap text-xs" onclick="addMonitor()" { (icon("plus")) "Add monitor" }
             }
             div class="space-y-3" hx-get="/ui/monitors" hx-trigger="load, every 3s" hx-swap="innerHTML" {
                 div class="card text-sm text-slate-400" { "loading…" }
@@ -676,9 +684,9 @@ pub async fn frag_servers(
 
     Ok(html! {
         @if rows.is_empty() {
-            tr { td class="td text-slate-400" colspan="8" { "No servers yet — click “Add server”." } }
+            tr { td class="td text-slate-400" colspan="7" { "No servers yet — click “Add server”." } }
         }
-        @for (id, name, hostname, last_seen, ver, token_id, s, spark_str) in rows {
+        @for (id, name, hostname, last_seen, ver, _token_id, s, spark_str) in rows {
             @let host = hostname.clone().unwrap_or_else(|| "—".into());
             @let first = s.first();
             @let cpu = first.map(|x| x.1).unwrap_or(0.0);
@@ -720,10 +728,6 @@ pub async fn frag_servers(
                     canvas data-spark=(spark_str) style="width:104px;height:30px;display:block" {}
                 }
                 td class="td col-agent whitespace-nowrap text-xs text-slate-400" { (ver.unwrap_or_else(|| "—".into())) }
-                td class="td text-right" {
-                    button class="btn-ghost px-2" title="Actions"
-                        onclick=(format!("openServerMenu('{id}','{token_id}','{host}','{name}')")) { (icon("more")) }
-                }
             }
         }
     })
@@ -763,7 +767,36 @@ pub async fn frag_monitors(
         rows.push((name, kind, target, beats));
     }
 
+    // Summary across monitors (mirrors the dashboard hero's stat rhythm).
+    let m_total = rows.len() as i64;
+    let m_up = rows
+        .iter()
+        .filter(|(_, _, _, b)| matches!(b.first(), Some((true, _, _))))
+        .count() as i64;
+    let m_down = m_total - m_up;
+    let avg_uptime = if rows.is_empty() {
+        0.0
+    } else {
+        rows.iter()
+            .map(|(_, _, _, b)| {
+                let t = b.len();
+                if t > 0 {
+                    b.iter().filter(|(u, _, _)| *u).count() as f64 / t as f64 * 100.0
+                } else {
+                    0.0
+                }
+            })
+            .sum::<f64>()
+            / rows.len() as f64
+    };
+
     Ok(html! {
+        div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4" {
+            (mon_chip("Monitors", &m_total.to_string(), "text-white"))
+            (mon_chip("Up", &m_up.to_string(), "text-teal"))
+            (mon_chip("Down", &m_down.to_string(), if m_down > 0 { "text-rose-400" } else { "text-white" }))
+            (mon_chip("Avg uptime", &format!("{avg_uptime:.1}%"), "text-white"))
+        }
         @if rows.is_empty() {
             div class="card text-sm text-slate-400" { "No monitors yet — add one in Manage." }
         }
@@ -1317,7 +1350,13 @@ pub async fn manage_servers(State(state): State<AppState>, user: Option<CurrentU
     .unwrap_or_default();
 
     let content = html! {
-        h1 class="mb-4 text-xl font-semibold" { "Servers & tokens" }
+        h1 class="mb-1 text-xl font-semibold" { "Servers & tokens" }
+        div class="mb-4 rounded-lg border border-line bg-panel px-4 py-3 text-xs leading-relaxed text-slate-400" {
+            "A " span class="font-semibold text-teal" { "token" } " enrolls one or more "
+            span class="font-semibold text-slate-200" { "servers" } " (each agent registers by hostname). "
+            "Delete a token to stop enrollment and remove " span class="font-semibold text-rose-300" { "all" }
+            " of its servers. " span class="text-slate-300" { "Remove" } " on a single server only clears its row — it reappears if that agent keeps reporting."
+        }
         // Tokens
         div class="card mb-4" {
             h2 class="mb-3 text-sm font-semibold text-slate-300" { "Enrollment tokens" }
