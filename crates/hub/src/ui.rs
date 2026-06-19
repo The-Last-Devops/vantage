@@ -21,6 +21,11 @@ fn selected_ns(jar: &CookieJar) -> Option<Uuid> {
     jar.get("ns").and_then(|c| c.value().parse::<Uuid>().ok())
 }
 
+/// The teal app logo mark (gradient square with a cut-out center).
+fn brand_mark() -> PreEscaped<String> {
+    PreEscaped(r#"<span style="display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;background:conic-gradient(from 140deg,#34E1C4,#1c8f9e 55%,#34E1C4)"><span style="width:9px;height:9px;border-radius:3px;background:#0B0E14"></span></span>"#.to_string())
+}
+
 /// Inline Lucide-style SVG icon (16px, currentColor). Crisp + theme-aware.
 fn icon(name: &str) -> PreEscaped<String> {
     let body = match name {
@@ -123,7 +128,7 @@ fn navbar(user: &CurrentUser) -> Markup {
     html! {
         nav class="border-b border-line bg-panel" {
             div class="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3" {
-                a href="/" class="mr-4 text-sm font-bold tracking-tight text-white" { "Last Monitor" }
+                a href="/" class="mr-4 flex items-center gap-2 text-sm font-bold tracking-tight text-white" { (brand_mark()) "Last Monitor" }
                 a href="/" class="btn-ghost" { "Dashboard" }
                 a href="/monitors" class="btn-ghost" { "Monitors" }
                 // Manage with a hover-revealed submenu.
@@ -307,10 +312,14 @@ pub async fn login_page() -> Markup {
         "Sign in",
         None,
         html! {
-            div class="mx-auto mt-16 max-w-sm" {
-                div class="card" {
-                    h1 class="mb-1 text-lg font-semibold" { "Last Monitor" }
-                    p class="mb-4 text-sm text-slate-400" { "Sign in to continue" }
+            div class="mx-auto mt-24 max-w-sm" {
+                div class="card p-7" {
+                    div class="mb-4 inline-grid h-11 w-11 place-items-center rounded-xl"
+                        style="background:conic-gradient(from 140deg,#34E1C4,#1c8f9e 55%,#34E1C4)" {
+                        span class="h-4 w-4 rounded-md bg-panel" {}
+                    }
+                    h1 class="text-xl font-semibold tracking-tight" { "Last Monitor" }
+                    p class="mb-5 mt-1 text-sm text-slate-400" { "Sign in to continue" }
                     form id="login" onsubmit="return doLogin(event)" class="space-y-3" {
                         input class="input" name="email" type="email" placeholder="email" required {}
                         input class="input" name="password" type="password" placeholder="password" required {}

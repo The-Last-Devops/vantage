@@ -4,19 +4,23 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2
-           text-sm font-medium text-white hover:bg-indigo-500 transition;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-teal px-3.5 py-2
+           text-sm font-semibold text-teal-fg hover:brightness-110 transition;
   }
   .btn-ghost {
-    @apply inline-flex items-center rounded-md px-3 py-2 text-sm font-medium
-           text-slate-300 hover:bg-line transition;
+    @apply inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium
+           text-slate-300 hover:bg-white/5 transition;
   }
   .card {
-    @apply rounded-xl border border-line bg-panel p-5 shadow-sm;
+    @apply rounded-xl border border-line bg-panel p-5;
   }
   .input {
-    @apply w-full rounded-md border border-line bg-ink px-3 py-2 text-sm text-slate-100
-           placeholder-slate-500 focus:border-indigo-500 focus:outline-none;
+    @apply w-full rounded-lg border border-line bg-ink px-3 py-2 text-sm text-slate-100
+           placeholder-slate-500 focus:border-teal focus:outline-none
+           focus:ring-2 focus:ring-teal/20;
+  }
+  .num {
+    @apply font-mono tabular-nums;
   }
   .pill {
     @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
