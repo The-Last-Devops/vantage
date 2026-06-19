@@ -155,7 +155,7 @@ fn navbar(user: &CurrentUser) -> Markup {
                         option { "All namespaces" }
                     }
                     span class="text-xs text-slate-400" { (user.email) }
-                    @if user.is_admin { span class="pill bg-indigo-500/20 text-indigo-300" { "admin" } }
+                    @if user.is_admin { span class="pill bg-teal/20 text-teal" { "admin" } }
                     button class="btn-ghost" onclick="logout()" { "Logout" }
                 }
             }
@@ -237,14 +237,14 @@ function showInstall(token){
   const tabs=['binary','docker','compose','k8s'];
   openModal(`
     <h3 class="mb-1 text-base font-semibold">Install the agent</h3>
-    <p class="mb-3 text-xs text-slate-400">Token <code class="text-emerald-300">${esc(token)}</code> — reuse on any number of hosts.</p>
+    <p class="mb-3 text-xs text-slate-400">Token <code class="text-teal">${esc(token)}</code> — reuse on any number of hosts.</p>
     <div class="mb-2 flex gap-1">${tabs.map(t=>`<button class="insttab btn-ghost text-xs" data-t="${t}" onclick="instTab('${t}')">${t}</button>`).join('')}</div>
     <pre id="instCode" class="max-h-72 overflow-auto rounded-lg border border-line bg-ink p-3 text-xs leading-relaxed text-slate-200"></pre>
     <div class="flex justify-end gap-2 pt-3"><button class="btn-ghost" onclick="location.reload()">Done</button><button class="btn" onclick="copyTxt(document.getElementById('instCode').textContent)">Copy</button></div>`);
   instTab('docker');
 }
 function instTab(t){ document.getElementById('instCode').textContent=instSnippet(t,window._tok,window._hub);
-  document.querySelectorAll('.insttab').forEach(b=>b.classList.toggle('!text-indigo-300',b.dataset.t===t)); }
+  document.querySelectorAll('.insttab').forEach(b=>b.classList.toggle('!text-teal',b.dataset.t===t)); }
 
 // --- per-server actions (modal, survives table polling) ---
 function openServerMenu(id,tok,host,name){
@@ -697,7 +697,7 @@ pub async fn frag_servers(
                         span class={"dot " (online_dot(last_seen))} {}
                         div {
                             div class="flex items-center gap-1.5" {
-                                a class="font-medium text-slate-100 hover:text-indigo-300" href={"/server/"(id)} { (name) }
+                                a class="font-medium text-slate-100 hover:text-teal" href={"/server/"(id)} { (name) }
                                 button class="text-slate-500 hover:text-slate-300" title="Copy name" onclick=(format!("copyTxt('{name}')")) { (icon("copy")) }
                             }
                             div class="text-xs text-slate-500" { (host) }
@@ -776,29 +776,38 @@ pub async fn frag_monitors(
             @let ups = beats.iter().filter(|(u, _, _)| *u).count();
             @let uptime = if total > 0 { ups as f64 / total as f64 * 100.0 } else { 0.0 };
             div class="card" {
-                div class="flex flex-wrap items-center gap-3" {
-                    span class={"dot " (match up { Some(true)=>"bg-emerald-500", Some(false)=>"bg-rose-500", None=>"bg-slate-600" })} {}
-                    div class="min-w-[140px]" {
-                        div class="font-medium text-slate-100" { (name) }
-                        div class="text-xs text-slate-500" { (kind) " · " (target) }
-                    }
-                    // heartbeat bar (oldest -> newest)
-                    div class="flex items-end gap-[3px]" {
-                        @for (u, _, _) in beats.iter().rev() {
-                            span class={"hb " (if *u { "bg-emerald-500" } else { "bg-rose-500" })}
-                                 title=(if *u { "up" } else { "down" }) {}
+                div class="grid items-center gap-5 md:grid-cols-[236px_1fr_240px]" {
+                    // info (left)
+                    div class="flex min-w-0 items-center gap-3" {
+                        span class={"dot " (match up { Some(true)=>"bg-teal", Some(false)=>"bg-rose-500", None=>"bg-slate-600" })} {}
+                        div class="min-w-0" {
+                            div class="truncate font-medium text-slate-100" { (name) }
+                            div class="truncate text-xs text-slate-500" { (kind) " · " (target) }
                         }
                     }
-                    div class="ml-auto flex items-center gap-4 text-right" {
-                        div { div class="text-xs text-slate-500" { "Uptime" }
-                              div class="text-sm font-medium tabular-nums text-slate-200" { (format!("{uptime:.0}%")) } }
-                        div { div class="text-xs text-slate-500" { "Latency" }
-                              div class="text-sm font-medium tabular-nums text-slate-200" { (latency.map(|l| format!("{l} ms")).unwrap_or_else(|| "—".into())) } }
+                    // tall heartbeat (center)
+                    div class="min-w-0" {
+                        div class="flex h-[50px] items-stretch gap-[3px]" {
+                            @for (u, _, _) in beats.iter().rev() {
+                                span class={"min-w-[2px] flex-1 rounded-sm " (if *u { "bg-teal" } else { "bg-rose-500" })}
+                                     title=(if *u { "up" } else { "down" }) {}
+                            }
+                        }
+                        div class="mt-1.5 flex justify-between text-[10px] text-slate-500" {
+                            span { (format!("{total} checks ago")) } span { "now" }
+                        }
+                    }
+                    // stats (right)
+                    div class="flex items-center justify-end gap-5" {
+                        div class="text-right" { div class="text-[10px] uppercase tracking-wide text-slate-500" { "Uptime" }
+                              div class="num text-sm font-semibold text-slate-200" { (format!("{uptime:.0}%")) } }
+                        div class="text-right" { div class="text-[10px] uppercase tracking-wide text-slate-500" { "Latency" }
+                              div class="num text-sm font-semibold text-slate-200" { (latency.map(|l| format!("{l}ms")).unwrap_or_else(|| "—".into())) } }
                         (status_pill(up))
                     }
                 }
                 @if let Some(m) = msg { @if up == Some(false) {
-                    div class="mt-2 rounded-md bg-rose-500/10 px-2 py-1 text-xs text-rose-300" { (m) }
+                    div class="mt-3 rounded-md bg-rose-500/10 px-2.5 py-1.5 text-xs text-rose-300" { (m) }
                 } }
             }
         }
@@ -855,9 +864,9 @@ pub async fn server_detail(
         html! {
             div class="mb-2 flex flex-wrap items-center gap-3" {
                 a href="/" class="btn-ghost text-xs" { "← Servers" }
-                span class={"dot " (if online { "bg-emerald-500" } else { "bg-rose-500" })} {}
+                span class={"dot " (if online { "bg-teal" } else { "bg-rose-500" })} {}
                 h1 class="text-xl font-semibold" { (name) }
-                span class={"pill " (if online { "bg-emerald-500/20 text-emerald-300" } else { "bg-rose-500/20 text-rose-300" })} {
+                span class={"pill " (if online { "bg-teal/20 text-teal" } else { "bg-rose-500/20 text-rose-300" })} {
                     (if online { "Up" } else { "Down" })
                 }
                 div class="ml-auto flex items-center gap-2" {
@@ -953,7 +962,7 @@ fn uptime_str(secs: i64) -> String {
 const CHART_JS: &str = r#"
 let RANGE='1h';
 const charts={};  // id -> { u, sig }
-const palette=['#818cf8','#34d399','#f59e0b','#38bdf8','#fb7185','#a78bfa','#f472b6','#4ade80','#facc15','#22d3ee','#c084fc','#fca5a5'];
+const palette=['#34E1C4','#34d399','#f59e0b','#38bdf8','#fb7185','#a78bfa','#f472b6','#4ade80','#facc15','#22d3ee','#c084fc','#fca5a5'];
 function fmtB(v){ if(v==null) return '–'; const u=['B','K','M','G']; let i=0; while(v>=1024&&i<3){v/=1024;i++;} return v.toFixed(i?1:0)+u[i]; }
 const pct=(u,v)=>v==null?'–':v.toFixed(0)+'%';
 const dpct=(u,v)=>v==null?'–':v.toFixed(1)+'%';
@@ -986,7 +995,7 @@ function stack(t, series){
 }
 function renderSystem(d){
   if(!d) return;
-  upsert('cpu','cpu', lineOpts('cpu',true,[{label:'CPU',stroke:'#818cf8',fill:'#818cf822',width:2,points:{show:false},value:pct}]), [d.t,d.cpu]);
+  upsert('cpu','cpu', lineOpts('cpu',true,[{label:'CPU',stroke:'#34E1C4',fill:'#34E1C422',width:2,points:{show:false},value:pct}]), [d.t,d.cpu]);
   upsert('mem','mem', lineOpts('mem',true,[{label:'Memory',stroke:'#34d399',fill:'#34d39922',width:2,points:{show:false},value:pct}]), [d.t,d.mem_pct]);
   upsert('disk','disk', lineOpts('disk',true,[{label:'Disk',stroke:'#f59e0b',fill:'#f59e0b22',width:2,points:{show:false},value:pct}]), [d.t,d.disk_pct]);
   upsert('dio','dio', lineOpts('dio',false,[
@@ -1031,7 +1040,7 @@ async function draw(){
   show('gpu-section', hasGpu);
   if(hasGpu){ renderLines('gusage', true, g.t, g.usage, pct); renderLines('gvram', true, g.t, g.vram, pct); renderLines('gpower', false, g.t, g.power, wattf); }
 }
-function setRange(r){ RANGE=r; document.querySelectorAll('.rng').forEach(b=>b.classList.toggle('!text-indigo-300', b.dataset.range===r)); draw(); }
+function setRange(r){ RANGE=r; document.querySelectorAll('.rng').forEach(b=>b.classList.toggle('!text-teal', b.dataset.range===r)); draw(); }
 let SINGLE=false;
 function toggleLayout(){ SINGLE=!SINGLE;
   document.querySelectorAll('.cgrid').forEach(g=>{ g.classList.toggle('lg:grid-cols-2', !SINGLE); g.classList.toggle('lg:grid-cols-1', SINGLE); });
@@ -1087,46 +1096,70 @@ pub async fn public_status(State(state): State<AppState>, Path(slug): Path<Strin
     }
     .unwrap_or_default();
 
-    let mut rows = Vec::new();
+    // Per monitor: recent beats for the bar + uptime% + latest state.
+    let mut rows: Vec<(String, Option<bool>, f64, Vec<bool>)> = Vec::new();
     for (id, name) in monitors {
-        let up: Option<(bool,)> = sqlx::query_as(
-            "SELECT up FROM heartbeats WHERE monitor_id = $1 ORDER BY time DESC LIMIT 1",
+        let beats: Vec<(bool,)> = sqlx::query_as(
+            "SELECT up FROM heartbeats WHERE monitor_id = $1 ORDER BY time DESC LIMIT 32",
         )
         .bind(id)
-        .fetch_optional(&state.data)
+        .fetch_all(&state.data)
         .await
-        .ok()
-        .flatten();
-        rows.push((name, up.map(|(u,)| u)));
+        .unwrap_or_default();
+        let up = beats.first().map(|(u,)| *u);
+        let total = beats.len();
+        let ups = beats.iter().filter(|(u,)| *u).count();
+        let uptime = if total > 0 {
+            ups as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+        let bars: Vec<bool> = beats.iter().rev().map(|(u,)| *u).collect();
+        rows.push((name, up, uptime, bars));
     }
 
-    let all_up = rows.iter().all(|(_, u)| matches!(u, Some(true)));
+    let all_up = !rows.is_empty() && rows.iter().all(|(_, u, _, _)| matches!(u, Some(true)));
     layout(
         &title,
         None,
         html! {
-            div class="mx-auto mt-8 max-w-2xl" {
-                div class="card" {
-                    div class="mb-4 flex items-center gap-3" {
-                        h1 class="text-xl font-semibold" { (title) }
-                        @if rows.is_empty() {
-                            span class="pill bg-slate-500/20 text-slate-300" { "no monitors" }
-                        } @else if all_up {
-                            span class="pill bg-emerald-500/20 text-emerald-300" { "All systems operational" }
-                        } @else {
-                            span class="pill bg-rose-500/20 text-rose-300" { "Partial outage" }
+            div class="mx-auto max-w-3xl px-4 py-14" {
+                div class="mb-7 text-center" {
+                    @if rows.is_empty() {
+                        span class="pill bg-slate-500/20 text-slate-300" { "No monitors" }
+                    } @else if all_up {
+                        span class="inline-flex items-center gap-2.5 rounded-full border border-teal/30 bg-teal/10 px-4 py-2 text-sm font-semibold text-teal" {
+                            span class="dot pulse-dot bg-teal" style="width:9px;height:9px" {} "All systems operational"
+                        }
+                    } @else {
+                        span class="inline-flex items-center gap-2.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-300" {
+                            span class="dot bg-rose-500" {} "Partial outage"
                         }
                     }
-                    div class="divide-y divide-line" {
-                        @for (name, up) in &rows {
-                            div class="flex items-center justify-between py-2" {
-                                span class="text-sm" { (name) }
-                                (status_pill(*up))
+                    h1 class="mt-4 text-2xl font-semibold tracking-tight" { (title) }
+                    p class="mt-1 text-sm text-slate-400" { "Live status of our services" }
+                }
+                div class="card p-0" {
+                    @for (name, up, uptime, bars) in &rows {
+                        div class="grid items-center gap-4 border-t border-white/5 px-5 py-4 first:border-t-0"
+                            style="grid-template-columns:1fr 220px 64px 104px" {
+                            div class="flex min-w-0 items-center gap-2.5" {
+                                span class={"dot " (match up { Some(true)=>"bg-teal", Some(false)=>"bg-rose-500", None=>"bg-slate-600" })} {}
+                                span class="truncate font-medium" { (name) }
+                            }
+                            div class="flex h-[26px] items-stretch gap-[2px]" {
+                                @for u in bars {
+                                    span class={"min-w-[2px] flex-1 rounded-sm " (if *u { "bg-teal" } else { "bg-rose-500" })} {}
+                                }
+                            }
+                            span class="num text-right text-xs text-slate-400" { (format!("{uptime:.1}%")) }
+                            span class={"text-right text-xs font-semibold " (if matches!(up, Some(false)) { "text-rose-300" } else { "text-teal" })} {
+                                (if matches!(up, Some(false)) { "Down" } else { "Operational" })
                             }
                         }
                     }
                 }
-                p class="mt-3 text-center text-xs text-slate-500" { "powered by last-monitor" }
+                p class="mt-4 text-center text-xs text-slate-500" { "powered by Last Monitor" }
             }
         },
     )
@@ -1180,7 +1213,7 @@ fn manage_layout(active: &str, user: &CurrentUser, content: Markup) -> Markup {
                             @if !admin_only_tab(slug) || user.is_admin {
                                 a href={"/manage/"(slug)}
                                   class=(if active == *slug {
-                                      "rounded-md bg-indigo-500/15 px-3 py-2 text-sm font-medium text-indigo-300"
+                                      "rounded-md bg-teal/15 px-3 py-2 text-sm font-medium text-teal"
                                   } else {
                                       "rounded-md px-3 py-2 text-sm text-slate-400 hover:bg-line hover:text-slate-200"
                                   }) { (label) }
@@ -1307,7 +1340,7 @@ pub async fn manage_servers(State(state): State<AppState>, user: Option<CurrentU
                             td class="td text-slate-400" { (nsn) }
                             td class="td font-medium" { span class="block max-w-[220px] truncate" title=(name) { (name) } }
                             td class="td" {
-                                code class="rounded bg-ink px-1.5 py-0.5 text-xs text-emerald-300" title="hidden for security" { (mask_token(token)) }
+                                code class="rounded bg-ink px-1.5 py-0.5 text-xs text-teal" title="hidden for security" { (mask_token(token)) }
                                 button class="ml-1 text-slate-500 hover:text-slate-300" title="Copy token" onclick=(format!("copyTxt('{token}')")) { (icon("copy")) }
                             }
                             td class="td" { (count) }
@@ -1391,7 +1424,7 @@ pub async fn manage_monitors(State(state): State<AppState>, user: Option<Current
                             td class="td text-slate-400" { (kind) } td class="td text-slate-400" { (target) }
                             td class="td text-slate-400" { (iv) "s" }
                             td class="td" {
-                                @if *enabled { span class="pill bg-emerald-500/20 text-emerald-300" { "enabled" } }
+                                @if *enabled { span class="pill bg-teal/20 text-teal" { "enabled" } }
                                 @else { span class="pill bg-slate-500/20 text-slate-400" { "paused" } }
                             }
                             td class="td whitespace-nowrap text-right" {
@@ -1564,7 +1597,7 @@ pub async fn manage_status(State(state): State<AppState>, user: Option<CurrentUs
                     @if pages.is_empty() { tr { td class="td text-slate-400" colspan="4" { "None yet." } } }
                     @for (id, slug, title, ns) in &pages {
                         tr { td class="td text-slate-400" { (ns) } td class="td font-medium" { (title) }
-                             td class="td" { a class="text-indigo-300 hover:underline" href={"/status/"(slug)} { "/status/" (slug) } }
+                             td class="td" { a class="text-teal hover:underline" href={"/status/"(slug)} { "/status/" (slug) } }
                              td class="td text-right" {
                                 button class="btn-ghost text-xs text-rose-400" onclick=(format!("jdelete('/api/status-pages/{id}','Delete status page {title}?')")) { "Delete" }
                              } }
@@ -1602,7 +1635,7 @@ pub async fn manage_users(State(state): State<AppState>, user: Option<CurrentUse
                 tbody {
                     @for (email, is_admin) in &users {
                         tr { td class="td" { (email) }
-                             td class="td" { @if *is_admin { span class="pill bg-indigo-500/20 text-indigo-300" { "admin" } } @else { span class="text-slate-400" { "user" } } } }
+                             td class="td" { @if *is_admin { span class="pill bg-teal/20 text-teal" { "admin" } } @else { span class="text-slate-400" { "user" } } } }
                     }
                 }
             }
@@ -1701,7 +1734,7 @@ function editMon(id,name,target,iv){
 
 fn status_pill(up: Option<bool>) -> Markup {
     match up {
-        Some(true) => html! { span class="pill bg-emerald-500/20 text-emerald-300" { "● up" } },
+        Some(true) => html! { span class="pill bg-teal/20 text-teal" { "● up" } },
         Some(false) => html! { span class="pill bg-rose-500/20 text-rose-300" { "● down" } },
         None => html! { span class="pill bg-slate-500/20 text-slate-400" { "○ —" } },
     }
@@ -1723,7 +1756,7 @@ fn gauge(value: f64) -> Markup {
     } else if v >= 60.0 {
         "bg-amber-500"
     } else {
-        "bg-emerald-500"
+        "bg-teal"
     };
     html! {
         div class="flex items-center gap-2" {
@@ -1738,7 +1771,7 @@ fn gauge(value: f64) -> Markup {
 /// Status dot color from how recently the server reported.
 fn online_dot(last_seen: Option<chrono::DateTime<chrono::Utc>>) -> &'static str {
     match last_seen {
-        Some(t) if (chrono::Utc::now() - t).num_seconds() < 60 => "bg-emerald-500",
+        Some(t) if (chrono::Utc::now() - t).num_seconds() < 60 => "bg-teal",
         Some(_) => "bg-rose-500",
         None => "bg-slate-600",
     }
@@ -1816,7 +1849,7 @@ mod tests {
     #[test]
     fn online_dot_thresholds() {
         let now = chrono::Utc::now();
-        assert_eq!(online_dot(Some(now)), "bg-emerald-500");
+        assert_eq!(online_dot(Some(now)), "bg-teal");
         assert_eq!(
             online_dot(Some(now - chrono::Duration::minutes(5))),
             "bg-rose-500"
