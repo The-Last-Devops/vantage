@@ -40,7 +40,7 @@ async function submit() {
   <div class="flex min-h-screen items-center justify-center px-6">
     <div class="w-full max-w-sm">
       <div class="mb-8 flex items-center justify-center gap-2.5">
-        <span class="lm-logo inline-block h-7 w-7 rounded-md bg-accent shadow-[0_0_20px_-4px_rgb(var(--accent))]"></span>
+        <span class="lm-logo inline-block h-7 w-7 rounded-md"></span>
         <span class="text-xl font-semibold tracking-tight text-fg">Last Monitor</span>
       </div>
 

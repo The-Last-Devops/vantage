@@ -234,7 +234,7 @@ watch([hoverIdx, cursorTime], () => emit('cursor-time', hoverIdx.value != null ?
       <!-- floating cursor tooltip (overlay charts): nearest host + value at time -->
       <div v-if="tooltip && tip.show" class="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+10px)] whitespace-nowrap rounded-md border border-line bg-surface2 px-2 py-1 text-xs shadow-xl" :style="{ left: tip.x + 'px', top: tip.y + 'px' }">
         <div class="text-faint">{{ tip.time }}</div>
-        <div class="mt-0.5 flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :style="{ background: tip.color }"></span><span class="text-fg">{{ short(tip.name) }}</span><span class="tabular-nums font-medium text-fg">{{ tip.val }}</span></div>
+        <div class="mt-0.5 flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :style="{ background: tip.color }"></span><span class="text-fg">{{ tip.name }}</span><span class="tabular-nums font-medium text-fg">{{ tip.val }}</span></div>
       </div>
     </div>
     <!-- fixed-column grid so values appearing on hover never change the row
