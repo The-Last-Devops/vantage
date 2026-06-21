@@ -10,6 +10,7 @@ const props = defineProps({
   series: { type: Array, default: () => [] },
   unit: { type: String, default: '' },
   height: { type: Number, default: 150 },
+  syncKey: { type: String, default: '' }, // charts sharing a key sync their cursor
 })
 
 const ui = useUi()
@@ -17,6 +18,7 @@ const el = ref(null)
 const hoverIdx = ref(null) // data index under cursor; null when not hovering
 let u = null
 let ro = null
+let zoomed = false // user drag-zoomed → freeze the view; live data keeps appending off-screen
 
 function cssVar(name) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -53,7 +55,12 @@ function opts() {
     height: props.height,
     padding: [10, 8, 0, 0],
     legend: { show: false }, // we render our own
-    cursor: { points: { size: 7 }, focus: { prox: 30 } },
+    cursor: {
+      points: { size: 7 },
+      focus: { prox: 30 },
+      drag: { x: true, y: false }, // drag to select/zoom a time range; dblclick resets
+      sync: props.syncKey ? { key: props.syncKey, scales: ['x', null] } : undefined,
+    },
     scales: { x: { time: true } },
     series: [
       {},
@@ -63,7 +70,16 @@ function opts() {
       { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace' },
       { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: 46, values: (_u, vals) => vals.map(fmt) },
     ],
-    hooks: { setCursor: [(up) => { hoverIdx.value = up.cursor.idx }] },
+    hooks: {
+      setCursor: [(up) => { hoverIdx.value = up.cursor.idx }],
+      setScale: [(up, key) => {
+        if (key !== 'x') return
+        const t = up.data[0]
+        if (!t || !t.length) { zoomed = false; return }
+        // zoomed if the visible x-range is narrower than the full data extent
+        zoomed = up.scales.x.min > t[0] + 1 || up.scales.x.max < t[t.length - 1] - 1
+      }],
+    },
   }
 }
 
@@ -79,7 +95,8 @@ onMounted(() => {
   ro.observe(el.value)
 })
 onBeforeUnmount(() => { ro && ro.disconnect(); u && u.destroy() })
-watch(uData, (d) => { if (u) u.setData(d) })
+// follow the latest when not zoomed; keep the frozen view (append off-screen) when zoomed
+watch(uData, (d) => { if (u) u.setData(d, !zoomed) })
 watch(() => ui.light, () => build())
 </script>
 

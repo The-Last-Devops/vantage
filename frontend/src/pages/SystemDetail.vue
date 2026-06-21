@@ -148,7 +148,7 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <div v-if="['node','host'].includes(type)" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div></div>
-        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" />
+        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :sync-key="'host:' + String(id)" />
       </div>
     </div>
 
@@ -208,7 +208,7 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <div v-else-if="type === 'container'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in containerLeafCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div>
-        <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" />
+        <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :sync-key="'ctr:' + String(id)" />
       </div>
       <p v-if="!containerLeaf" class="text-sm text-muted">No data for this container.</p>
     </div>
