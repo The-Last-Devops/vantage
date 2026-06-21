@@ -6,7 +6,7 @@ import AppShell from '../components/AppShell.vue'
 import Gauge from '../components/Gauge.vue'
 import AddSystemModal from '../components/AddSystemModal.vue'
 import SystemSearch from '../components/SystemSearch.vue'
-import UplotChart from '../components/UplotChart.vue'
+import FleetCharts from '../components/FleetCharts.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
 
@@ -257,13 +257,9 @@ const detailLink = (s) => {
           </div>
         </div>
         <p v-if="!visible.length" class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No hosts match the filter. <button @click="resetFilters" class="text-accent hover:underline">Reset</button></p>
-        <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-            <div class="mb-2 text-sm font-medium text-fg">{{ c.title }}</div>
-            <UplotChart :time="gappedFleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :show-legend="false" :tooltip="true" :area="false" sync-key="fleet"
-              :focus-names="fleetFocus" :selected-names="selectedNames" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleByName" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
-          </div>
-        </div>
+        <FleetCharts v-else :charts="fleetCharts" :time="gappedFleet?.t || []" :span-seconds="FSPAN[frange]" :view-range="fviewRange"
+          :focus-names="fleetFocus" :selected-names="selectedNames" sync-key="fleet"
+          @legend-hover="hoverNode = $event" @legend-toggle="toggleByName" @zoom="setFzoom" />
       </section>
 
       <!-- Hosts: one flat table; Type / Cluster / Namespace are clickable filters -->

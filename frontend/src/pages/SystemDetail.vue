@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import UplotChart from '../components/UplotChart.vue'
+import FleetCharts from '../components/FleetCharts.vue'
 import SystemSearch from '../components/SystemSearch.vue'
 import Gauge from '../components/Gauge.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
@@ -51,11 +52,12 @@ function chartFocus(series) {
   const sel = series.filter((s) => selectedMetrics.value.includes(s.name)).map((s) => s.name)
   return sel.length ? sel : null
 }
+// single focus for the shared fleet grid (docker host + containers)
+const fleetFocus = computed(() => (hoverMetric.value ? [hoverMetric.value] : selectedMetrics.value.length ? selectedMetrics.value : null))
 
 const metrics = ref(null)
 const containersList = ref([])
 const containersTime = ref([])
-const clusterNodes = ref([])
 const error = ref('')
 
 const C = { teal: '#34E1C4', amber: '#F4A261', blue: '#5BA8FF', purple: '#8B7FD6' }
@@ -139,13 +141,6 @@ async function loadContainers() {
     }))
   } catch { containersList.value = [] }
 }
-async function loadCluster() {
-  try {
-    const all = await api.get('/api/systems')
-    clusterNodes.value = all.filter((s) => s.kind === 'k8s' && (s.cluster || 'unnamed') === name.value)
-  } catch { clusterNodes.value = [] }
-}
-
 // docker detail = a fleet scoped to one host: the host itself is just another
 // line alongside its containers. Host + containers share the agent's push
 // timestamps, so we align both on the union timeline.
@@ -222,50 +217,16 @@ const containerLeafCharts = computed(() => {
     { title: 'Network', sub: 'rx+tx', unit: 'B/s', series: [{ name: 'net', color: C.blue, data: c.series.net || [] }] },
   ]
 })
-const clusterAgg = computed(() => {
-  const ns = clusterNodes.value
-  const a = (f) => { const v = ns.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((x, y) => x + y, 0) / v.length) : null }
-  return { online: ns.filter(online).length, total: ns.length, cpu: a((x) => x.cpu_percent), mem: a((x) => pct(x.mem_used, x.mem_total)), disk: a((x) => pct(x.disk_used, x.disk_total)) }
-})
-// Up if data is fresh (latest sample within ~90s); for k8s, if any node is ready
+// Up if the latest sample is fresh (within ~90s)
 const statusUp = computed(() => {
-  if (type.value === 'k8s') return clusterAgg.value.online > 0
   const t = metrics.value?.t || containersTime.value
   return !!(t && t.length && Date.now() / 1000 - t[t.length - 1] < 90)
 })
 
-// k8s cluster detail, fleet-style: overlay this cluster's nodes (from /api/fleet,
-// filtered to the cluster's node names) on one chart per metric
-const fleet = ref(null)
-async function loadClusterFleet() { try { fleet.value = await api.get(`/api/fleet?range=${range.value}`) } catch {} }
-const clusterFleetData = computed(() => {
-  const f = fleet.value
-  if (!f || !f.t) return null
-  const keep = new Set(clusterNodes.value.map((n) => n.name))
-  const groups = ['cpu', 'mem', 'disk', 'net']
-  const arrays = [], map = []
-  groups.forEach((g) => (f[g] || []).filter((s) => keep.has(s.name)).forEach((s) => { arrays.push(s.data); map.push([g, s.name]) }))
-  if (!map.length) return null
-  const { t, arrays: na } = insertGaps(f.t, arrays)
-  const out = { t, cpu: [], mem: [], disk: [], net: [] }
-  map.forEach(([g, name], i) => out[g].push({ name, data: na[i] }))
-  return out
-})
-const clusterFleetCharts = computed(() => {
-  const f = clusterFleetData.value
-  if (!f) return []
-  const colored = (arr) => arr.map((s, i) => ({ ...s, color: seriesColor(i) }))
-  return [
-    { title: 'CPU', unit: '%', series: colored(f.cpu) },
-    { title: 'Memory', unit: '%', series: colored(f.mem) },
-    { title: 'Disk', unit: '%', series: colored(f.disk) },
-    { title: 'Network', unit: 'B/s', series: colored(f.net) },
-  ].filter((c) => c.series.length)
-})
-
 async function reload() {
   error.value = ''
-  if (type.value === 'k8s') { await loadCluster(); await loadClusterFleet(); return }
+  // a k8s cluster is just the fleet filtered to its nodes → send there
+  if (type.value === 'k8s') { router.replace({ path: '/', query: { q: `cluster:${name.value}` } }); return }
   if (type.value === 'container') return loadContainers()
   await loadMetrics()
   if (type.value === 'docker') await loadContainers()
@@ -293,7 +254,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <span class="text-faint">›</span>
       <template v-if="parent && ptype">
         <RouterLink :to="kindHref(ptype)" class="hover:text-accent">{{ TYPE_LABEL[ptype] }}</RouterLink><span class="text-faint">›</span>
-        <RouterLink :to="`/system/${encodeURIComponent(parent)}?type=${ptype}&name=${encodeURIComponent(parent)}`" class="hover:text-accent">{{ parent }}</RouterLink>
+        <RouterLink :to="ptype === 'k8s' ? { path: '/', query: { q: `cluster:${parent}` } } : `/system/${encodeURIComponent(parent)}?type=${ptype}&name=${encodeURIComponent(parent)}`" class="hover:text-accent">{{ parent }}</RouterLink>
         <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
       </template>
       <template v-else>
@@ -302,7 +263,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     </nav>
 
     <!-- range (charts views) -->
-    <div v-if="['node','host','container','docker','k8s'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
+    <div v-if="['node','host','container','docker'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
       <div class="flex rounded-lg border border-line bg-surface2 p-0.5 text-sm">
         <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
       </div>
@@ -334,13 +295,9 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
         <RouterLink :to="`/system/${id}?type=host&name=${encodeURIComponent(name)}`" class="ml-auto flex items-center gap-1 rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-accent hover:border-accent/50">Host details <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></RouterLink>
       </div>
 
-      <div v-if="dockerCharts && dockerCharts.charts.length" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div v-for="c in dockerCharts.charts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-          <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} series</span></div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-          <UplotChart :time="dockerCharts.t" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :legend-values-always="false" :sync-key="'docker:' + String(id)"
-            :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
-        </div>
-      </div>
+      <FleetCharts v-if="dockerCharts && dockerCharts.charts.length" :charts="dockerCharts.charts" :time="dockerCharts.t" :span-seconds="spanSeconds" :view-range="viewRange"
+        :focus-names="fleetFocus" :selected-names="selectedMetrics" :sync-key="'docker:' + String(id)"
+        @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @zoom="setZoom" />
       <p v-else class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No data for the current filter. <button v-if="chips.length" @click="resetFilters" class="text-accent hover:underline">Reset</button></p>
 
       <div class="mt-5 overflow-hidden rounded-xl border border-line">
@@ -353,40 +310,6 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
               <td class="px-4 py-3 tabular-nums text-muted">{{ c.mem != null ? (c.mem/1048576).toFixed(0)+' MB' : '—' }}</td>
             </tr>
             <tr v-if="!containersList.length"><td colspan="3" class="px-4 py-6 text-center text-muted">No container data</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
-
-    <!-- k8s: overview + nodes -->
-    <template v-else-if="type === 'k8s'">
-      <div class="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Nodes ready</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.online }}<span class="text-base text-faint">/{{ clusterAgg.total }}</span></div></div>
-        <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Avg CPU</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.cpu ?? '—' }}%</div></div>
-        <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Avg memory</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.mem ?? '—' }}%</div></div>
-        <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Avg disk</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.disk ?? '—' }}%</div></div>
-      </div>
-
-      <!-- cluster nodes, fleet-style: one line per node per metric -->
-      <div v-if="clusterFleetCharts.length" class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div v-for="c in clusterFleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-          <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} nodes</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-          <UplotChart :time="clusterFleetData?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :legend-values-always="false" :sync-key="'k8s:' + String(id)"
-            :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
-        </div>
-      </div>
-
-      <div class="overflow-hidden rounded-xl border border-line">
-        <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Nodes</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ clusterNodes.length }}</span></div>
-        <table class="w-full min-w-[560px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Node</th><th class="px-4 py-2.5 font-medium">Status</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th><th class="px-4 py-2.5 font-medium">Disk</th></tr></thead>
-          <tbody>
-            <tr v-for="n in clusterNodes" :key="n.id" class="lm-row border-b border-line last:border-0">
-              <td class="px-4 py-3"><RouterLink :to="`/system/${n.id}?type=node&name=${encodeURIComponent(n.name)}&parent=${encodeURIComponent(name)}&ptype=k8s`" class="text-fg hover:text-accent">{{ n.name }}</RouterLink></td>
-              <td class="px-4 py-3 text-sm" :class="online(n)?'text-accent':'text-red-500'">{{ online(n)?'online':'offline' }}</td>
-              <td class="px-4 py-3"><Gauge :v="Math.round(n.cpu_percent||0)" /></td>
-              <td class="px-4 py-3"><Gauge :v="pct(n.mem_used,n.mem_total)" /></td>
-              <td class="px-4 py-3"><Gauge :v="pct(n.disk_used,n.disk_total)" /></td>
-            </tr>
           </tbody>
         </table>
       </div>
