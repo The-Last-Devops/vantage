@@ -80,6 +80,11 @@ function matchPred(s, p) {
   // default (plain text) = node name (+ hostname), wildcard-aware
   return wild(s.name + ' ' + (s.hostname || ''), p.v)
 }
+// committed filters shown as chips (each token in q); search box appends via @add
+const chips = computed(() => q.value.trim().split(/\s+/).filter(Boolean))
+function addToken(tok) { const t = (tok || '').trim(); if (t) q.value = q.value.trim() ? `${q.value.trim()} ${t}` : t }
+function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); q.value = a.join(' ') }
+function resetFilters() { q.value = '' }
 const preds = computed(() => parseQuery(q.value))
 const visible = computed(() => servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p))))
 function sortList(list, st) {
@@ -203,7 +208,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
 
       <!-- toolbar -->
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <SystemSearch v-model="q" :items="servers" />
+        <SystemSearch :items="servers" @add="addToken" />
         <button @click="showAdd = true" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add system</button>
       </div>
 
@@ -211,15 +216,22 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
       <p v-if="error" class="text-sm text-red-500">{{ error }}</p>
 
       <!-- Fleet overlay: every visible host on one chart per metric (filter applies) -->
-      <section v-if="visible.length">
+      <section v-if="servers.length">
         <div class="mb-2 flex flex-wrap items-center gap-2">
           <h2 class="text-sm font-semibold text-fg">Fleet metrics</h2>
           <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ visible.length }} hosts</span>
+          <!-- active filter chips (each token in the query) + reset -->
+          <span v-for="(c, i) in chips" :key="c + i" class="flex items-center gap-1 rounded-full border border-line bg-surface2 py-0.5 pl-2 pr-1 text-xs text-fg">
+            <span class="tabular-nums">{{ c }}</span>
+            <button @click="removeChip(i)" title="Remove filter" class="grid h-4 w-4 place-items-center rounded-full text-faint hover:bg-red-500/15 hover:text-red-500"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </span>
+          <button v-if="chips.length" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
           <div class="ml-auto flex rounded-lg border border-line bg-surface2 p-0.5 text-xs">
             <button v-for="rr in FRANGES" :key="rr" @click="setFrange(rr)" class="rounded-md px-2.5 py-1" :class="frange===rr?'bg-accent/15 font-medium text-accent':'text-muted hover:text-fg'">{{ rr }}</button>
           </div>
         </div>
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <p v-if="!visible.length" class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No hosts match the filter. <button @click="resetFilters" class="text-accent hover:underline">Reset</button></p>
+        <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
             <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
             <UplotChart :time="gappedFleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" sync-key="fleet"

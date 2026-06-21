@@ -1,11 +1,12 @@
 <script setup>
 import { ref, computed } from 'vue'
 
-// v-model = the raw query string; items = systems (to suggest real ns/agent values).
-const props = defineProps({ modelValue: { type: String, default: '' }, items: { type: Array, default: () => [] } })
-const emit = defineEmits(['update:modelValue'])
+// Composes one filter token at a time. Enter (or picking a complete suggestion)
+// emits 'add' with the token; the parent keeps the committed filters as chips.
+const props = defineProps({ items: { type: Array, default: () => [] } })
+const emit = defineEmits(['add'])
 
-const text = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) })
+const text = ref('')
 const open = ref(false)
 const hi = ref(0)
 
@@ -21,13 +22,8 @@ const FIELDS = [
 ]
 const uniq = (f) => [...new Set(props.items.map(f).filter(Boolean))]
 
-// suggestions are context-aware on the token after the last space
-const lastToken = computed(() => {
-  const parts = text.value.split(/\s+/)
-  return parts[parts.length - 1] || ''
-})
 const suggestions = computed(() => {
-  const tok = lastToken.value
+  const tok = text.value.trim()
   const kv = tok.match(/^(status|kind|ns|agent):(.*)$/i)
   if (kv) {
     const key = kv[1].toLowerCase()
@@ -43,25 +39,26 @@ const suggestions = computed(() => {
   return FIELDS.filter((f) => !t || f.label.toLowerCase().startsWith(t) || f.insert.toLowerCase().startsWith(t))
 })
 
-function onFocus() {
-  open.value = true
-  hi.value = 0
-}
-function apply(s) {
-  const parts = text.value.split(/\s+/)
-  parts[parts.length - 1] = s.insert
-  // ':' (field) and trailing '>' (numeric) keep the cursor going; finished values get a space
-  const trailing = /[:>]$/.test(s.insert) ? '' : ' '
-  text.value = parts.join(' ') + trailing
-  hi.value = 0
+function onFocus() { open.value = true; hi.value = 0 }
+function reset() { text.value = ''; open.value = false; hi.value = 0 }
+function commit() { const t = text.value.trim(); if (t) { emit('add', t); reset() } }
+// apply a suggestion into the draft: field prefixes (end with : or >) keep typing,
+// otherwise it's a complete token — commit it
+function pick(s) {
+  if (/[:>]$/.test(s.insert)) { text.value = s.insert; open.value = true; hi.value = 0 }
+  else { emit('add', s.insert); reset() }
 }
 function onKey(e) {
-  if (!open.value) return
   const list = suggestions.value
-  if (e.key === 'ArrowDown') { e.preventDefault(); hi.value = (hi.value + 1) % list.length }
+  if (e.key === 'ArrowDown') { e.preventDefault(); open.value = true; hi.value = (hi.value + 1) % list.length }
   else if (e.key === 'ArrowUp') { e.preventDefault(); hi.value = (hi.value - 1 + list.length) % list.length }
-  else if (e.key === 'Enter' && list[hi.value]) { e.preventDefault(); apply(list[hi.value]) }
-  else if (e.key === 'Escape') { open.value = false }
+  else if (e.key === 'Enter') {
+    e.preventDefault()
+    const s = open.value ? list[hi.value] : null
+    // commit the typed text unless the highlighted suggestion is an incomplete field
+    if (s && /[:>]$/.test(s.insert) && !/[:>=<]/.test(text.value)) pick(s)
+    else commit()
+  } else if (e.key === 'Escape') { open.value = false }
 }
 </script>
 
@@ -69,10 +66,10 @@ function onKey(e) {
   <div class="relative">
     <svg class="absolute left-2.5 top-2.5 h-4 w-4 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
     <input v-model="text" @focus="onFocus" @blur="open = false" @keydown="onKey"
-      placeholder="Search nodes…   web*  cpu>50  ns:prod  kind:docker"
+      placeholder="Filter…  cpu>50  ns:prod  web*  — Enter to add"
       class="w-96 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg outline-none focus:border-accent/50" />
     <div v-if="open && suggestions.length" class="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-auto rounded-lg border border-line bg-surface2 py-1 shadow-xl">
-      <button v-for="(s, i) in suggestions" :key="s.label" @mousedown.prevent="apply(s)"
+      <button v-for="(s, i) in suggestions" :key="s.label" @mousedown.prevent="pick(s)"
         class="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left text-sm" :class="i === hi ? 'bg-accent/15 text-accent' : 'text-fg hover:bg-surface'">
         <span class="tabular-nums">{{ s.label }}</span>
         <span v-if="s.desc" class="text-xs text-faint">{{ s.desc }}</span>
