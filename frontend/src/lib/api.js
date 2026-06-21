@@ -4,6 +4,7 @@ async function request(method, path, body) {
   const opts = {
     method,
     credentials: 'include',
+    cache: 'no-store', // polled endpoints must never come from the HTTP cache (was causing delayed "realtime" updates)
     headers: {},
   }
   if (body !== undefined) {
