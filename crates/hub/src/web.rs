@@ -48,6 +48,12 @@ pub struct MetricsHistory {
     /// Disk read / write throughput (bytes/sec).
     pub dr: Vec<f64>,
     pub dw: Vec<f64>,
+    /// Load average 1 / 5 / 15 minutes.
+    pub load1: Vec<f64>,
+    pub load5: Vec<f64>,
+    pub load15: Vec<f64>,
+    /// Per-core CPU usage % (one Series per core, htop-style).
+    pub cores: Vec<Series>,
 }
 
 #[derive(serde::Deserialize)]
@@ -81,11 +87,11 @@ pub async fn system_metrics_series(
     let interval = range_interval(&q.range);
     let sql = format!(
         "SELECT time, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, \
-                COALESCE(disk_read,0), COALESCE(disk_write,0) \
+                COALESCE(disk_read,0), COALESCE(disk_write,0), load1, COALESCE(load5,0), COALESCE(load15,0), cpu_per_core \
          FROM system_metrics WHERE system_id = $1 AND time > now() - interval '{interval}' \
-         ORDER BY time ASC LIMIT 2000"
+         ORDER BY time ASC LIMIT 4000"
     );
-    let rows: Vec<(
+    type Sample = (
         chrono::DateTime<chrono::Utc>,
         f64,
         i64,
@@ -96,11 +102,30 @@ pub async fn system_metrics_series(
         i64,
         i64,
         i64,
-    )> = sqlx::query_as(&sql)
+        f64,
+        f64,
+        f64,
+        Option<sqlx::types::Json<Vec<f32>>>,
+    );
+    let rows: Vec<Sample> = sqlx::query_as(&sql)
         .bind(id)
         .fetch_all(&state.data)
         .await
         .map_err(internal)?;
+
+    let pct = |used: i64, total: i64| {
+        if total > 0 {
+            used as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        }
+    };
+    let ncores = rows
+        .iter()
+        .map(|r| r.13.as_ref().map(|j| j.0.len()).unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let mut core_data: Vec<Vec<Option<f64>>> = vec![Vec::with_capacity(rows.len()); ncores];
 
     let mut h = MetricsHistory {
         t: Vec::new(),
@@ -111,24 +136,42 @@ pub async fn system_metrics_series(
         net_tx: Vec::new(),
         dr: Vec::new(),
         dw: Vec::new(),
-    };
-    let pct = |used: i64, total: i64| {
-        if total > 0 {
-            used as f64 / total as f64 * 100.0
-        } else {
-            0.0
-        }
+        load1: Vec::new(),
+        load5: Vec::new(),
+        load15: Vec::new(),
+        cores: Vec::new(),
     };
     // Cumulative counters -> per-second rate from consecutive deltas.
     let mut prev: Option<(i64, i64, i64, i64, i64)> = None; // (ts, rx, tx, dr, dw)
-    for (time, cpu, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, dread, dwrite) in
-        rows
-    {
+    for row in rows {
+        let (
+            time,
+            cpu,
+            mem_used,
+            mem_total,
+            disk_used,
+            disk_total,
+            net_rx,
+            net_tx,
+            dread,
+            dwrite,
+            l1,
+            l5,
+            l15,
+            pc,
+        ) = row;
         let ts = time.timestamp();
         h.t.push(ts);
         h.cpu.push(cpu);
         h.mem_pct.push(pct(mem_used, mem_total));
         h.disk_pct.push(pct(disk_used, disk_total));
+        h.load1.push(l1);
+        h.load5.push(l5);
+        h.load15.push(l15);
+        let per_core = pc.map(|j| j.0).unwrap_or_default();
+        for (i, slot) in core_data.iter_mut().enumerate() {
+            slot.push(per_core.get(i).map(|v| *v as f64));
+        }
         let (rx_rate, tx_rate, dr_rate, dw_rate) = match prev {
             Some((pt, prx, ptx, pdr, pdw)) if ts > pt => {
                 let dt = (ts - pt) as f64;
@@ -147,6 +190,14 @@ pub async fn system_metrics_series(
         h.dw.push(dw_rate);
         prev = Some((ts, net_rx, net_tx, dread, dwrite));
     }
+    h.cores = core_data
+        .into_iter()
+        .enumerate()
+        .map(|(i, data)| Series {
+            name: format!("core {i}"),
+            data,
+        })
+        .collect();
     Ok(Json(h))
 }
 

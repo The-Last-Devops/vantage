@@ -109,6 +109,8 @@ fn collect(
 
     let (disk_read, disk_write) = disk_io();
 
+    let load = System::load_average();
+    let cpu_per_core: Vec<f32> = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
     MetricsReport {
         ts: now_secs(),
         hostname: System::host_name().unwrap_or_else(|| "unknown".into()),
@@ -121,7 +123,10 @@ fn collect(
         disk_total,
         net_rx,
         net_tx,
-        load1: System::load_average().one,
+        load1: load.one,
+        load5: load.five,
+        load15: load.fifteen,
+        cpu_per_core,
         uptime: System::uptime(),
         kind: String::new(), // set from config in the push loop
         cluster: String::new(),

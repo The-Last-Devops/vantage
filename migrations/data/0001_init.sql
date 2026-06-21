@@ -19,11 +19,14 @@ CREATE TABLE system_metrics (
     net_rx      BIGINT NOT NULL,
     net_tx      BIGINT NOT NULL,
     load1       DOUBLE PRECISION NOT NULL,
+    load5       DOUBLE PRECISION,
+    load15      DOUBLE PRECISION,
     uptime      BIGINT NOT NULL,
     disk_read   BIGINT,
     disk_write  BIGINT,
     temps       JSONB,
-    gpus        JSONB
+    gpus        JSONB,
+    cpu_per_core JSONB
 );
 SELECT create_hypertable('system_metrics', 'time');
 CREATE INDEX idx_system_metrics_sys_time ON system_metrics (system_id, time DESC);

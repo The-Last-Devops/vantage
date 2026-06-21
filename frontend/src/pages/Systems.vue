@@ -22,6 +22,19 @@ const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boole
 const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
 const selected = reactive(new Set())
 const expanded = reactive(new Set())
+const containers = reactive({}) // dockerSystemId -> [{name, cpu, mem}]
+const lastNonNull = (d) => { if (!d) return null; for (let i = d.length - 1; i >= 0; i--) if (d[i] != null) return d[i]; return null }
+async function toggleDocker(s) {
+  if (expanded.has(s.id)) { expanded.delete(s.id); return }
+  expanded.add(s.id)
+  if (!containers[s.id]) {
+    try {
+      const h = await api.get(`/api/systems/${s.id}/containers`)
+      const memBy = Object.fromEntries((h.mem || []).map((x) => [x.name, x]))
+      containers[s.id] = (h.cpu || []).map((x) => ({ name: x.name, cpu: Math.round(lastNonNull(x.data) ?? 0), mem: lastNonNull(memBy[x.name]?.data) }))
+    } catch { containers[s.id] = [] }
+  }
+}
 const sortState = reactive({ nodes: { col: 'name', dir: 'asc' }, docker: { col: 'name', dir: 'asc' } })
 let timer = null
 
@@ -37,7 +50,7 @@ function parseQuery(qs) {
   return (qs || '').trim().split(/\s+/).filter(Boolean).map((tok) => {
     let m = tok.match(/^(cpu|mem|disk)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
     if (m) return { t: 'num', f: m[1].toLowerCase(), op: m[2], v: +m[3] }
-    m = tok.match(/^(status|kind|ns|agent):(.+)$/i)
+    m = tok.match(/^(status|kind|ns|agent|name|node|system):(.+)$/i)
     if (m) return { t: 'kv', k: m[1].toLowerCase(), v: m[2].toLowerCase() }
     return { t: 'text', v: tok.toLowerCase() }
   })
@@ -47,12 +60,14 @@ const cmpOp = (a, op, b) => (op === '>' ? a > b : op === '<' ? a < b : op === '>
 function matchPred(s, p) {
   if (p.t === 'num') { const v = metricVal(s, p.f); return v != null && cmpOp(v, p.op, p.v) }
   if (p.t === 'kv') {
+    if (['name', 'node', 'system'].includes(p.k)) return (s.name || '').toLowerCase().includes(p.v)
     if (p.k === 'status') return (online(s) ? 'online' : 'offline').startsWith(p.v)
     if (p.k === 'kind') return s.kind === p.v
     if (p.k === 'ns') return (s.namespace || '').toLowerCase().includes(p.v)
     if (p.k === 'agent') return (s.agent_version || '').toLowerCase().includes(p.v)
   }
-  return (s.name + ' ' + (s.hostname || '') + ' ' + (s.cluster || '')).toLowerCase().includes(p.v)
+  // default (plain text) = node name (+ hostname)
+  return (s.name + ' ' + (s.hostname || '')).toLowerCase().includes(p.v)
 }
 const preds = computed(() => parseQuery(q.value))
 const visible = computed(() => servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p))))
@@ -146,15 +161,31 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
               <th class="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-fg" @click="sortBy(sec.key,'agent')">Agent{{ arrow(sec.key,'agent') }}</th>
             </tr></thead>
             <tbody>
-              <tr v-for="s in sec.rows" :key="s.id" class="lm-row border-b border-line" :class="selected.has(s.id) ? 'sel' : ''">
-                <td class="px-3 py-3"><input type="checkbox" :checked="selected.has(s.id)" @change="toggleRow(s.id)" class="h-4 w-4 accent-accent" /></td>
-                <td class="px-4 py-3"><RouterLink :to="detailLink(s)" class="flex items-center gap-2.5"><span class="h-2 w-2 rounded-full" :class="online(s)?'bg-accent':'bg-red-500'"></span><span><span class="text-fg">{{ s.name }}</span><span class="block text-xs text-faint">{{ s.hostname }}</span></span></RouterLink></td>
-                <td class="px-4 py-3 text-sm" :class="online(s)?'text-accent':'text-red-500'">{{ online(s)?'online':'offline' }}</td>
-                <td class="px-4 py-3"><Gauge :v="online(s)?r(s.cpu_percent):null" /></td>
-                <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" /></td>
-                <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.disk_used,s.disk_total):null" /></td>
-                <td class="px-4 py-3"><span class="rounded px-1.5 py-0.5 text-xs" :class="agentCls(s.agent_version)">{{ s.agent_version ? 'v'+s.agent_version : '—' }}</span></td>
-              </tr>
+              <template v-for="s in sec.rows" :key="s.id">
+                <tr class="lm-row border-b border-line" :class="selected.has(s.id) ? 'sel' : ''">
+                  <td class="px-3 py-3"><input type="checkbox" :checked="selected.has(s.id)" @change="toggleRow(s.id)" class="h-4 w-4 accent-accent" /></td>
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-1.5">
+                      <button v-if="sec.key === 'docker'" @click="toggleDocker(s)" class="text-muted hover:text-accent"><svg class="h-4 w-4 transition-transform" :class="expanded.has(s.id) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+                      <RouterLink :to="detailLink(s)" class="flex items-center gap-2.5"><span class="h-2 w-2 rounded-full" :class="online(s)?'bg-accent':'bg-red-500'"></span><span><span class="text-fg">{{ s.name }}</span><span class="block text-xs text-faint">{{ s.hostname }}</span></span></RouterLink>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-sm" :class="online(s)?'text-accent':'text-red-500'">{{ online(s)?'online':'offline' }}</td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?r(s.cpu_percent):null" /></td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" /></td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.disk_used,s.disk_total):null" /></td>
+                  <td class="px-4 py-3"><span class="rounded px-1.5 py-0.5 text-xs" :class="agentCls(s.agent_version)">{{ s.agent_version ? 'v'+s.agent_version : '—' }}</span></td>
+                </tr>
+                <tr v-for="c in (containers[s.id] || [])" v-show="sec.key === 'docker' && expanded.has(s.id)" :key="s.id + ':' + c.name" class="lm-row border-b border-line bg-bg/40">
+                  <td></td>
+                  <td class="px-4 py-2"><RouterLink :to="`/system/${s.id}?type=container&name=${encodeURIComponent(c.name)}&parent=${encodeURIComponent(s.name)}&ptype=docker`" class="flex items-center gap-2 pl-6 text-sm text-fg hover:text-accent"><span class="text-faint">└</span>{{ c.name }}</RouterLink></td>
+                  <td class="px-4 py-2 text-sm text-accent">running</td>
+                  <td class="px-4 py-2"><Gauge :v="c.cpu" /></td>
+                  <td class="px-4 py-2 tabular-nums text-muted">{{ c.mem != null ? (c.mem / 1048576).toFixed(0) + ' MB' : '—' }}</td>
+                  <td class="px-4 py-2 text-faint">—</td>
+                  <td class="px-4 py-2 text-faint">—</td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>

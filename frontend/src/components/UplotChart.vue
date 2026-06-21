@@ -32,7 +32,7 @@ function fmt(v) {
     while (n >= 1024 && i < 3) { n /= 1024; i++ }
     return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + us[i] + (props.unit.includes('/s') ? '/s' : '')
   }
-  return v.toFixed(0) + props.unit
+  return (v < 10 ? v.toFixed(2) : v.toFixed(0)) + props.unit
 }
 
 const uData = computed(() => [props.time, ...props.series.map((s) => s.data)])

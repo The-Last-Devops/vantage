@@ -30,8 +30,17 @@ pub struct MetricsReport {
     pub net_rx: u64,
     /// Bytes transmitted since boot (cumulative).
     pub net_tx: u64,
-    /// System load average over the last minute.
+    /// Load average over the last minute.
     pub load1: f64,
+    /// Load average over the last 5 minutes.
+    #[serde(default)]
+    pub load5: f64,
+    /// Load average over the last 15 minutes.
+    #[serde(default)]
+    pub load15: f64,
+    /// Per-core CPU usage % (htop-style); empty if unavailable.
+    #[serde(default)]
+    pub cpu_per_core: Vec<f32>,
     /// Seconds since the machine booted.
     pub uptime: u64,
 

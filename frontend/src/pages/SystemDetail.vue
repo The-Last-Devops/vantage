@@ -31,16 +31,36 @@ const lastVal = (d) => { if (!d) return null; for (let i = d.length - 1; i >= 0;
 const pct = (u, t) => (u != null && t ? Math.round((u / t) * 100) : null)
 const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTime() < 60000
 
+const coreColor = (i) => `hsl(${(i * 53) % 360} 65% 58%)`
 const hostCharts = computed(() => {
   const m = metrics.value
   if (!m) return []
-  return [
+  const charts = [
     { title: 'CPU Usage', sub: 'overall %', unit: '%', series: [{ name: 'CPU', color: C.teal, data: m.cpu }] },
+  ]
+  if (m.cores && m.cores.length) {
+    charts.push({
+      title: 'CPU per-core', sub: `${m.cores.length} cores`, unit: '%',
+      series: m.cores.map((c, i) => ({ name: c.name, color: coreColor(i), data: c.data })),
+    })
+  }
+  if (m.load1 && m.load1.length) {
+    charts.push({
+      title: 'Load average', sub: '1m / 5m / 15m', unit: '',
+      series: [
+        { name: '1m', color: C.teal, data: m.load1 },
+        { name: '5m', color: C.amber, data: m.load5 },
+        { name: '15m', color: C.blue, data: m.load15 },
+      ],
+    })
+  }
+  charts.push(
     { title: 'Memory', sub: 'used %', unit: '%', series: [{ name: 'Memory', color: C.blue, data: m.mem_pct }] },
     { title: 'Disk Usage', sub: 'used %', unit: '%', series: [{ name: 'Disk', color: C.purple, data: m.disk_pct }] },
     { title: 'Disk I/O', sub: 'read / write', unit: 'B/s', series: [{ name: 'read', color: C.teal, data: m.dr }, { name: 'write', color: C.amber, data: m.dw }] },
     { title: 'Network', sub: 'rx / tx', unit: 'B/s', series: [{ name: 'rx', color: C.teal, data: m.net_rx }, { name: 'tx', color: C.blue, data: m.net_tx }] },
-  ]
+  )
+  return charts
 })
 const snapshot = computed(() => {
   const m = metrics.value
