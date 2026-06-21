@@ -168,11 +168,14 @@ async function reload() {
 const live = computed(() => ['30m', '1h'].includes(range.value))
 let timer = null
 function restartTimer() { clearInterval(timer); timer = setInterval(reload, live.value ? 1000 : 5000) }
-onMounted(() => { reload(); restartTimer() })
+// node metadata (namespace, kernel, cpu model…) — fetched once per target, not polled
+const meta = ref(null)
+async function loadMeta() { try { const all = await api.get('/api/systems'); meta.value = all.find((s) => s.id === id.value) || null } catch { meta.value = null } }
+onMounted(() => { reload(); restartTimer(); loadMeta() })
 onBeforeUnmount(() => clearInterval(timer))
 // reload only when the target or range changes — NOT when ?sel (metric selection)
 // changes, which would otherwise blank the charts and cause a flash
-watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer() })
+watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer(); loadMeta() })
 </script>
 
 <template>
@@ -182,6 +185,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <RouterLink v-if="kind !== 'container'" :to="{ path: '/', query: { q: `kind:${kind}` } }" :title="`Filter kind:${kind}`" class="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20">{{ typeLabel }}</RouterLink>
       <span v-else class="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent">{{ typeLabel }}</span>
       <RouterLink v-if="ptype === 'k8s' && parent" :to="{ path: '/', query: { q: `cluster:${parent}` } }" :title="`Filter cluster:${parent}`" class="rounded bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">{{ parent }}</RouterLink>
+      <RouterLink v-if="meta && meta.namespace" :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" :title="`Filter ns:${meta.namespace}`" class="rounded bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">{{ meta.namespace }}</RouterLink>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusUp ? 'bg-accent' : 'bg-red-500'"></span><span class="text-xs font-medium" :class="statusUp ? 'text-accent' : 'text-red-500'">{{ statusUp ? 'Up' : 'Down' }}</span></span>
     </template>
     <!-- breadcrumb (simple: back to the fleet) -->
@@ -189,6 +193,17 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="hover:text-accent">Systems</RouterLink>
       <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
     </nav>
+
+    <!-- node metadata -->
+    <div v-if="meta && type !== 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
+      <span><span class="text-faint">Type</span> <span class="text-fg">{{ TYPE_LABEL[meta.kind] || meta.kind }}</span></span>
+      <span v-if="meta.cluster"><span class="text-faint">Cluster</span> <span class="text-fg">{{ meta.cluster }}</span></span>
+      <span><span class="text-faint">Namespace</span> <span class="text-fg">{{ meta.namespace }}</span></span>
+      <span v-if="meta.hostname"><span class="text-faint">Hostname</span> <span class="text-fg">{{ meta.hostname }}</span></span>
+      <span v-if="meta.cpu_model"><span class="text-faint">CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
+      <span v-if="meta.kernel"><span class="text-faint">Kernel</span> <span class="text-fg">{{ meta.kernel }}</span></span>
+      <span v-if="meta.agent_version"><span class="text-faint">Agent</span> <span class="text-fg">v{{ meta.agent_version }}</span></span>
+    </div>
 
     <!-- range (charts views) -->
     <div v-if="['node','host','container','docker'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">

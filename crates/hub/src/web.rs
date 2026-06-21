@@ -209,6 +209,9 @@ pub struct SystemRow {
     pub cluster: Option<String>,
     pub namespace: String,
     pub agent_version: Option<String>,
+    pub kernel: Option<String>,
+    pub cpu_model: Option<String>,
+    pub cpu_cores: Option<i32>,
     pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
     pub cpu_percent: Option<f64>,
     pub mem_used: Option<i64>,
@@ -232,9 +235,13 @@ pub async fn list_systems(
         Option<String>,
         String,
         Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i32>,
         Option<chrono::DateTime<chrono::Utc>>,
     )> = sqlx::query_as(
-        "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, n.name, s.agent_version, s.last_seen \
+        "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, n.name, s.agent_version, \
+                s.kernel, s.cpu_model, s.cpu_cores, s.last_seen \
              FROM systems s JOIN namespaces n ON n.id = s.namespace_id \
              WHERE $1 OR s.namespace_id IN ( \
                 SELECT namespace_id FROM memberships WHERE user_id = $2) \
@@ -264,7 +271,20 @@ pub async fn list_systems(
     }
 
     let mut rows = Vec::with_capacity(servers.len());
-    for (id, name, hostname, kind, cluster, namespace, agent_version, last_seen) in servers {
+    for (
+        id,
+        name,
+        hostname,
+        kind,
+        cluster,
+        namespace,
+        agent_version,
+        kernel,
+        cpu_model,
+        cpu_cores,
+        last_seen,
+    ) in servers
+    {
         let (cpu_percent, mem_used, mem_total, disk_used, disk_total) = match latest.get(&id) {
             Some(&(c, u, t, du, dt)) => (Some(c), Some(u), Some(t), du, dt),
             None => (None, None, None, None, None),
@@ -277,6 +297,9 @@ pub async fn list_systems(
             cluster,
             namespace,
             agent_version,
+            kernel,
+            cpu_model,
+            cpu_cores,
             last_seen,
             cpu_percent,
             mem_used,
