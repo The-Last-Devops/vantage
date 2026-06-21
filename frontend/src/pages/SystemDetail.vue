@@ -54,24 +54,21 @@ const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTim
 const hostCharts = computed(() => {
   const m = metrics.value
   if (!m) return []
-  const charts = [
-    { title: 'CPU Usage', sub: 'overall %', unit: '%', series: [{ name: 'CPU', color: C.teal, data: m.cpu }] },
-  ]
-  // Full CPU breakdown (only where the agent reports it — Linux /proc/stat).
-  // idle is derived as the remainder so the parts sum to ~100%.
-  if (m.cpu_user && m.cpu_user.some((v) => v > 0)) {
-    const idle = m.cpu_user.map((u, i) => Math.max(0, 100 - u - (m.cpu_system[i] || 0) - (m.cpu_iowait[i] || 0) - (m.cpu_steal[i] || 0)))
-    charts.push({
-      title: 'CPU breakdown', sub: 'user / system / iowait / steal / idle', unit: '%',
-      series: [
-        { name: 'user', color: C.teal, data: m.cpu_user },
-        { name: 'system', color: C.amber, data: m.cpu_system },
-        { name: 'iowait', color: C.blue, data: m.cpu_iowait },
-        { name: 'steal', color: C.purple, data: m.cpu_steal },
-        { name: 'idle', color: '#64748b', data: idle },
-      ],
-    })
+  // One CPU chart that folds the breakdown in: overall line + user/system/iowait/
+  // steal (Linux /proc/stat). macOS has no breakdown → just the overall line.
+  const hasBreakdown = m.cpu_user && m.cpu_user.some((v) => v > 0)
+  const cpuSeries = [{ name: 'CPU', color: C.teal, data: m.cpu }]
+  if (hasBreakdown) {
+    cpuSeries.push(
+      { name: 'user', color: C.blue, data: m.cpu_user },
+      { name: 'system', color: C.amber, data: m.cpu_system },
+      { name: 'iowait', color: C.purple, data: m.cpu_iowait },
+      { name: 'steal', color: '#e06c9f', data: m.cpu_steal },
+    )
   }
+  const charts = [
+    { title: 'CPU', sub: hasBreakdown ? 'overall + user / system / iowait / steal' : 'overall %', unit: '%', area: !hasBreakdown, series: cpuSeries },
+  ]
   if (m.load1 && m.load1.length) {
     charts.push({
       title: 'Load average', sub: '1m / 5m / 15m', unit: '',
@@ -196,7 +193,7 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <div v-if="['node','host'].includes(type)" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ chartTime }}</span></div>
-        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'host:' + String(id)"
+        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="c.area !== false" :sync-key="'host:' + String(id)"
           :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" />
       </div>
     </div>
