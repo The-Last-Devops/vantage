@@ -143,6 +143,28 @@ async function loadCluster() {
   } catch { clusterNodes.value = [] }
 }
 
+// docker detail, fleet-style: overlay every container on one chart per metric the
+// containers actually have (cpu/mem/net), with gap breaks inserted
+const containerSeriesData = computed(() => {
+  const list = containersList.value
+  if (!list.length || containersTime.value.length < 3) return list.length ? { t: containersTime.value, cpu: list.map((c) => ({ name: c.name, data: c.series.cpu })), mem: list.map((c) => ({ name: c.name, data: c.series.mem })), net: list.map((c) => ({ name: c.name, data: c.series.net })) } : null
+  const keys = ['cpu', 'mem', 'net']
+  const arrays = [], map = []
+  keys.forEach((k) => list.forEach((c) => { if (Array.isArray(c.series[k])) { arrays.push(c.series[k]); map.push([k, c.name]) } }))
+  const { t, arrays: na } = insertGaps(containersTime.value, arrays)
+  const out = { t, cpu: [], mem: [], net: [] }
+  map.forEach(([k, name], i) => out[k].push({ name, data: na[i] }))
+  return out
+})
+const dockerContainerCharts = computed(() => {
+  const f = containerSeriesData.value
+  if (!f) return []
+  return [
+    { title: 'CPU', sub: 'per container', unit: '%', series: f.cpu },
+    { title: 'Memory', sub: 'per container', unit: 'B', series: f.mem },
+    { title: 'Network', sub: 'per container', unit: 'B/s', series: f.net },
+  ].filter((c) => c.series.some((s) => Array.isArray(s.data) && s.data.some((v) => v != null)))
+})
 const containerLeaf = computed(() => containersList.value.find((c) => c.name === name.value))
 const containerLeafCharts = computed(() => {
   const c = containerLeaf.value
@@ -159,9 +181,37 @@ const clusterAgg = computed(() => {
   return { online: ns.filter(online).length, total: ns.length, cpu: a((x) => x.cpu_percent), mem: a((x) => pct(x.mem_used, x.mem_total)), disk: a((x) => pct(x.disk_used, x.disk_total)) }
 })
 
+// k8s cluster detail, fleet-style: overlay this cluster's nodes (from /api/fleet,
+// filtered to the cluster's node names) on one chart per metric
+const fleet = ref(null)
+async function loadClusterFleet() { try { fleet.value = await api.get(`/api/fleet?range=${range.value}`) } catch {} }
+const clusterFleetData = computed(() => {
+  const f = fleet.value
+  if (!f || !f.t) return null
+  const keep = new Set(clusterNodes.value.map((n) => n.name))
+  const groups = ['cpu', 'mem', 'disk', 'net']
+  const arrays = [], map = []
+  groups.forEach((g) => (f[g] || []).filter((s) => keep.has(s.name)).forEach((s) => { arrays.push(s.data); map.push([g, s.name]) }))
+  if (!map.length) return null
+  const { t, arrays: na } = insertGaps(f.t, arrays)
+  const out = { t, cpu: [], mem: [], disk: [], net: [] }
+  map.forEach(([g, name], i) => out[g].push({ name, data: na[i] }))
+  return out
+})
+const clusterFleetCharts = computed(() => {
+  const f = clusterFleetData.value
+  if (!f) return []
+  return [
+    { title: 'CPU', unit: '%', series: f.cpu },
+    { title: 'Memory', unit: '%', series: f.mem },
+    { title: 'Disk', unit: '%', series: f.disk },
+    { title: 'Network', unit: 'B/s', series: f.net },
+  ].filter((c) => c.series.length)
+})
+
 async function reload() {
   error.value = ''
-  if (type.value === 'k8s') return loadCluster()
+  if (type.value === 'k8s') { await loadCluster(); await loadClusterFleet(); return }
   if (type.value === 'container') return loadContainers()
   await loadMetrics()
   if (type.value === 'docker') await loadContainers()
@@ -201,7 +251,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     </div>
 
     <!-- range (charts views) -->
-    <div v-if="['node','host','container'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
+    <div v-if="['node','host','container','docker','k8s'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
       <div class="flex rounded-lg border border-line bg-surface2 p-0.5 text-sm">
         <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
       </div>
@@ -234,6 +284,16 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
           <div><div class="text-xs text-muted">Disk</div><div class="mt-1.5"><Gauge :v="snapshot.disk" /></div></div>
         </div>
       </div>
+
+      <!-- containers, fleet-style: one line per container per metric they report -->
+      <div v-if="dockerContainerCharts.length" class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div v-for="c in dockerContainerCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} containers</span></div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
+          <UplotChart :time="containerSeriesData?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :sync-key="'docker:' + String(id)"
+            :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
+        </div>
+      </div>
+
       <div class="overflow-hidden rounded-xl border border-line">
         <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Containers</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ containersList.length }}</span></div>
         <table class="w-full min-w-[520px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Container</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th></tr></thead>
@@ -257,6 +317,16 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
         <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Avg memory</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.mem ?? '—' }}%</div></div>
         <div class="rounded-xl border border-line bg-surface p-3.5"><div class="text-xs uppercase tracking-wider text-muted">Avg disk</div><div class="mt-1 text-xl font-semibold text-fg">{{ clusterAgg.disk ?? '—' }}%</div></div>
       </div>
+
+      <!-- cluster nodes, fleet-style: one line per node per metric -->
+      <div v-if="clusterFleetCharts.length" class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div v-for="c in clusterFleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} nodes</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
+          <UplotChart :time="clusterFleetData?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :legend-values-always="false" :sync-key="'k8s:' + String(id)"
+            :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
+        </div>
+      </div>
+
       <div class="overflow-hidden rounded-xl border border-line">
         <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Nodes</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ clusterNodes.length }}</span></div>
         <table class="w-full min-w-[560px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Node</th><th class="px-4 py-2.5 font-medium">Status</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th><th class="px-4 py-2.5 font-medium">Disk</th></tr></thead>
