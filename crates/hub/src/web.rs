@@ -42,6 +42,8 @@ pub struct MetricsHistory {
     pub t: Vec<i64>,
     pub cpu: Vec<f64>,
     pub mem_pct: Vec<f64>,
+    /// Raw used memory in bytes (for byte-unit overlays alongside container stats).
+    pub mem_used: Vec<f64>,
     pub disk_pct: Vec<f64>,
     pub net_rx: Vec<f64>,
     pub net_tx: Vec<f64>,
@@ -96,7 +98,8 @@ pub async fn system_metrics_series(
                 CASE WHEN disk_total>0 THEN disk_used::float8/disk_total*100 ELSE 0 END, \
                 net_rx, net_tx, COALESCE(disk_read,0), COALESCE(disk_write,0), \
                 load1, COALESCE(load5,0), COALESCE(load15,0), \
-                COALESCE(cpu_user,0), COALESCE(cpu_system,0), COALESCE(cpu_iowait,0), COALESCE(cpu_steal,0) \
+                COALESCE(cpu_user,0), COALESCE(cpu_system,0), COALESCE(cpu_iowait,0), COALESCE(cpu_steal,0), \
+                mem_used \
          FROM system_metrics WHERE system_id = $1 AND time > now() - interval '{interval}' \
          ORDER BY time ASC LIMIT 4000"
     );
@@ -116,6 +119,7 @@ pub async fn system_metrics_series(
         f64,
         f64,
         f64,
+        i64,
     );
     let rows: Vec<Sample> = sqlx::query_as(&sql)
         .bind(id)
@@ -127,6 +131,7 @@ pub async fn system_metrics_series(
         t: Vec::new(),
         cpu: Vec::new(),
         mem_pct: Vec::new(),
+        mem_used: Vec::new(),
         disk_pct: Vec::new(),
         net_rx: Vec::new(),
         net_tx: Vec::new(),
@@ -159,11 +164,13 @@ pub async fn system_metrics_series(
             cs,
             cio,
             cst,
+            mu,
         ) = row;
         let ts = time.timestamp();
         h.t.push(ts);
         h.cpu.push(cpu);
         h.mem_pct.push(mem_pct);
+        h.mem_used.push(mu as f64);
         h.disk_pct.push(disk_pct);
         h.load1.push(l1);
         h.load5.push(l5);

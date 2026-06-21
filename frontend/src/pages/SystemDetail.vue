@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import UplotChart from '../components/UplotChart.vue'
+import SystemSearch from '../components/SystemSearch.vue'
 import Gauge from '../components/Gauge.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
@@ -143,27 +144,69 @@ async function loadCluster() {
   } catch { clusterNodes.value = [] }
 }
 
-// docker detail, fleet-style: overlay every container on one chart per metric the
-// containers actually have (cpu/mem/net), with gap breaks inserted
-const containerSeriesData = computed(() => {
-  const list = containersList.value
-  if (!list.length || containersTime.value.length < 3) return list.length ? { t: containersTime.value, cpu: list.map((c) => ({ name: c.name, data: c.series.cpu })), mem: list.map((c) => ({ name: c.name, data: c.series.mem })), net: list.map((c) => ({ name: c.name, data: c.series.net })) } : null
-  const keys = ['cpu', 'mem', 'net']
-  const arrays = [], map = []
-  keys.forEach((k) => list.forEach((c) => { if (Array.isArray(c.series[k])) { arrays.push(c.series[k]); map.push([k, c.name]) } }))
-  const { t, arrays: na } = insertGaps(containersTime.value, arrays)
-  const out = { t, cpu: [], mem: [], net: [] }
-  map.forEach(([k, name], i) => out[k].push({ name, data: na[i] }))
-  return out
+// docker detail = a fleet scoped to one host: the host itself is just another
+// line alongside its containers. Host + containers share the agent's push
+// timestamps, so we align both on the union timeline.
+const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+const wild = (hay, pat) => { if (!pat) return true; hay = (hay || '').toLowerCase(); return pat.includes('*') ? new RegExp('^' + pat.split('*').map(escapeRe).join('.*') + '$').test(hay) : hay.includes(pat) }
+const cmpOp = (a, op, b) => (op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b : op === '<=' ? a <= b : a === b)
+// filter chips (search) for the docker overlay, persisted in the URL (?q)
+const chips = computed(() => (route.query.q || '').trim().split(/\s+/).filter(Boolean))
+function addToken(tok) { const t = (tok || '').trim(); if (!t) return; const cur = (route.query.q || '').trim(); router.replace({ query: { ...route.query, q: cur ? `${cur} ${t}` : t } }) }
+function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); router.replace({ query: { ...route.query, q: a.join(' ') || undefined } }) }
+function resetFilters() { router.replace({ query: { ...route.query, q: undefined } }) }
+
+const dockerOverlay = computed(() => {
+  const m = metrics.value, ct = containersTime.value, list = containersList.value
+  if (!m || !m.t || !m.t.length) return null
+  const tset = new Set(m.t); ct.forEach((x) => tset.add(x))
+  const t = [...tset].sort((a, b) => a - b)
+  const hi = new Map(m.t.map((ts, i) => [ts, i])), ci = new Map(ct.map((ts, i) => [ts, i]))
+  const pick = (arr, idx, ts) => { const i = idx.get(ts); return i == null || !arr ? null : (arr[i] ?? null) }
+  const hostNet = (ts) => { const i = hi.get(ts); return i == null ? null : (m.net_rx?.[i] ?? 0) + (m.net_tx?.[i] ?? 0) }
+  const h = name.value
+  const cpu = [{ name: h, data: t.map((ts) => pick(m.cpu, hi, ts)) }]
+  const mem = [{ name: h, data: t.map((ts) => pick(m.mem_used, hi, ts)) }]
+  const disk = [{ name: h, data: t.map((ts) => pick(m.disk_pct, hi, ts)) }]
+  const net = [{ name: h, data: t.map((ts) => hostNet(ts)) }]
+  for (const c of list) {
+    cpu.push({ name: c.name, data: t.map((ts) => pick(c.series.cpu, ci, ts)) })
+    if (c.series.mem) mem.push({ name: c.name, data: t.map((ts) => pick(c.series.mem, ci, ts)) })
+    if (c.series.net) net.push({ name: c.name, data: t.map((ts) => pick(c.series.net, ci, ts)) })
+  }
+  return { t, host: h, cpu, mem, disk, net }
 })
-const dockerContainerCharts = computed(() => {
-  const f = containerSeriesData.value
-  if (!f) return []
-  return [
-    { title: 'CPU', sub: 'per container', unit: '%', series: f.cpu },
-    { title: 'Memory', sub: 'per container', unit: 'B', series: f.mem },
-    { title: 'Network', sub: 'per container', unit: 'B/s', series: f.net },
-  ].filter((c) => c.series.some((s) => Array.isArray(s.data) && s.data.some((v) => v != null)))
+// entity names (host + containers) passing the filter chips
+const dockerPass = computed(() => {
+  const o = dockerOverlay.value
+  if (!o) return new Set()
+  const last = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null }
+  const v = {}
+  ;['cpu', 'mem', 'disk', 'net'].forEach((g) => o[g].forEach((s) => { (v[s.name] ||= {})[g] = last(s.data) }))
+  const ok = (name, tok) => {
+    const m = tok.match(/^(cpu|mem|disk|net)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
+    if (m) { const x = v[name]?.[m[1].toLowerCase()]; return x != null && cmpOp(x, m[2], +m[3]) }
+    const kv = tok.match(/^(name|node):(.+)$/i)
+    return wild(name, (kv ? kv[2] : tok).toLowerCase())
+  }
+  return new Set(Object.keys(v).filter((n) => chips.value.every((tok) => ok(n, tok))))
+})
+const dockerCharts = computed(() => {
+  const o = dockerOverlay.value
+  if (!o) return null
+  const keep = dockerPass.value
+  const arrays = [], map = []
+  ;['cpu', 'mem', 'disk', 'net'].forEach((g) => o[g].filter((s) => keep.has(s.name)).forEach((s) => { arrays.push(s.data); map.push([g, s.name]) }))
+  const { t, arrays: na } = insertGaps(o.t, arrays)
+  const out = { cpu: [], mem: [], disk: [], net: [] }
+  map.forEach(([g, name], i) => out[g].push({ name, data: na[i] }))
+  const defs = [
+    { title: 'CPU', sub: 'host + containers', unit: '%', series: out.cpu },
+    { title: 'Memory', sub: 'host + containers', unit: 'B', series: out.mem },
+    { title: 'Disk', sub: 'host', unit: '%', series: out.disk },
+    { title: 'Network', sub: 'host + containers', unit: 'B/s', series: out.net },
+  ].filter((c) => c.series.length)
+  return { t, count: keep.size, charts: defs }
 })
 const containerLeaf = computed(() => containersList.value.find((c) => c.name === name.value))
 const containerLeafCharts = computed(() => {
@@ -271,30 +314,28 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       </div>
     </div>
 
-    <!-- docker: host snapshot + containers -->
+    <!-- docker: fleet-style overlay of the host + its containers -->
     <template v-else-if="type === 'docker'">
-      <div class="mb-5 rounded-xl border border-line bg-surface p-4">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-sm font-semibold text-fg">Host</h2>
-          <RouterLink :to="`/system/${id}?type=host&name=${encodeURIComponent(name)}`" class="flex items-center gap-1 rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-accent hover:border-accent/50">View details <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></RouterLink>
-        </div>
-        <div v-if="snapshot" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <div><div class="text-xs text-muted">CPU</div><div class="mt-1.5"><Gauge :v="snapshot.cpu" /></div></div>
-          <div><div class="text-xs text-muted">Memory</div><div class="mt-1.5"><Gauge :v="snapshot.mem" /></div></div>
-          <div><div class="text-xs text-muted">Disk</div><div class="mt-1.5"><Gauge :v="snapshot.disk" /></div></div>
-        </div>
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <SystemSearch :items="[]" @add="addToken" />
+        <span v-for="(c, i) in chips" :key="c + i" class="flex items-center gap-1 rounded-full border border-line bg-surface2 py-0.5 pl-2 pr-1 text-xs text-fg">
+          <span class="tabular-nums">{{ c }}</span>
+          <button @click="removeChip(i)" title="Remove filter" class="grid h-4 w-4 place-items-center rounded-full text-faint hover:bg-red-500/15 hover:text-red-500"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </span>
+        <button v-if="chips.length" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
+        <RouterLink :to="`/system/${id}?type=host&name=${encodeURIComponent(name)}`" class="ml-auto flex items-center gap-1 rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-accent hover:border-accent/50">Host details <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></RouterLink>
       </div>
 
-      <!-- containers, fleet-style: one line per container per metric they report -->
-      <div v-if="dockerContainerCharts.length" class="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div v-for="c in dockerContainerCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-          <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} containers</span></div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-          <UplotChart :time="containerSeriesData?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :sync-key="'docker:' + String(id)"
+      <div v-if="dockerCharts && dockerCharts.charts.length" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div v-for="c in dockerCharts.charts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
+          <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} series</span></div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
+          <UplotChart :time="dockerCharts.t" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="false" :legend-values-always="false" :sync-key="'docker:' + String(id)"
             :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
         </div>
       </div>
+      <p v-else class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No data for the current filter. <button v-if="chips.length" @click="resetFilters" class="text-accent hover:underline">Reset</button></p>
 
-      <div class="overflow-hidden rounded-xl border border-line">
+      <div class="mt-5 overflow-hidden rounded-xl border border-line">
         <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Containers</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ containersList.length }}</span></div>
         <table class="w-full min-w-[520px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Container</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th></tr></thead>
           <tbody>
