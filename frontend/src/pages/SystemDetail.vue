@@ -18,7 +18,15 @@ const RANGES = [['30m', '1m'], ['1h', '1m'], ['3h', '1m'], ['6h', '5m'], ['12h',
 // range persisted in the URL so F5 keeps it
 const range = computed(() => route.query.range || '30m')
 const resOf = computed(() => RANGES.find(([r]) => r === range.value)?.[1] || '1m')
-function setRange(r) { router.replace({ query: { ...route.query, range: r } }) }
+function setRange(r) { router.replace({ query: { ...route.query, range: r, zoom: undefined } }) }
+// drag-zoom window persisted in the URL (?zoom=minTs-maxTs), shared by all charts
+const viewRange = computed(() => {
+  const z = route.query.zoom
+  if (!z) return null
+  const [a, b] = String(z).split('-').map(Number)
+  return a && b && b > a ? [a, b] : null
+})
+function setZoom(r) { router.replace({ query: { ...route.query, zoom: r ? `${Math.round(r[0])}-${Math.round(r[1])}` : undefined } }) }
 const SPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 }
 // charts always span the full selected window (blank where data is missing)
 const spanSeconds = computed(() => SPAN[range.value] || 0)
@@ -195,7 +203,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ chartTime }}</span></div>
         <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="c.area !== false" :sync-key="'host:' + String(id)"
-          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" />
+          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
       </div>
     </div>
 
@@ -256,7 +264,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <div v-for="c in containerLeafCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div><span class="tabular-nums text-xs text-faint">{{ chartTime }}</span></div>
         <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)"
-          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" />
+          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
       </div>
       <p v-if="!containerLeaf" class="text-sm text-muted">No data for this container.</p>
     </div>

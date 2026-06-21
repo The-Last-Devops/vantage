@@ -20,8 +20,9 @@ const props = defineProps({
   // hidden); null = show all. selectedNames = pinned series (for legend styling).
   focusNames: { type: Array, default: null },
   selectedNames: { type: Array, default: () => [] },
+  viewRange: { type: Array, default: null }, // [minTs, maxTs] zoom window (persisted by parent); null = full
 })
-const emit = defineEmits(['legend-hover', 'legend-toggle', 'cursor-time'])
+const emit = defineEmits(['legend-hover', 'legend-toggle', 'cursor-time', 'zoom'])
 const isSel = (n) => props.selectedNames.includes(n)
 const isDim = (n) => props.focusNames != null && !props.focusNames.includes(n)
 const isHi = (n) => lineHover.value === n || (props.focusNames != null && props.focusNames.includes(n)) // bright
@@ -135,15 +136,14 @@ function opts() {
         // zoomed if the visible x-range is narrower than the full data extent
         zoomed = up.scales.x.min > t[0] + 1 || up.scales.x.max < t[t.length - 1] - 1
       }],
-      // drag-release → zoom the x scale to the selected pixel range (manual so it
-      // works reliably alongside live polling); tiny drags are treated as clicks
+      // drag-release → zoom to the selected pixel range and persist it (parent → URL)
       setSelect: [(up) => {
         const w = up.select.width
         if (w > 4) {
           const min = up.posToVal(up.select.left, 'x')
           const max = up.posToVal(up.select.left + w, 'x')
-          zoomed = true
           up.setScale('x', { min, max })
+          emit('zoom', [min, max])
         }
         up.setSelect({ left: 0, width: 0, top: 0, height: 0 }, false) // clear the box
       }],
@@ -158,6 +158,14 @@ function applyFocus() {
   props.series.forEach((s, i) => u.setSeries(i + 1, { show: f == null || f.includes(s.name) }))
 }
 
+// apply the persisted zoom window (from the URL); null → reset to the full range
+function applyViewRange() {
+  if (!u) return
+  const v = props.viewRange
+  if (v && v.length === 2) u.setScale('x', { min: v[0], max: v[1] })
+  else u.setData(uData.value, true)
+}
+
 function onUp() { dragging = false } // resume live redraws after the drag ends
 
 function build() {
@@ -165,12 +173,13 @@ function build() {
   if (!el.value) return
   u = new uPlot(opts(), uData.value, el.value)
   applyFocus()
+  applyViewRange()
   u.over.addEventListener('mousedown', () => { dragging = true })
   u.over.addEventListener('mouseleave', () => { focusIdx = null; lineHover.value = null })
   // a plain click (no drag) on/near a line pins that host; real drags fire no click
   u.over.addEventListener('click', () => { if (focusIdx) emit('legend-toggle', props.series[focusIdx - 1]?.name) })
   // double-click resets the zoom back to the full window
-  u.over.addEventListener('dblclick', () => { zoomed = false; u.setData(uData.value, true) })
+  u.over.addEventListener('dblclick', () => { emit('zoom', null); u.setData(uData.value, true) })
 }
 
 onMounted(() => {
@@ -180,11 +189,17 @@ onMounted(() => {
   window.addEventListener('mouseup', onUp) // release may land outside the plot
 })
 onBeforeUnmount(() => { ro && ro.disconnect(); window.removeEventListener('mouseup', onUp); u && u.destroy() })
-// follow the latest when not zoomed; keep the frozen view (append off-screen) when
-// zoomed; never redraw mid-drag (it would wipe the selection rectangle)
-watch(uData, (d) => { if (u && !dragging) u.setData(d, !zoomed) })
+// follow the latest when not zoomed; when a zoom window is set, re-pin it on every
+// update (survives live polling + F5); never redraw mid-drag (wipes the selection)
+watch(uData, (d) => {
+  if (!u || dragging) return
+  const v = props.viewRange
+  if (v && v.length === 2) { u.setData(d, false); u.setScale('x', { min: v[0], max: v[1] }) }
+  else u.setData(d, !zoomed)
+})
 watch(() => ui.light, () => build())
 watch(() => props.focusNames, applyFocus, { deep: true })
+watch(() => props.viewRange, applyViewRange, { deep: true })
 // surface the hovered timestamp ('now' when not hovering) so the parent can show
 // it in the chart header — keeps it out of the legend so nothing reflows
 watch([hoverIdx, cursorTime], () => emit('cursor-time', hoverIdx.value != null ? cursorTime.value : 'now'), { immediate: true })
@@ -211,4 +226,6 @@ watch([hoverIdx, cursorTime], () => emit('cursor-time', hoverIdx.value != null ?
 
 <style>
 .uplot { font-family: ui-monospace, monospace; }
+/* visible drag-to-select overlay (uPlot's default is nearly invisible on dark) */
+.uplot .u-select { background: rgb(var(--accent) / 0.18); border-left: 1px solid rgb(var(--accent) / 0.6); border-right: 1px solid rgb(var(--accent) / 0.6); }
 </style>
