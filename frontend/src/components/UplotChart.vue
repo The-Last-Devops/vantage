@@ -100,7 +100,7 @@ function opts() {
     cursor: {
       points: { size: 7 },
       focus: { prox: 30 },
-      drag: { x: true, y: false }, // drag to select/zoom a time range; dblclick resets
+      drag: { x: true, y: false, setScale: false }, // we zoom manually in setSelect (more reliable here)
       sync: props.syncKey ? { key: props.syncKey, scales: ['x', null] } : undefined,
     },
     scales: { x: { time: true } },
@@ -135,6 +135,18 @@ function opts() {
         // zoomed if the visible x-range is narrower than the full data extent
         zoomed = up.scales.x.min > t[0] + 1 || up.scales.x.max < t[t.length - 1] - 1
       }],
+      // drag-release → zoom the x scale to the selected pixel range (manual so it
+      // works reliably alongside live polling); tiny drags are treated as clicks
+      setSelect: [(up) => {
+        const w = up.select.width
+        if (w > 4) {
+          const min = up.posToVal(up.select.left, 'x')
+          const max = up.posToVal(up.select.left + w, 'x')
+          zoomed = true
+          up.setScale('x', { min, max })
+        }
+        up.setSelect({ left: 0, width: 0, top: 0, height: 0 }, false) // clear the box
+      }],
     },
   }
 }
@@ -146,11 +158,7 @@ function applyFocus() {
   props.series.forEach((s, i) => u.setSeries(i + 1, { show: f == null || f.includes(s.name) }))
 }
 
-function onUp() {
-  if (!dragging) return
-  dragging = false
-  if (u) u.setData(uData.value, !zoomed) // re-sync any data skipped during the drag
-}
+function onUp() { dragging = false } // resume live redraws after the drag ends
 
 function build() {
   if (u) { u.destroy(); u = null }
@@ -161,6 +169,8 @@ function build() {
   u.over.addEventListener('mouseleave', () => { focusIdx = null; lineHover.value = null })
   // a plain click (no drag) on/near a line pins that host; real drags fire no click
   u.over.addEventListener('click', () => { if (focusIdx) emit('legend-toggle', props.series[focusIdx - 1]?.name) })
+  // double-click resets the zoom back to the full window
+  u.over.addEventListener('dblclick', () => { zoomed = false; u.setData(uData.value, true) })
 }
 
 onMounted(() => {
