@@ -36,7 +36,10 @@ const spanSeconds = computed(() => SPAN[range.value] || 0)
 // chart that owns the metric.
 const selectedMetrics = computed(() => (route.query.sel || '').split(',').filter(Boolean))
 const hoverMetric = ref(null)
-const chartTime = ref('') // timestamp shown in each chart header (latest, or hovered point)
+const chartTime = ref('') // hovered timestamp (empty when not hovering)
+const fmtTs = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+// header shows: hovered point → its time; zoomed → the selected range; else → "now"
+const headerTime = computed(() => chartTime.value || (viewRange.value ? `${fmtTs(viewRange.value[0])} – ${fmtTs(viewRange.value[1])}` : 'now'))
 function toggleMetric(name) {
   const set = new Set(selectedMetrics.value)
   set.has(name) ? set.delete(name) : set.add(name)
@@ -201,7 +204,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     <!-- node / host: full charts -->
     <div v-if="['node','host'].includes(type)" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ chartTime }}</span></div>
+        <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
         <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="c.area !== false" :sync-key="'host:' + String(id)"
           :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
       </div>
@@ -262,7 +265,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     <!-- container: charts -->
     <div v-else-if="type === 'container'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in containerLeafCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div><span class="tabular-nums text-xs text-faint">{{ chartTime }}</span></div>
+        <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
         <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)"
           :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
       </div>

@@ -202,7 +202,7 @@ watch(() => props.focusNames, applyFocus, { deep: true })
 watch(() => props.viewRange, applyViewRange, { deep: true })
 // surface the hovered timestamp ('now' when not hovering) so the parent can show
 // it in the chart header — keeps it out of the legend so nothing reflows
-watch([hoverIdx, cursorTime], () => emit('cursor-time', cursorTime.value), { immediate: true })
+watch([hoverIdx, cursorTime], () => emit('cursor-time', hoverIdx.value != null ? cursorTime.value : ''), { immediate: true })
 </script>
 
 <template>

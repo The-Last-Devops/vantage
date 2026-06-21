@@ -129,6 +129,8 @@ const fviewRange = computed(() => {
   return a && b && b > a ? [a, b] : null
 })
 function setFzoom(r) { router.replace({ query: { ...route.query, fzoom: r ? `${Math.round(r[0])}-${Math.round(r[1])}` : undefined } }) }
+// header: hovered point → its time; zoomed → the selected range; else → "now"
+const headerTime = computed(() => fleetTime.value || (fviewRange.value ? `${fmtTs(fviewRange.value[0])} – ${fmtTs(fviewRange.value[1])}` : 'now'))
 const fleet = ref(null)
 async function loadFleet() { try { fleet.value = await api.get(`/api/fleet?range=${frange.value}`) } catch {} }
 const hostColor = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
@@ -138,7 +140,8 @@ const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.
 // hover a legend → show only that node on every chart; click → pin (multi), in URL
 const selectedNodes = computed(() => (route.query.fsel || '').split(',').filter(Boolean))
 const hoverNode = ref(null)
-const fleetTime = ref('') // timestamp shown in each fleet chart header (latest, or hovered)
+const fleetTime = ref('') // hovered timestamp (empty when not hovering)
+const fmtTs = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 const fleetFocus = computed(() => (hoverNode.value ? [hoverNode.value] : selectedNodes.value.length ? selectedNodes.value : null))
 function toggleNode(name) {
   const set = new Set(selectedNodes.value)
@@ -209,7 +212,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
         </div>
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-            <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div><span class="tabular-nums text-xs text-faint">{{ fleetTime }}</span></div>
+            <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
             <UplotChart :time="fleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" :span-gaps="true" sync-key="fleet"
               :focus-names="fleetFocus" :selected-names="selectedNodes" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleNode" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
           </div>
