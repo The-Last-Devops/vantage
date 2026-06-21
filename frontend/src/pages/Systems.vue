@@ -195,7 +195,12 @@ onMounted(() => { load(); loadFleet(); timer = setInterval(() => { load(); loadF
 onUnmounted(() => clearInterval(timer))
 watch(frange, loadFleet)
 
-const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURIComponent(s.name)}`
+// a k8s row IS a node → open its node detail (with cluster breadcrumb), not the cluster aggregate
+const detailLink = (s) => {
+  const n = encodeURIComponent(s.name)
+  if (s.kind === 'k8s') return `/system/${s.id}?type=node&name=${n}&parent=${encodeURIComponent(s.cluster || '')}&ptype=k8s`
+  return `/system/${s.id}?type=${s.kind}&name=${n}`
+}
 </script>
 
 <template>
