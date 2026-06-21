@@ -24,12 +24,13 @@ const props = defineProps({
 const emit = defineEmits(['legend-hover', 'legend-toggle', 'cursor-time'])
 const isSel = (n) => props.selectedNames.includes(n)
 const isDim = (n) => props.focusNames != null && !props.focusNames.includes(n)
-const isHi = (n) => props.focusNames != null && props.focusNames.includes(n) // hovered/isolated → bright
+const isHi = (n) => lineHover.value === n || (props.focusNames != null && props.focusNames.includes(n)) // bright
 const short = (n) => (n && n.length > 10 ? n.slice(0, 10) + '…' : n)
 
 const ui = useUi()
 const el = ref(null)
 const hoverIdx = ref(null) // data index under cursor; null when not hovering
+const lineHover = ref(null) // series name nearest the cursor (local; brightens its legend row)
 let u = null
 let ro = null
 let zoomed = false // user drag-zoomed → freeze the view; live data keeps appending off-screen
@@ -95,6 +96,7 @@ function opts() {
     height: props.height,
     padding: [10, 8, 0, 0],
     legend: { show: false }, // we render our own
+    focus: { alpha: 0.25 }, // hovering a line dims the others (canvas-level, cheap)
     cursor: {
       points: { size: 7 },
       focus: { prox: 30 },
@@ -119,12 +121,12 @@ function opts() {
     ],
     hooks: {
       setCursor: [(up) => { hoverIdx.value = up.cursor.idx }],
-      // nearest line under the cursor → light up that host in the legend (and, via
-      // the parent, isolate it across charts). Click on the plot pins it.
+      // nearest line under the cursor → brighten its legend row (local only; uPlot's
+      // focus.alpha dims the other lines on the canvas). Click on the plot pins it.
       setSeries: [(_up, i, o) => {
         if (!o || o.focus == null) return
-        if (o.focus) { focusIdx = i; emit('legend-hover', props.series[i - 1]?.name ?? null) }
-        else if (focusIdx === i) { focusIdx = null; emit('legend-hover', null) }
+        if (o.focus) { focusIdx = i; lineHover.value = props.series[i - 1]?.name ?? null }
+        else if (focusIdx === i) { focusIdx = null; lineHover.value = null }
       }],
       setScale: [(up, key) => {
         if (key !== 'x') return
@@ -156,7 +158,7 @@ function build() {
   u = new uPlot(opts(), uData.value, el.value)
   applyFocus()
   u.over.addEventListener('mousedown', () => { dragging = true })
-  u.over.addEventListener('mouseleave', () => { if (focusIdx) { focusIdx = null; emit('legend-hover', null) } })
+  u.over.addEventListener('mouseleave', () => { focusIdx = null; lineHover.value = null })
   // a plain click (no drag) on/near a line pins that host; real drags fire no click
   u.over.addEventListener('click', () => { if (focusIdx) emit('legend-toggle', props.series[focusIdx - 1]?.name) })
 }
