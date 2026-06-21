@@ -16,7 +16,14 @@ const props = defineProps({
   legendValuesAlways: { type: Boolean, default: true }, // false → show values only on hover
   area: { type: Boolean, default: true }, // false → lines only (cleaner for many-host overlay)
   spanGaps: { type: Boolean, default: false }, // true → connect across missing buckets
+  // legend interaction (controlled by parent): focusNames = series to show (others
+  // hidden); null = show all. selectedNames = pinned series (for legend styling).
+  focusNames: { type: Array, default: null },
+  selectedNames: { type: Array, default: () => [] },
 })
+const emit = defineEmits(['legend-hover', 'legend-toggle'])
+const isSel = (n) => props.selectedNames.includes(n)
+const isDim = (n) => props.focusNames != null && !props.focusNames.includes(n)
 
 const ui = useUi()
 const el = ref(null)
@@ -119,10 +126,18 @@ function opts() {
   }
 }
 
+// show only the focused series across the chart (others hidden); null = all
+function applyFocus() {
+  if (!u) return
+  const f = props.focusNames
+  props.series.forEach((s, i) => u.setSeries(i + 1, { show: f == null || f.includes(s.name) }))
+}
+
 function build() {
   if (u) { u.destroy(); u = null }
   if (!el.value) return
   u = new uPlot(opts(), uData.value, el.value)
+  applyFocus()
 }
 
 onMounted(() => {
@@ -134,6 +149,7 @@ onBeforeUnmount(() => { ro && ro.disconnect(); u && u.destroy() })
 // follow the latest when not zoomed; keep the frozen view (append off-screen) when zoomed
 watch(uData, (d) => { if (u) u.setData(d, !zoomed) })
 watch(() => ui.light, () => build())
+watch(() => props.focusNames, applyFocus, { deep: true })
 </script>
 
 <template>
@@ -141,11 +157,15 @@ watch(() => ui.light, () => build())
     <div ref="el" class="w-full"></div>
     <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
       <template v-if="showLegend">
-        <span v-for="s in legend" :key="s.name" class="flex items-center gap-1.5">
-          <span class="h-2 w-2 rounded-full" :style="{ background: s.color }"></span>
-          <span class="text-muted">{{ s.name }}</span>
-          <span class="tabular-nums text-fg">{{ s.value }}</span>
-        </span>
+        <button v-for="s in legend" :key="s.name" type="button"
+          @mouseenter="emit('legend-hover', s.name)" @mouseleave="emit('legend-hover', null)"
+          @click="emit('legend-toggle', s.name)"
+          class="flex items-center gap-1.5 rounded transition-opacity"
+          :class="[isDim(s.name) ? 'opacity-35' : '', isSel(s.name) ? 'font-medium text-fg' : '']">
+          <span class="h-2 w-2 rounded-full" :class="isSel(s.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: s.color, '--tw-ring-color': s.color }"></span>
+          <span :class="isSel(s.name) ? 'text-fg' : 'text-muted'">{{ s.name }}</span>
+          <span v-if="s.value" class="tabular-nums text-fg">{{ s.value }}</span>
+        </button>
       </template>
       <span class="ml-auto tabular-nums text-faint">{{ hoverIdx != null ? cursorTime : 'now' }}</span>
     </div>

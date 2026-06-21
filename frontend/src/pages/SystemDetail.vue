@@ -23,6 +23,22 @@ const SPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, 
 // charts always span the full selected window (blank where data is missing)
 const spanSeconds = computed(() => SPAN[range.value] || 0)
 
+// legend interaction: hover a metric → show only it in its chart; click → pin
+// (multi), persisted in the URL (?sel). Selection is per-metric, applied to the
+// chart that owns the metric.
+const selectedMetrics = computed(() => (route.query.sel || '').split(',').filter(Boolean))
+const hoverMetric = ref(null)
+function toggleMetric(name) {
+  const set = new Set(selectedMetrics.value)
+  set.has(name) ? set.delete(name) : set.add(name)
+  router.replace({ query: { ...route.query, sel: [...set].join(',') || undefined } })
+}
+function chartFocus(series) {
+  if (hoverMetric.value && series.some((s) => s.name === hoverMetric.value)) return [hoverMetric.value]
+  const sel = series.filter((s) => selectedMetrics.value.includes(s.name)).map((s) => s.name)
+  return sel.length ? sel : null
+}
+
 const metrics = ref(null)
 const containersList = ref([])
 const containersTime = ref([])
@@ -176,7 +192,8 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <div v-if="['node','host'].includes(type)" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div></div>
-        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'host:' + String(id)" />
+        <UplotChart :time="metrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'host:' + String(id)"
+          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" />
       </div>
     </div>
 
@@ -236,7 +253,8 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <div v-else-if="type === 'container'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div v-for="c in containerLeafCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
         <div class="mb-2 text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div>
-        <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)" />
+        <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)"
+          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" />
       </div>
       <p v-if="!containerLeaf" class="text-sm text-muted">No data for this container.</p>
     </div>

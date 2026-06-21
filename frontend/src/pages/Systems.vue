@@ -127,6 +127,15 @@ const hostColor = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
 // overlay only the hosts that pass the current filter + namespace
 const visibleNames = computed(() => new Set(visible.value.map((s) => s.name)))
 const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s, i) => ({ name: s.name, color: hostColor(i), data: s.data }))
+// hover a legend → show only that node on every chart; click → pin (multi), in URL
+const selectedNodes = computed(() => (route.query.fsel || '').split(',').filter(Boolean))
+const hoverNode = ref(null)
+const fleetFocus = computed(() => (hoverNode.value ? [hoverNode.value] : selectedNodes.value.length ? selectedNodes.value : null))
+function toggleNode(name) {
+  const set = new Set(selectedNodes.value)
+  set.has(name) ? set.delete(name) : set.add(name)
+  router.replace({ query: { ...route.query, fsel: [...set].join(',') || undefined } })
+}
 const fleetCharts = computed(() => {
   const f = fleet.value
   if (!f) return []
@@ -192,7 +201,8 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
             <div class="mb-2 text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div>
-            <UplotChart :time="fleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" :span-gaps="true" sync-key="fleet" />
+            <UplotChart :time="fleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" :span-gaps="true" sync-key="fleet"
+              :focus-names="fleetFocus" :selected-names="selectedNodes" @legend-hover="hoverNode = $event" @legend-toggle="toggleNode" />
           </div>
         </div>
       </section>
