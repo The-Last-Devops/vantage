@@ -32,7 +32,7 @@
 
 /* Logo mark cycles the full hue spectrum — a nod to the constant live data flow. */
 @keyframes lm-hue { to { filter: hue-rotate(360deg); } }
-.lm-logo { animation: lm-hue 5s linear infinite; }
+.lm-logo { animation: lm-hue 16s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .lm-logo { animation: none; } }
 
 /* Table rows: clear hover/select in both themes (left accent when selected). */
