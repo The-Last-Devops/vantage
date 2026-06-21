@@ -59,6 +59,8 @@ const clusterNodes = ref([])
 const error = ref('')
 
 const C = { teal: '#34E1C4', amber: '#F4A261', blue: '#5BA8FF', purple: '#8B7FD6' }
+// per-line color for overlay charts (host + containers / cluster nodes)
+const seriesColor = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
 const lastVal = (d) => { if (!d) return null; for (let i = d.length - 1; i >= 0; i--) if (d[i] != null) return d[i]; return null }
 const pct = (u, t) => (u != null && t ? Math.round((u / t) * 100) : null)
 const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTime() < 60000
@@ -201,11 +203,12 @@ const dockerCharts = computed(() => {
   const { t, arrays: na } = insertGaps(o.t, arrays)
   const out = { cpu: [], mem: [], disk: [], net: [] }
   map.forEach(([g, name], i) => out[g].push({ name, data: na[i] }))
+  const colored = (arr) => arr.map((s, i) => ({ ...s, color: seriesColor(i) }))
   const defs = [
-    { title: 'CPU', sub: 'host + containers', unit: '%', series: out.cpu },
-    { title: 'Memory', sub: 'host + containers', unit: 'B', series: out.mem },
-    { title: 'Disk', sub: 'host', unit: '%', series: out.disk },
-    { title: 'Network', sub: 'host + containers', unit: 'B/s', series: out.net },
+    { title: 'CPU', sub: 'host + containers', unit: '%', series: colored(out.cpu) },
+    { title: 'Memory', sub: 'host + containers', unit: 'B', series: colored(out.mem) },
+    { title: 'Disk', sub: 'host', unit: '%', series: colored(out.disk) },
+    { title: 'Network', sub: 'host + containers', unit: 'B/s', series: colored(out.net) },
   ].filter((c) => c.series.length)
   return { t, count: keep.size, charts: defs }
 })
@@ -251,11 +254,12 @@ const clusterFleetData = computed(() => {
 const clusterFleetCharts = computed(() => {
   const f = clusterFleetData.value
   if (!f) return []
+  const colored = (arr) => arr.map((s, i) => ({ ...s, color: seriesColor(i) }))
   return [
-    { title: 'CPU', unit: '%', series: f.cpu },
-    { title: 'Memory', unit: '%', series: f.mem },
-    { title: 'Disk', unit: '%', series: f.disk },
-    { title: 'Network', unit: 'B/s', series: f.net },
+    { title: 'CPU', unit: '%', series: colored(f.cpu) },
+    { title: 'Memory', unit: '%', series: colored(f.mem) },
+    { title: 'Disk', unit: '%', series: colored(f.disk) },
+    { title: 'Network', unit: 'B/s', series: colored(f.net) },
   ].filter((c) => c.series.length)
 })
 
