@@ -35,11 +35,9 @@ const hostCharts = computed(() => {
   const m = metrics.value
   if (!m) return []
   return [
-    { title: 'Utilization', sub: 'CPU / memory / disk %', unit: '%', series: [
-      { name: 'CPU', color: C.teal, data: m.cpu },
-      { name: 'Memory', color: C.blue, data: m.mem_pct },
-      { name: 'Disk', color: C.purple, data: m.disk_pct },
-    ] },
+    { title: 'CPU Usage', sub: 'overall %', unit: '%', series: [{ name: 'CPU', color: C.teal, data: m.cpu }] },
+    { title: 'Memory', sub: 'used %', unit: '%', series: [{ name: 'Memory', color: C.blue, data: m.mem_pct }] },
+    { title: 'Disk Usage', sub: 'used %', unit: '%', series: [{ name: 'Disk', color: C.purple, data: m.disk_pct }] },
     { title: 'Disk I/O', sub: 'read / write', unit: 'B/s', series: [{ name: 'read', color: C.teal, data: m.dr }, { name: 'write', color: C.amber, data: m.dw }] },
     { title: 'Network', sub: 'rx / tx', unit: 'B/s', series: [{ name: 'rx', color: C.teal, data: m.net_rx }, { name: 'tx', color: C.blue, data: m.net_tx }] },
   ]
@@ -101,11 +99,14 @@ async function reload() {
   await loadMetrics()
   if (type.value === 'docker') await loadContainers()
 }
+// Sub-hour ranges poll every 1s (feels realtime); larger ranges every 5s.
+const live = computed(() => ['30m', '1h'].includes(range.value))
 let timer = null
-onMounted(() => { reload(); timer = setInterval(reload, 2000) })
+function restartTimer() { clearInterval(timer); timer = setInterval(reload, live.value ? 1000 : 5000) }
+onMounted(() => { reload(); restartTimer() })
 onBeforeUnmount(() => clearInterval(timer))
 // range lives in the URL → fullPath changes cover both range switch and navigation
-watch(() => route.fullPath, () => { metrics.value = null; containersList.value = []; reload() })
+watch(() => route.fullPath, () => { metrics.value = null; containersList.value = []; reload(); restartTimer() })
 </script>
 
 <template>
@@ -137,7 +138,8 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
         <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
       </div>
       <span class="text-xs text-muted">Resolution <span class="rounded bg-surface2 px-1.5 py-0.5 text-fg">{{ resOf }}</span></span>
-      <span class="ml-auto flex items-center gap-1.5 text-xs text-accent"><span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>Live 1s</span>
+      <span v-if="live" class="ml-auto flex items-center gap-1.5 text-xs text-accent"><span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>Live</span>
+      <span v-else class="ml-auto text-xs text-faint">auto-refresh 5s</span>
     </div>
 
     <p v-if="error" class="text-sm text-red-500">{{ error }}</p>

@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import Gauge from '../components/Gauge.vue'
@@ -7,10 +8,17 @@ import AddSystemModal from '../components/AddSystemModal.vue'
 
 const showAdd = ref(false)
 
+const route = useRoute()
+const router = useRouter()
 const servers = ref([])
 const loading = ref(true)
 const error = ref('')
-const filterText = ref('')
+const q = ref(route.query.q || '')
+let qTimer
+watch(q, (v) => { clearTimeout(qTimer); qTimer = setTimeout(() => router.replace({ query: { ...route.query, q: v || undefined } }), 300) })
+// namespace filter from URL (?ns=a,b ; empty = all) — shared/persisted, set in the sidebar
+const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
+const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
 const selected = reactive(new Set())
 const expanded = reactive(new Set())
 const sortState = reactive({ nodes: { col: 'name', dir: 'asc' }, docker: { col: 'name', dir: 'asc' } })
@@ -23,12 +31,30 @@ const LATEST = computed(() => servers.value.map((s) => s.agent_version).filter(B
 function cmpVer(a, b) { const p = (x) => x.split('.').map(Number); const A = p(a), B = p(b); for (let i = 0; i < 3; i++) if ((A[i]||0)!==(B[i]||0)) return (A[i]||0)-(B[i]||0); return 0 }
 function agentCls(v) { if (!v) return 'bg-surface2 text-faint'; if (v === LATEST.value) return 'bg-accent/10 text-accent'; return cmpVer(v, '0.7.0') >= 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500' }
 
-const visible = computed(() =>
-  servers.value.filter((s) => {
-    const t = filterText.value.trim().toLowerCase()
-    return !t || (s.name + ' ' + (s.hostname || '') + ' ' + (s.cluster || '')).toLowerCase().includes(t)
-  }),
-)
+// Query mini-language: "cpu>50 disk<30 status:online kind:docker ns:prod web" (space = AND)
+function parseQuery(qs) {
+  return (qs || '').trim().split(/\s+/).filter(Boolean).map((tok) => {
+    let m = tok.match(/^(cpu|mem|disk)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
+    if (m) return { t: 'num', f: m[1].toLowerCase(), op: m[2], v: +m[3] }
+    m = tok.match(/^(status|kind|ns|agent):(.+)$/i)
+    if (m) return { t: 'kv', k: m[1].toLowerCase(), v: m[2].toLowerCase() }
+    return { t: 'text', v: tok.toLowerCase() }
+  })
+}
+const metricVal = (s, f) => (f === 'cpu' ? s.cpu_percent : f === 'mem' ? pct(s.mem_used, s.mem_total) : pct(s.disk_used, s.disk_total))
+const cmpOp = (a, op, b) => (op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b : op === '<=' ? a <= b : a === b)
+function matchPred(s, p) {
+  if (p.t === 'num') { const v = metricVal(s, p.f); return v != null && cmpOp(v, p.op, p.v) }
+  if (p.t === 'kv') {
+    if (p.k === 'status') return (online(s) ? 'online' : 'offline').startsWith(p.v)
+    if (p.k === 'kind') return s.kind === p.v
+    if (p.k === 'ns') return (s.namespace || '').toLowerCase().includes(p.v)
+    if (p.k === 'agent') return (s.agent_version || '').toLowerCase().includes(p.v)
+  }
+  return (s.name + ' ' + (s.hostname || '') + ' ' + (s.cluster || '')).toLowerCase().includes(p.v)
+}
+const preds = computed(() => parseQuery(q.value))
+const visible = computed(() => servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p))))
 function sortList(list, st) {
   const f = {
     name: (a, b) => a.name.localeCompare(b.name),
@@ -92,7 +118,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="relative">
           <svg class="absolute left-2.5 top-2.5 h-4 w-4 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input v-model="filterText" placeholder="Filter systems…" class="w-56 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg outline-none focus:border-accent/50" />
+          <input v-model="q" placeholder="cpu>50 disk<30 status:online kind:docker …" title="Filter: cpu/mem/disk >,<,>=,<=,= ; status: kind: ns: agent: ; plain text = name. Space = AND." class="w-80 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg outline-none focus:border-accent/50" />
         </div>
         <button @click="showAdd = true" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add system</button>
       </div>

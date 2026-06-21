@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { useRouter, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { api } from '../lib/api'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
@@ -9,6 +9,7 @@ defineProps({ title: { type: String, default: '' } })
 
 const auth = useAuth()
 const ui = useUi()
+const route = useRoute()
 const router = useRouter()
 
 const drawer = ref(false)
@@ -16,16 +17,28 @@ const nsOpen = ref(false)
 const namespaces = ref([]) // [{id,name}]
 
 const nsNames = computed(() => namespaces.value.map((n) => n.name))
+// Selected namespaces live in the URL (?ns=a,b) so they're shareable; empty = all.
+const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
+const isAll = computed(() => selectedNs.value.length === 0 || selectedNs.value.length === nsNames.value.length)
 const nsLabel = computed(() => {
-  if (!ui.nsTouched) return 'All namespaces'
-  const n = ui.selectedNs.size
-  if (n === 0) return 'No namespace'
-  if (n === nsNames.value.length) return 'All namespaces'
-  if (n === 1) return [...ui.selectedNs][0]
-  return `${n} namespaces`
+  const n = selectedNs.value.length
+  if (n === 0 || n === nsNames.value.length) return 'All namespaces'
+  return n === 1 ? selectedNs.value[0] : `${n} namespaces`
 })
-const nsChecked = (name) => !ui.nsTouched || ui.selectedNs.has(name)
-const allChecked = computed(() => !ui.nsTouched || ui.selectedNs.size === nsNames.value.length)
+const nsChecked = (name) => selectedNs.value.length === 0 || selectedNs.value.includes(name)
+const allChecked = isAll
+
+function setNs(arr) {
+  const all = arr.length === 0 || arr.length === nsNames.value.length
+  router.replace({ query: { ...route.query, ns: all ? undefined : arr.join(',') } })
+}
+function toggleNs(name) {
+  const cur = selectedNs.value.length ? [...selectedNs.value] : [...nsNames.value]
+  const i = cur.indexOf(name)
+  if (i >= 0) cur.splice(i, 1); else cur.push(name)
+  setNs(cur)
+}
+function toggleAllNs() { setNs([]) } // clears the filter → show all namespaces
 
 onMounted(async () => {
   try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
@@ -53,10 +66,10 @@ async function logout() { await auth.logout(); router.push({ name: 'login' }) }
           <svg class="h-4 w-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
         </button>
         <div v-if="nsOpen" class="absolute left-3 right-3 z-30 mt-1 overflow-hidden rounded-lg border border-line bg-surface2 py-1 shadow-xl">
-          <button @click="ui.toggleAllNs(nsNames)" class="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left text-sm hover:bg-surface" :class="allChecked ? 'text-accent' : 'text-muted'">
+          <button @click="toggleAllNs()" class="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left text-sm hover:bg-surface" :class="allChecked ? 'text-accent' : 'text-muted'">
             <span class="grid h-4 w-4 place-items-center rounded border" :class="allChecked ? 'border-accent bg-accent' : 'border-line'"></span>All namespaces
           </button>
-          <button v-for="n in namespaces" :key="n.id" @click="ui.toggleNs(n.name, nsNames)"
+          <button v-for="n in namespaces" :key="n.id" @click="toggleNs(n.name)"
             class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface" :class="nsChecked(n.name) ? 'text-fg' : 'text-muted'">
             <span class="grid h-4 w-4 place-items-center rounded border" :class="nsChecked(n.name) ? 'border-accent bg-accent' : 'border-line'"></span>{{ n.name }}
           </button>

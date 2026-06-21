@@ -157,6 +157,7 @@ pub struct SystemRow {
     pub hostname: Option<String>,
     pub kind: String,
     pub cluster: Option<String>,
+    pub namespace: String,
     pub agent_version: Option<String>,
     pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
     pub cpu_percent: Option<f64>,
@@ -179,10 +180,12 @@ pub async fn list_systems(
         Option<String>,
         String,
         Option<String>,
+        String,
         Option<String>,
         Option<chrono::DateTime<chrono::Utc>>,
     )> = sqlx::query_as(
-        "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, s.agent_version, s.last_seen FROM systems s \
+        "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, n.name, s.agent_version, s.last_seen \
+             FROM systems s JOIN namespaces n ON n.id = s.namespace_id \
              WHERE $1 OR s.namespace_id IN ( \
                 SELECT namespace_id FROM memberships WHERE user_id = $2) \
              ORDER BY s.name",
@@ -194,7 +197,7 @@ pub async fn list_systems(
     .map_err(internal)?;
 
     let mut rows = Vec::with_capacity(servers.len());
-    for (id, name, hostname, kind, cluster, agent_version, last_seen) in servers {
+    for (id, name, hostname, kind, cluster, namespace, agent_version, last_seen) in servers {
         let latest: Option<(f64, i64, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
             "SELECT cpu_percent, mem_used, mem_total, disk_used, disk_total FROM system_metrics \
              WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
@@ -214,6 +217,7 @@ pub async fn list_systems(
             hostname,
             kind,
             cluster,
+            namespace,
             agent_version,
             last_seen,
             cpu_percent,
