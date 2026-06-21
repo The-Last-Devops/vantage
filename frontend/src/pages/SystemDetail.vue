@@ -16,7 +16,7 @@ const ptype = computed(() => route.query.ptype || '')
 const TYPE_LABEL = { node: 'Node', host: 'Host', docker: 'Docker', k8s: 'Kubernetes', container: 'Container' }
 const RANGES = [['30m', '1m'], ['1h', '1m'], ['3h', '1m'], ['6h', '5m'], ['12h', '5m'], ['24h', '15m']]
 // range persisted in the URL so F5 keeps it
-const range = computed(() => route.query.range || '6h')
+const range = computed(() => route.query.range || '30m')
 const resOf = computed(() => RANGES.find(([r]) => r === range.value)?.[1] || '1m')
 function setRange(r) { router.replace({ query: { ...route.query, range: r } }) }
 const SPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 }
