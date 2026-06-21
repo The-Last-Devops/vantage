@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify end-to-end: login + GET /api/servers, tóm tắt theo kind/cluster.
+# Verify end-to-end: login + GET /api/systems, then summarize by kind/cluster.
 set -u
 HUB_URL="${HUB_URL:-http://localhost:8080}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local}"

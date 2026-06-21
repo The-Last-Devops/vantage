@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Xoá sạch token + server do simulator tạo (tên token 'simulator' hoặc 'sim-*').
-# Xoá token sẽ cascade xoá server gắn token đó. Cũng xoá cache token cục bộ.
+# Delete all API keys + systems created by the simulator (key name 'simulator' or 'sim-*').
+# Deleting a key cascades to the systems bound to it. Also clears the local token cache.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 HUB_URL="${HUB_URL:-http://localhost:8080}"

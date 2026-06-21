@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import UplotChart from '../components/UplotChart.vue'
 import Gauge from '../components/Gauge.vue'
+import { encodeZoom, decodeZoom } from '../lib/zoom'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,14 +20,9 @@ const RANGES = [['30m', '1m'], ['1h', '1m'], ['3h', '1m'], ['6h', '5m'], ['12h',
 const range = computed(() => route.query.range || '30m')
 const resOf = computed(() => RANGES.find(([r]) => r === range.value)?.[1] || '1m')
 function setRange(r) { router.replace({ query: { ...route.query, range: r, zoom: undefined } }) }
-// drag-zoom window persisted in the URL (?zoom=minTs-maxTs), shared by all charts
-const viewRange = computed(() => {
-  const z = route.query.zoom
-  if (!z) return null
-  const [a, b] = String(z).split('-').map(Number)
-  return a && b && b > a ? [a, b] : null
-})
-function setZoom(r) { router.replace({ query: { ...route.query, zoom: r ? `${Math.round(r[0])}-${Math.round(r[1])}` : undefined } }) }
+// drag-zoom window persisted in the URL as a human-readable range, shared by all charts
+const viewRange = computed(() => decodeZoom(route.query.zoom))
+function setZoom(r) { router.replace({ query: { ...route.query, zoom: encodeZoom(r) } }) }
 const SPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 }
 // charts always span the full selected window (blank where data is missing)
 const spanSeconds = computed(() => SPAN[range.value] || 0)

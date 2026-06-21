@@ -7,6 +7,7 @@ import Gauge from '../components/Gauge.vue'
 import AddSystemModal from '../components/AddSystemModal.vue'
 import SystemSearch from '../components/SystemSearch.vue'
 import UplotChart from '../components/UplotChart.vue'
+import { encodeZoom, decodeZoom } from '../lib/zoom'
 
 const showAdd = ref(false)
 
@@ -121,14 +122,9 @@ const FRANGES = ['30m', '1h', '3h', '6h', '12h', '24h']
 const FSPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 }
 const frange = computed(() => route.query.frange || '30m')
 function setFrange(r) { router.replace({ query: { ...route.query, frange: r, fzoom: undefined } }) }
-// drag-zoom window persisted in the URL (?fzoom=minTs-maxTs), shared by all fleet charts
-const fviewRange = computed(() => {
-  const z = route.query.fzoom
-  if (!z) return null
-  const [a, b] = String(z).split('-').map(Number)
-  return a && b && b > a ? [a, b] : null
-})
-function setFzoom(r) { router.replace({ query: { ...route.query, fzoom: r ? `${Math.round(r[0])}-${Math.round(r[1])}` : undefined } }) }
+// drag-zoom window persisted in the URL as a human-readable range, shared by all fleet charts
+const fviewRange = computed(() => decodeZoom(route.query.fzoom))
+function setFzoom(r) { router.replace({ query: { ...route.query, fzoom: encodeZoom(r) } }) }
 // header: hovered point → its time; zoomed → the selected range; else → "now"
 const headerTime = computed(() => fleetTime.value || (fviewRange.value ? `${fmtTs(fviewRange.value[0])} – ${fmtTs(fviewRange.value[1])}` : 'now'))
 const fleet = ref(null)
@@ -213,7 +209,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
             <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-            <UplotChart :time="fleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" :span-gaps="true" sync-key="fleet"
+            <UplotChart :time="fleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" sync-key="fleet"
               :focus-names="fleetFocus" :selected-names="selectedNodes" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleNode" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
           </div>
         </div>

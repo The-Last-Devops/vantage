@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Chạy test-agent simulator với mặc định khớp docker-compose.
-# Yêu cầu: stack đã chạy (`docker compose up -d`).
-#   scripts/sim-agents.sh                 # chạy mãi, ~33 host
-#   DURATION=20 NODES=50 scripts/sim-agents.sh   # tuỳ biến qua env
+# Run the test-agent simulator with defaults matching docker-compose.
+# Requires the stack to be running (`docker compose up -d`).
+#   scripts/sim-agents.sh                 # run forever, ~33 hosts
+#   DURATION=20 NODES=50 scripts/sim-agents.sh   # customize via env
 set -e
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export HUB_URL="${HUB_URL:-http://localhost:8080}"
