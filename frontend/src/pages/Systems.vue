@@ -88,7 +88,7 @@ const chips = computed(() => q.value.trim().split(/\s+/).filter(Boolean))
 function addToken(tok) { const t = (tok || '').trim(); if (t) q.value = q.value.trim() ? `${q.value.trim()} ${t}` : t }
 function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); q.value = a.join(' ') }
 // reset clears both the text filters (?q) and the pinned-node selection (?fsel)
-function resetFilters() { q.value = ''; router.replace({ query: { ...route.query, q: undefined, fsel: undefined, fzoom: undefined } }) }
+function resetFilters() { q.value = ''; selected.clear(); router.replace({ query: { ...route.query, q: undefined, fzoom: undefined } }) }
 const shortName = (n) => (n && n.length > 12 ? n.slice(0, 12) + '…' : n)
 // section title → filter the list to that kind (keeps the namespace)
 const kindLink = (k) => ({ path: '/', query: { ...(route.query.ns ? { ns: route.query.ns } : {}), q: `kind:${k}` } })
@@ -152,17 +152,15 @@ const colorOf = computed(() => {
 // overlay only the hosts that pass the current filter + namespace
 const visibleNames = computed(() => new Set(visible.value.map((s) => s.name)))
 const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s) => ({ name: s.name, color: colorOf.value[s.name] || '#888', data: s.data }))
-// hover a legend → show only that node on every chart; click → pin (multi), in URL
-const selectedNodes = computed(() => (route.query.fsel || '').split(',').filter(Boolean))
+// Selection is unified: the row checkbox (`selected`, by id) both marks for
+// bulk-delete AND isolates the node on the charts. Hover a row → transient highlight.
 const hoverNode = ref(null)
 const fleetTime = ref('') // hovered timestamp (empty when not hovering)
 const fmtTs = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
-const fleetFocus = computed(() => (hoverNode.value ? [hoverNode.value] : selectedNodes.value.length ? selectedNodes.value : null))
-function toggleNode(name) {
-  const set = new Set(selectedNodes.value)
-  set.has(name) ? set.delete(name) : set.add(name)
-  router.replace({ query: { ...route.query, fsel: [...set].join(',') || undefined } })
-}
+const pinnedSystems = computed(() => servers.value.filter((s) => selected.has(s.id)))
+const selectedNames = computed(() => pinnedSystems.value.map((s) => s.name))
+const fleetFocus = computed(() => (hoverNode.value ? [hoverNode.value] : selectedNames.value.length ? selectedNames.value : null))
+function toggleByName(name) { const s = servers.value.find((x) => x.name === name); if (s) toggleRow(s.id) }
 // rebuild fleet data with null breaks inserted at timeline gaps (agents stopped)
 const gappedFleet = computed(() => {
   const f = fleet.value
@@ -238,10 +236,11 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
             <span class="tabular-nums">{{ c }}</span>
             <button @click="removeChip(i)" title="Remove filter" class="grid h-4 w-4 place-items-center rounded-full text-faint hover:bg-red-500/15 hover:text-red-500"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </span>
-          <!-- pinned nodes (click a line/legend to pin) shown as chips -->
-          <span v-for="n in selectedNodes" :key="'pin-' + n" :title="n" class="flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-0.5 pl-2 pr-1 text-xs text-accent">
-            <span class="tabular-nums">{{ shortName(n) }}</span>
-            <button @click="toggleNode(n)" title="Unpin node" class="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/25"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          <!-- selected nodes (row checkbox) — shown on charts, listed as chips -->
+          <span v-for="s in pinnedSystems" :key="'pin-' + s.id" :title="s.name" class="flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-0.5 pl-2 pr-1 text-xs text-accent">
+            <span class="h-2 w-2 rounded-full" :style="{ background: colorOf[s.name] }"></span>
+            <span class="tabular-nums">{{ shortName(s.name) }}</span>
+            <button @click="toggleRow(s.id)" title="Deselect" class="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/25"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </span>
           <!-- zoom window shown as a chip (drag a chart to set; x clears) -->
           <span v-if="fviewRange" class="flex items-center gap-1 rounded-full border border-line bg-surface2 py-0.5 pl-2 pr-1 text-xs text-muted">
@@ -249,7 +248,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
             <span class="tabular-nums">{{ fmtTs(fviewRange[0]) }} – {{ fmtTs(fviewRange[1]) }}</span>
             <button @click="setFzoom(null)" title="Clear zoom" class="grid h-4 w-4 place-items-center rounded-full text-faint hover:bg-red-500/15 hover:text-red-500"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </span>
-          <button v-if="chips.length || selectedNodes.length || fviewRange" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
+          <button v-if="chips.length || pinnedSystems.length || fviewRange" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
           <div class="ml-auto flex rounded-lg border border-line bg-surface2 p-0.5 text-xs">
             <button v-for="rr in FRANGES" :key="rr" @click="setFrange(rr)" class="rounded-md px-2.5 py-1" :class="frange===rr?'bg-accent/15 font-medium text-accent':'text-muted hover:text-fg'">{{ rr }}</button>
           </div>
@@ -259,7 +258,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
             <div class="mb-2 text-sm font-medium text-fg">{{ c.title }}</div>
             <UplotChart :time="gappedFleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :show-legend="false" :tooltip="true" :area="false" sync-key="fleet"
-              :focus-names="fleetFocus" :selected-names="selectedNodes" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleNode" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
+              :focus-names="fleetFocus" :selected-names="selectedNames" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleByName" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
           </div>
         </div>
       </section>
@@ -286,8 +285,8 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5">
                       <button v-if="sec.key === 'docker'" @click="toggleDocker(s)" class="text-muted hover:text-accent"><svg class="h-4 w-4 transition-transform" :class="expanded.has(s.id) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
-                      <button @click="toggleNode(s.name)" :title="selectedNodes.includes(s.name) ? 'Unpin from charts' : 'Pin on charts'" class="h-2.5 w-2.5 shrink-0 rounded-full" :class="selectedNodes.includes(s.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: colorOf[s.name], '--tw-ring-color': colorOf[s.name] }"></button>
-                      <RouterLink :to="detailLink(s)" class="flex items-center gap-2.5"><span class="h-2 w-2 rounded-full" :class="online(s)?'bg-accent':'bg-red-500'"></span><span><span class="text-fg">{{ s.name }}</span><span class="block text-xs text-faint">{{ s.hostname }}</span></span></RouterLink>
+                      <span class="h-2 w-2 shrink-0 rounded-full" :title="online(s) ? 'online' : 'offline'" :style="{ background: colorOf[s.name] }"></span>
+                      <RouterLink :to="detailLink(s)" class="flex items-center gap-2.5"><span><span class="text-fg">{{ s.name }}</span><span class="block text-xs text-faint">{{ s.hostname }}</span></span></RouterLink>
                     </div>
                   </td>
                   <td class="px-4 py-3"><span class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted">{{ s.namespace || '—' }}</span></td>
@@ -333,7 +332,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
                 </tr>
                 <tr v-for="(n,i) in c.nodes" v-show="expanded.has('k8s:'+c.cluster)" :key="n.id" class="lm-row border-b border-line bg-bg/40" @mouseenter="hoverNode = n.name" @mouseleave="hoverNode = null">
                   <td class="px-3 py-2"><input type="checkbox" :checked="selected.has(n.id)" @change="toggleRow(n.id)" class="h-4 w-4 accent-accent" /></td>
-                  <td class="px-4 py-2"><div class="flex items-center gap-2 pl-6"><span class="text-faint">{{ i===c.nodes.length-1?'└':'├' }}</span><button @click="toggleNode(n.name)" :title="selectedNodes.includes(n.name) ? 'Unpin' : 'Pin on charts'" class="h-2.5 w-2.5 shrink-0 rounded-full" :class="selectedNodes.includes(n.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: colorOf[n.name], '--tw-ring-color': colorOf[n.name] }"></button><RouterLink :to="`/system/${n.id}?type=node&name=${encodeURIComponent(n.name)}&parent=${encodeURIComponent(c.cluster)}&ptype=k8s`" class="text-sm text-fg hover:text-accent">{{ n.name }}</RouterLink></div></td>
+                  <td class="px-4 py-2"><div class="flex items-center gap-2 pl-6"><span class="text-faint">{{ i===c.nodes.length-1?'└':'├' }}</span><span class="h-2 w-2 shrink-0 rounded-full" :style="{ background: colorOf[n.name] }"></span><RouterLink :to="`/system/${n.id}?type=node&name=${encodeURIComponent(n.name)}&parent=${encodeURIComponent(c.cluster)}&ptype=k8s`" class="text-sm text-fg hover:text-accent">{{ n.name }}</RouterLink></div></td>
                   <td class="px-4 py-2 text-sm" :class="online(n)?'text-accent':'text-red-500'">{{ online(n)?'online':'offline' }}</td>
                   <td class="px-4 py-2"><Gauge :v="r(n.cpu_percent)" /></td>
                   <td class="px-4 py-2"><Gauge :v="pct(n.mem_used,n.mem_total)" /></td>
