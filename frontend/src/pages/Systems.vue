@@ -57,7 +57,7 @@ function parseQuery(qs) {
   return (qs || '').trim().split(/\s+/).filter(Boolean).map((tok) => {
     let m = tok.match(/^(cpu|mem|disk)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
     if (m) return { t: 'num', f: m[1].toLowerCase(), op: m[2], v: +m[3] }
-    m = tok.match(/^(status|kind|type|cluster|ns|agent|name|node|system):(.+)$/i)
+    m = tok.match(/^(status|kind|type|cluster|ns|agent|kernel|name|node|system):(.+)$/i)
     if (m) return { t: 'kv', k: m[1].toLowerCase(), v: m[2].toLowerCase() }
     return { t: 'text', v: tok.toLowerCase() }
   })
@@ -81,6 +81,7 @@ function matchPred(s, p) {
     if (p.k === 'cluster') return wild(s.cluster, p.v)
     if (p.k === 'ns') return wild(s.namespace, p.v)
     if (p.k === 'agent') return wild(s.agent_version, p.v)
+    if (p.k === 'kernel') return wild(s.kernel, p.v)
   }
   // default (plain text) = node name (+ hostname), wildcard-aware
   return wild(s.name + ' ' + (s.hostname || ''), p.v)

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import UplotChart from '../components/UplotChart.vue'
+import FleetCharts from '../components/FleetCharts.vue'
 import Gauge from '../components/Gauge.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
@@ -20,7 +21,7 @@ const TYPE_LABEL = { node: 'Node', host: 'Host', docker: 'Docker', k8s: 'Kuberne
 const kind = computed(() => {
   if (type.value === 'container') return 'container'
   if (ptype.value === 'k8s') return 'k8s'
-  if (type.value === 'host' || type.value === 'docker') return 'docker'
+  if (['host', 'docker', 'containers'].includes(type.value)) return 'docker'
   return 'node'
 })
 const typeLabel = computed(() => TYPE_LABEL[kind.value])
@@ -54,6 +55,15 @@ function chartFocus(series) {
   if (hoverMetric.value && series.some((s) => s.name === hoverMetric.value)) return [hoverMetric.value]
   const sel = series.filter((s) => selectedMetrics.value.includes(s.name)).map((s) => s.name)
   return sel.length ? sel : null
+}
+// single focus for the containers fleet grid (hover/pin a container)
+const fleetFocus = computed(() => (hoverMetric.value ? [hoverMetric.value] : selectedMetrics.value.length ? selectedMetrics.value : null))
+const seriesColor = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
+const fmtBps = (v) => {
+  if (v == null) return '—'
+  const u = ['B', 'K', 'M', 'G']; let i = 0; let n = v
+  while (n >= 1024 && i < 3) { n /= 1024; i++ }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}/s`
 }
 
 const metrics = ref(null)
@@ -150,6 +160,26 @@ const containerLeafCharts = computed(() => {
     { title: 'Network', sub: 'rx+tx', unit: 'B/s', series: [{ name: 'net', color: C.blue, data: c.series.net || [] }] },
   ]
 })
+// containers fleet (type=containers): overlay this host's containers per metric
+const containersFleet = computed(() => {
+  const list = containersList.value, ct = containersTime.value
+  if (!list.length || ct.length < 3) return null
+  const mk = (key) => list.map((c, i) => ({ name: c.name, color: seriesColor(i), data: c.series[key] })).filter((s) => Array.isArray(s.data))
+  const groups = { cpu: mk('cpu'), mem: mk('mem'), net: mk('net') }
+  const arrays = [], map = []
+  ;['cpu', 'mem', 'net'].forEach((g) => groups[g].forEach((s) => { arrays.push(s.data); map.push([g, s.name, s.color]) }))
+  const { t, arrays: na } = insertGaps(ct, arrays)
+  const out = { cpu: [], mem: [], net: [] }
+  map.forEach(([g, name, color], i) => out[g].push({ name, color, data: na[i] }))
+  return {
+    t,
+    charts: [
+      { title: 'CPU', unit: '%', series: out.cpu },
+      { title: 'Memory', unit: 'B', series: out.mem },
+      { title: 'Network', unit: 'B/s', series: out.net },
+    ].filter((c) => c.series.length),
+  }
+})
 // Up if the latest sample is fresh (within ~90s)
 const statusUp = computed(() => {
   const t = metrics.value?.t || containersTime.value
@@ -160,7 +190,7 @@ async function reload() {
   error.value = ''
   // a k8s cluster is just the fleet filtered to its nodes → send there
   if (type.value === 'k8s') { router.replace({ path: '/', query: { q: `cluster:${name.value}` } }); return }
-  if (type.value === 'container') return loadContainers()
+  if (type.value === 'container' || type.value === 'containers') return loadContainers()
   await loadMetrics()
   if (type.value === 'docker') await loadContainers()
 }
@@ -194,19 +224,19 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
     </nav>
 
-    <!-- node metadata -->
+    <!-- node metadata — every field links to the fleet filtered by that value -->
     <div v-if="meta && type !== 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
-      <span><span class="text-faint">Type</span> <span class="text-fg">{{ TYPE_LABEL[meta.kind] || meta.kind }}</span></span>
-      <span v-if="meta.cluster"><span class="text-faint">Cluster</span> <span class="text-fg">{{ meta.cluster }}</span></span>
-      <span><span class="text-faint">Namespace</span> <span class="text-fg">{{ meta.namespace }}</span></span>
-      <span v-if="meta.hostname"><span class="text-faint">Hostname</span> <span class="text-fg">{{ meta.hostname }}</span></span>
+      <span><span class="text-faint">Type</span> <RouterLink :to="{ path: '/', query: { q: `kind:${meta.kind}` } }" class="text-fg hover:text-accent">{{ TYPE_LABEL[meta.kind] || meta.kind }}</RouterLink></span>
+      <span v-if="meta.cluster"><span class="text-faint">Cluster</span> <RouterLink :to="{ path: '/', query: { q: `cluster:${meta.cluster}` } }" class="text-fg hover:text-accent">{{ meta.cluster }}</RouterLink></span>
+      <span><span class="text-faint">Namespace</span> <RouterLink :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" class="text-fg hover:text-accent">{{ meta.namespace }}</RouterLink></span>
+      <span v-if="meta.hostname"><span class="text-faint">Hostname</span> <RouterLink :to="{ path: '/', query: { q: meta.hostname } }" class="text-fg hover:text-accent">{{ meta.hostname }}</RouterLink></span>
       <span v-if="meta.cpu_model"><span class="text-faint">CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
-      <span v-if="meta.kernel"><span class="text-faint">Kernel</span> <span class="text-fg">{{ meta.kernel }}</span></span>
-      <span v-if="meta.agent_version"><span class="text-faint">Agent</span> <span class="text-fg">v{{ meta.agent_version }}</span></span>
+      <span v-if="meta.kernel"><span class="text-faint">Kernel</span> <RouterLink :to="{ path: '/', query: { q: `kernel:${meta.kernel}` } }" class="text-fg hover:text-accent">{{ meta.kernel }}</RouterLink></span>
+      <span v-if="meta.agent_version"><span class="text-faint">Agent</span> <RouterLink :to="{ path: '/', query: { q: `agent:${meta.agent_version}` } }" class="text-fg hover:text-accent">v{{ meta.agent_version }}</RouterLink></span>
     </div>
 
     <!-- range (charts views) -->
-    <div v-if="['node','host','container','docker'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
+    <div v-if="['node','host','container','docker','containers'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
       <div class="flex rounded-lg border border-line bg-surface2 p-0.5 text-sm">
         <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
       </div>
@@ -226,20 +256,46 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       </div>
     </div>
 
-    <!-- docker: its containers, as a separate table (not mixed into the host charts) -->
+    <!-- docker: its containers, as a separate table (link to the fleet view) -->
     <div v-if="type === 'docker'" class="mt-5 overflow-hidden rounded-xl border border-line">
-      <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Containers</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ containersList.length }}</span></div>
-      <table class="w-full min-w-[520px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Container</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th></tr></thead>
+      <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5">
+        <h2 class="text-sm font-semibold text-fg">Containers</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ containersList.length }}</span>
+        <RouterLink v-if="containersList.length" :to="`/system/${id}?type=containers&name=${encodeURIComponent(name)}`" class="ml-auto flex items-center gap-1 text-xs text-accent hover:underline">View as fleet <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></RouterLink>
+      </div>
+      <table class="w-full min-w-[600px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Container</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th><th class="px-4 py-2.5 font-medium">Network</th></tr></thead>
         <tbody>
           <tr v-for="c in containersList" :key="c.name" class="lm-row border-b border-line last:border-0">
             <td class="px-4 py-3"><RouterLink :to="`/system/${id}?type=container&name=${encodeURIComponent(c.name)}&parent=${encodeURIComponent(name)}&ptype=docker`" class="text-fg hover:text-accent">{{ c.name }}</RouterLink></td>
             <td class="px-4 py-3"><Gauge :v="c.cpu" /></td>
             <td class="px-4 py-3 tabular-nums text-muted">{{ c.mem != null ? (c.mem/1048576).toFixed(0)+' MB' : '—' }}</td>
+            <td class="px-4 py-3 tabular-nums text-muted">{{ fmtBps(c.net) }}</td>
           </tr>
-          <tr v-if="!containersList.length"><td colspan="3" class="px-4 py-6 text-center text-muted">No container data</td></tr>
+          <tr v-if="!containersList.length"><td colspan="4" class="px-4 py-6 text-center text-muted">No container data</td></tr>
         </tbody>
       </table>
     </div>
+
+    <!-- containers fleet: overlay this host's containers + table-as-selector -->
+    <template v-else-if="type === 'containers'">
+      <FleetCharts v-if="containersFleet" :charts="containersFleet.charts" :time="containersFleet.t" :span-seconds="spanSeconds" :view-range="viewRange"
+        :focus-names="fleetFocus" :selected-names="selectedMetrics" :sync-key="'ctrs:' + String(id)"
+        @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @zoom="setZoom" />
+      <p v-else class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No container data.</p>
+
+      <div class="mt-5 overflow-hidden rounded-xl border border-line">
+        <div class="flex items-center gap-2 border-b border-line bg-surface px-4 py-2.5"><h2 class="text-sm font-semibold text-fg">Containers</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ containersList.length }}</span></div>
+        <table class="w-full min-w-[600px] text-sm"><thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr><th class="px-4 py-2.5 font-medium">Container</th><th class="px-4 py-2.5 font-medium">CPU</th><th class="px-4 py-2.5 font-medium">Mem</th><th class="px-4 py-2.5 font-medium">Network</th></tr></thead>
+          <tbody>
+            <tr v-for="(c, i) in containersList" :key="c.name" class="lm-row border-b border-line last:border-0" :class="selectedMetrics.includes(c.name) ? 'sel' : ''" @mouseenter="hoverMetric = c.name" @mouseleave="hoverMetric = null">
+              <td class="px-4 py-3"><div class="flex items-center gap-2"><button @click="toggleMetric(c.name)" :title="selectedMetrics.includes(c.name) ? 'Unpin' : 'Pin on charts'" class="h-2.5 w-2.5 shrink-0 rounded-full" :class="selectedMetrics.includes(c.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: seriesColor(i), '--tw-ring-color': seriesColor(i) }"></button><span class="text-fg">{{ c.name }}</span></div></td>
+              <td class="px-4 py-3"><Gauge :v="c.cpu" /></td>
+              <td class="px-4 py-3 tabular-nums text-muted">{{ c.mem != null ? (c.mem/1048576).toFixed(0)+' MB' : '—' }}</td>
+              <td class="px-4 py-3 tabular-nums text-muted">{{ fmtBps(c.net) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <!-- container: charts -->
     <div v-else-if="type === 'container'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
