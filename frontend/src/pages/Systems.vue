@@ -90,6 +90,8 @@ function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); q.value 
 // reset clears both the text filters (?q) and the pinned-node selection (?fsel)
 function resetFilters() { q.value = ''; router.replace({ query: { ...route.query, q: undefined, fsel: undefined } }) }
 const shortName = (n) => (n && n.length > 12 ? n.slice(0, 12) + '…' : n)
+// section title → filter the list to that kind (keeps the namespace)
+const kindLink = (k) => ({ path: '/', query: { ...(route.query.ns ? { ns: route.query.ns } : {}), q: `kind:${k}` } })
 const preds = computed(() => parseQuery(q.value))
 const visible = computed(() => servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p))))
 function sortList(list, st) {
@@ -106,8 +108,8 @@ function sortList(list, st) {
   return st.dir === 'desc' ? out.reverse() : out
 }
 const sections = computed(() => [
-  { key: 'nodes', title: 'Nodes', rows: sortList(visible.value.filter((s) => s.kind === 'node'), sortState.nodes) },
-  { key: 'docker', title: 'Docker', rows: sortList(visible.value.filter((s) => s.kind === 'docker'), sortState.docker) },
+  { key: 'nodes', title: 'Single Nodes', kind: 'node', rows: sortList(visible.value.filter((s) => s.kind === 'node'), sortState.nodes) },
+  { key: 'docker', title: 'Docker Hosts', kind: 'docker', rows: sortList(visible.value.filter((s) => s.kind === 'docker'), sortState.docker) },
 ])
 function avg(arr, f) { const v = arr.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null }
 const clusters = computed(() => {
@@ -252,7 +254,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
 
       <!-- Nodes + Docker -->
       <section v-for="sec in sections" :key="sec.key" v-show="sec.rows.length">
-        <div class="mb-2 flex items-center gap-2"><h2 class="text-sm font-semibold text-fg">{{ sec.title }}</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ sec.rows.length }}</span></div>
+        <div class="mb-2 flex items-center gap-2"><RouterLink :to="kindLink(sec.kind)" class="text-sm font-semibold text-fg hover:text-accent">{{ sec.title }}</RouterLink><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ sec.rows.length }}</span></div>
         <div class="overflow-x-auto rounded-xl border border-line">
           <table class="w-full min-w-[940px] text-sm">
             <thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr>
@@ -300,7 +302,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
 
       <!-- Kubernetes -->
       <section v-if="clusters.length">
-        <div class="mb-2 flex items-center gap-2"><h2 class="text-sm font-semibold text-fg">Kubernetes</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ clusters.length }}</span></div>
+        <div class="mb-2 flex items-center gap-2"><RouterLink :to="kindLink('k8s')" class="text-sm font-semibold text-fg hover:text-accent">Kubernetes</RouterLink><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ clusters.length }}</span></div>
         <div class="overflow-x-auto rounded-xl border border-line">
           <table class="w-full min-w-[760px] text-sm">
             <thead class="border-b border-line bg-surface text-left text-xs uppercase tracking-wider text-muted"><tr>
