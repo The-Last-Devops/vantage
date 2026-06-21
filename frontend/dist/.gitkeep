@@ -1,0 +1,2 @@
+# Keeps frontend/dist present so rust-embed compiles in CI before `vite build`.
+# The real build output (and the Docker image) overwrite this directory.

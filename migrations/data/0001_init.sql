@@ -1,12 +1,14 @@
 -- Data DB: time-series metrics + service heartbeats. PostgreSQL + TimescaleDB.
--- Linked to the config DB only by IDs (server_id / monitor_id) at the app layer.
+-- Linked to the config DB only by IDs (system_id / monitor_id) at the app layer.
+-- Pre-release: single consolidated schema. Retention / compression / continuous
+-- aggregates are configured at startup in data_admin::setup (idempotent).
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- Host metrics pushed by agents.
-CREATE TABLE metrics (
+CREATE TABLE system_metrics (
     time        TIMESTAMPTZ NOT NULL,
-    server_id   UUID NOT NULL,
+    system_id   UUID NOT NULL,
     cpu_percent DOUBLE PRECISION NOT NULL,
     mem_used    BIGINT NOT NULL,
     mem_total   BIGINT NOT NULL,
@@ -17,11 +19,27 @@ CREATE TABLE metrics (
     net_rx      BIGINT NOT NULL,
     net_tx      BIGINT NOT NULL,
     load1       DOUBLE PRECISION NOT NULL,
-    uptime      BIGINT NOT NULL
+    uptime      BIGINT NOT NULL,
+    disk_read   BIGINT,
+    disk_write  BIGINT,
+    temps       JSONB,
+    gpus        JSONB
 );
+SELECT create_hypertable('system_metrics', 'time');
+CREATE INDEX idx_system_metrics_sys_time ON system_metrics (system_id, time DESC);
 
-SELECT create_hypertable('metrics', 'time');
-CREATE INDEX idx_metrics_server_time ON metrics (server_id, time DESC);
+-- Per-container resource usage (Beszel-style Docker stats).
+CREATE TABLE container_metrics (
+    time        TIMESTAMPTZ NOT NULL,
+    system_id   UUID NOT NULL,
+    name        TEXT NOT NULL,
+    cpu_percent DOUBLE PRECISION NOT NULL,
+    mem_used    BIGINT NOT NULL,
+    net_rx      BIGINT NOT NULL,
+    net_tx      BIGINT NOT NULL
+);
+SELECT create_hypertable('container_metrics', 'time');
+CREATE INDEX idx_container_metrics_sys_time ON container_metrics (system_id, time DESC);
 
 -- Service check results.
 CREATE TABLE heartbeats (
@@ -32,15 +50,5 @@ CREATE TABLE heartbeats (
     status_code INTEGER,
     message     TEXT
 );
-
 SELECT create_hypertable('heartbeats', 'time');
 CREATE INDEX idx_heartbeats_monitor_time ON heartbeats (monitor_id, time DESC);
-
--- Retention: keep raw samples 7 days. Downsampling via continuous aggregates
--- can be layered on later (1m / 1h rollups) before tightening this further.
-SELECT add_retention_policy('metrics', INTERVAL '7 days');
-SELECT add_retention_policy('heartbeats', INTERVAL '30 days');
-
--- Compress older chunks to save space.
-ALTER TABLE metrics SET (timescaledb.compress, timescaledb.compress_segmentby = 'server_id');
-SELECT add_compression_policy('metrics', INTERVAL '1 day');

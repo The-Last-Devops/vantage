@@ -1,11 +1,21 @@
 # syntax=docker/dockerfile:1
-# Build the hub binary, then ship it with the migration files it reads at runtime.
-# BuildKit cache mounts persist the cargo registry + target dir across builds, so
-# only changed crates recompile (first build is slow, later builds are fast).
+# Build the Vue SPA, then the hub binary (which embeds the SPA via rust-embed),
+# then ship the binary with the migration files it reads at runtime.
+
+# 1) Frontend build -> /web/dist
+FROM node:22-slim AS web
+WORKDIR /web
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend ./
+RUN npm run build
+
+# 2) Hub build. rust-embed reads crates/hub/../../frontend/dist at compile time.
 FROM rust:1-bookworm AS build
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY --from=web /web/dist ./frontend/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --release -p hub && cp target/release/last-hub /usr/local/bin/last-hub

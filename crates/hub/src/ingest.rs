@@ -1,14 +1,14 @@
 //! Agent metrics ingest endpoint.
 //!
-//! Flow: authenticate the agent by its enrollment token (config DB) -> resolve the
-//! owning server -> write the sample into the data DB hypertable.
+//! Flow: authenticate the agent by its API key (config DB) -> resolve the owning
+//! system -> write the sample into the data DB hypertable.
 
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
     Json,
 };
-use shared::{IngestAck, MetricsReport, AGENT_TOKEN_HEADER};
+use shared::{IngestAck, MetricsReport, API_KEY_HEADER};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -18,23 +18,22 @@ pub async fn ingest(
     headers: HeaderMap,
     Json(report): Json<MetricsReport>,
 ) -> Result<Json<IngestAck>, StatusCode> {
-    let token = headers
-        .get(AGENT_TOKEN_HEADER)
+    let key = headers
+        .get(API_KEY_HEADER)
         .and_then(|v| v.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Resolve the (reusable) enrollment token -> its namespace.
-    let tok: (Uuid, Uuid) =
-        sqlx::query_as("SELECT id, namespace_id FROM enrollment_tokens WHERE token = $1")
-            .bind(token)
-            .fetch_optional(&state.config)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "config DB error during ingest");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
-    let (token_id, namespace_id) = tok;
+    // Resolve the (reusable) API key -> its namespace.
+    let row: (Uuid, Uuid) = sqlx::query_as("SELECT id, namespace_id FROM api_keys WHERE key = $1")
+        .bind(key)
+        .fetch_optional(&state.config)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "config DB error during ingest");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let (key_id, namespace_id) = row;
 
     let hostname = if report.hostname.is_empty() {
         "unknown".to_string()
@@ -42,36 +41,49 @@ pub async fn ingest(
         report.hostname.clone()
     };
 
-    // Auto-register / update the server identified by (token, hostname).
-    let server: (Uuid,) = sqlx::query_as(
-        "INSERT INTO servers (namespace_id, token_id, name, hostname, kernel, cpu_model, cpu_cores, agent_version, last_seen) \
-         VALUES ($1, $2, $3, $3, $4, $5, $6, $7, now()) \
-         ON CONFLICT (token_id, hostname) DO UPDATE SET \
-            last_seen = now(), kernel = $4, cpu_model = $5, cpu_cores = $6, agent_version = $7 \
+    // Classification: empty kind defaults to "node"; cluster only meaningful for k8s.
+    let kind = match report.kind.as_str() {
+        "docker" | "k8s" => report.kind.as_str(),
+        _ => "node",
+    };
+    let cluster = if kind == "k8s" && !report.cluster.is_empty() {
+        Some(report.cluster.as_str())
+    } else {
+        None
+    };
+
+    // Auto-register / update the system identified by (key, hostname).
+    let system: (Uuid,) = sqlx::query_as(
+        "INSERT INTO systems (namespace_id, key_id, name, hostname, kernel, cpu_model, cpu_cores, agent_version, kind, cluster, last_seen) \
+         VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, now()) \
+         ON CONFLICT (key_id, hostname) DO UPDATE SET \
+            last_seen = now(), kernel = $4, cpu_model = $5, cpu_cores = $6, agent_version = $7, kind = $8, cluster = $9 \
          RETURNING id",
     )
     .bind(namespace_id)
-    .bind(token_id)
+    .bind(key_id)
     .bind(&hostname)
     .bind(&report.kernel)
     .bind(&report.cpu_model)
     .bind(report.cpu_cores as i32)
     .bind(&report.agent_version)
+    .bind(kind)
+    .bind(cluster)
     .fetch_one(&state.config)
     .await
     .map_err(|e| {
-        tracing::error!(error = %e, "server upsert during ingest");
+        tracing::error!(error = %e, "system upsert during ingest");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    let server_id = server.0;
+    let system_id = system.0;
     let ts = chrono::DateTime::from_timestamp(report.ts, 0).unwrap_or_else(chrono::Utc::now);
 
-    // Write the sample into the data DB. server_id is the cross-DB link (no JOINs).
+    // Write the sample into the data DB. system_id is the cross-DB link (no JOINs).
     sqlx::query(
         r#"
-        INSERT INTO metrics (
-            time, server_id, cpu_percent, mem_used, mem_total,
+        INSERT INTO system_metrics (
+            time, system_id, cpu_percent, mem_used, mem_total,
             swap_used, swap_total, disk_used, disk_total,
             net_rx, net_tx, load1, uptime, temps,
             disk_read, disk_write, gpus
@@ -79,7 +91,7 @@ pub async fn ingest(
         "#,
     )
     .bind(ts)
-    .bind(server_id)
+    .bind(system_id)
     .bind(report.cpu_percent as f64)
     .bind(report.mem_used as i64)
     .bind(report.mem_total as i64)
@@ -105,11 +117,11 @@ pub async fn ingest(
     // Per-container stats (best-effort).
     for c in &report.containers {
         let _ = sqlx::query(
-            "INSERT INTO container_stats (time, server_id, name, cpu_percent, mem_used, net_rx, net_tx) \
+            "INSERT INTO container_metrics (time, system_id, name, cpu_percent, mem_used, net_rx, net_tx) \
              VALUES ($1,$2,$3,$4,$5,$6,$7)",
         )
         .bind(ts)
-        .bind(server_id)
+        .bind(system_id)
         .bind(&c.name)
         .bind(c.cpu_percent as f64)
         .bind(c.mem_used as i64)

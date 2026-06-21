@@ -21,7 +21,7 @@ const TICK: Duration = Duration::from_secs(10);
 struct Rule {
     id: Uuid,
     monitor_id: Option<Uuid>,
-    server_id: Option<Uuid>,
+    system_id: Option<Uuid>,
     condition: Value,
     cooldown_secs: i32,
     channel_kind: String,
@@ -63,7 +63,7 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
 
         // Prior state.
         let prior: Option<(bool, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as("SELECT firing, last_notified FROM alert_state WHERE rule_id = $1")
+            sqlx::query_as("SELECT firing, last_notified FROM alert_state WHERE alert_id = $1")
                 .bind(rule.id)
                 .fetch_optional(&state.config)
                 .await?;
@@ -94,9 +94,9 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
         // Persist state. last_notified advances only when we actually notified.
         if eval.firing != was_firing || should_notify {
             sqlx::query(
-                "INSERT INTO alert_state (rule_id, firing, last_changed, last_notified) \
+                "INSERT INTO alert_state (alert_id, firing, last_changed, last_notified) \
                  VALUES ($1, $2, now(), CASE WHEN $3 THEN now() ELSE NULL END) \
-                 ON CONFLICT (rule_id) DO UPDATE SET \
+                 ON CONFLICT (alert_id) DO UPDATE SET \
                    firing = EXCLUDED.firing, \
                    last_changed = CASE WHEN alert_state.firing <> EXCLUDED.firing \
                                        THEN now() ELSE alert_state.last_changed END, \
@@ -123,9 +123,9 @@ async fn load_rules(state: &AppState) -> anyhow::Result<Vec<Rule>> {
         Json<Value>,
         String,
     )> = sqlx::query_as(
-        "SELECT r.id, r.monitor_id, r.server_id, r.condition, r.cooldown_secs, \
+        "SELECT r.id, r.monitor_id, r.system_id, r.condition, r.cooldown_secs, \
                 c.kind, c.config, c.name \
-         FROM alert_rules r JOIN notification_channels c ON c.id = r.channel_id \
+         FROM alerts r JOIN channels c ON c.id = r.channel_id \
          WHERE r.enabled = true",
     )
     .fetch_all(&state.config)
@@ -137,7 +137,7 @@ async fn load_rules(state: &AppState) -> anyhow::Result<Vec<Rule>> {
             |(
                 id,
                 monitor_id,
-                server_id,
+                system_id,
                 condition,
                 cooldown_secs,
                 channel_kind,
@@ -147,7 +147,7 @@ async fn load_rules(state: &AppState) -> anyhow::Result<Vec<Rule>> {
                 Rule {
                     id,
                     monitor_id,
-                    server_id,
+                    system_id,
                     condition: condition.0,
                     cooldown_secs,
                     channel_kind,
@@ -164,7 +164,7 @@ async fn evaluate(state: &AppState, rule: &Rule) -> anyhow::Result<Option<Eval>>
     if let Some(mid) = rule.monitor_id {
         return evaluate_monitor(state, mid).await;
     }
-    if let Some(sid) = rule.server_id {
+    if let Some(sid) = rule.system_id {
         return evaluate_server(state, sid, &rule.condition).await;
     }
     Ok(None)
@@ -190,16 +190,16 @@ async fn evaluate_monitor(state: &AppState, monitor_id: Uuid) -> anyhow::Result<
 
 async fn evaluate_server(
     state: &AppState,
-    server_id: Uuid,
+    system_id: Uuid,
     cond: &Value,
 ) -> anyhow::Result<Option<Eval>> {
-    let name = server_name(state, server_id).await.unwrap_or_default();
+    let name = server_name(state, system_id).await.unwrap_or_default();
 
     // Offline check: no fresh sample within N seconds.
     if let Some(secs) = cond.get("offline_secs").and_then(Value::as_i64) {
         let last_seen: Option<(Option<chrono::DateTime<chrono::Utc>>,)> =
-            sqlx::query_as("SELECT last_seen FROM servers WHERE id = $1")
-                .bind(server_id)
+            sqlx::query_as("SELECT last_seen FROM systems WHERE id = $1")
+                .bind(system_id)
                 .fetch_optional(&state.config)
                 .await?;
         let last = last_seen.and_then(|(t,)| t);
@@ -223,10 +223,10 @@ async fn evaluate_server(
     let threshold = cond.get("value").and_then(Value::as_f64);
     if let (Some(metric), Some(op), Some(threshold)) = (metric, op, threshold) {
         let row: Option<(f64, f64, i64, i64)> = sqlx::query_as(
-            "SELECT cpu_percent, load1, mem_used, mem_total FROM metrics \
-             WHERE server_id = $1 ORDER BY time DESC LIMIT 1",
+            "SELECT cpu_percent, load1, mem_used, mem_total FROM system_metrics \
+             WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
         )
-        .bind(server_id)
+        .bind(system_id)
         .fetch_optional(&state.data)
         .await?;
         let Some((cpu, load1, mem_used, mem_total)) = row else {
@@ -295,7 +295,7 @@ async fn monitor_name(state: &AppState, id: Uuid) -> Option<String> {
 }
 
 async fn server_name(state: &AppState, id: Uuid) -> Option<String> {
-    sqlx::query_as::<_, (String,)>("SELECT name FROM servers WHERE id = $1")
+    sqlx::query_as::<_, (String,)>("SELECT name FROM systems WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.config)
         .await

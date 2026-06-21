@@ -1,0 +1,39 @@
+image:
+  hub: ghcr.io/the-last-devops/last-monitor-hub:main
+  agent: ghcr.io/the-last-devops/last-monitor-agent:main
+  pullPolicy: IfNotPresent
+  # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
+  pullSecrets: []        # e.g. [ghcr]
+
+# First admin (UI login).
+admin:
+  email: admin@local
+  password: changeme
+
+# Shared API key the bundled agent DaemonSet uses. The hub bootstraps it into the
+# 'default' namespace (LOCAL_AGENT_TOKEN), so the agent enrolls with no UI step.
+apiKey: change-me-please
+cluster: my-cluster
+
+timescaledb:
+  enabled: true                       # set false to use an external DB
+  image: timescale/timescaledb:latest-pg16
+  password: lastmon
+  storage: 5Gi
+  storageClass: ""                    # "" = cluster default
+
+hub:
+  replicas: 1
+  # Used only when timescaledb.enabled=false:
+  configDatabaseUrl: ""
+  dataDatabaseUrl: ""
+  service:
+    type: ClusterIP                   # NodePort/LoadBalancer to expose the UI
+  ingress:
+    enabled: false
+    className: ""
+    host: ""                          # e.g. mon.example.com
+
+agent:
+  enabled: true
+  interval: 15

@@ -35,6 +35,16 @@ pub struct MetricsReport {
     /// Seconds since the machine booted.
     pub uptime: u64,
 
+    // --- system classification (lets the hub group node / docker / k8s) ---
+    /// System kind: "node" (plain host), "docker" (host + containers), or "k8s"
+    /// (a Kubernetes node). Empty is treated as "node".
+    #[serde(default)]
+    pub kind: String,
+    /// For k8s nodes, the cluster name they belong to (groups nodes into a
+    /// cluster in the UI). Empty for node/docker.
+    #[serde(default)]
+    pub cluster: String,
+
     // --- host metadata (mostly static; the hub stores the latest on the server row) ---
     /// Agent binary version (CARGO_PKG_VERSION).
     #[serde(default)]
@@ -108,5 +118,5 @@ pub struct IngestAck {
     pub next_interval_secs: u64,
 }
 
-/// Header the agent uses to present its enrollment token.
-pub const AGENT_TOKEN_HEADER: &str = "x-agent-token";
+/// Header the agent uses to present its API key.
+pub const API_KEY_HEADER: &str = "x-api-key";

@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens as RGB triplets (so Tailwind's <alpha-value> works). */
+:root {
+  --bg: 11 14 20;        /* #0B0E14 */
+  --surface: 16 21 31;   /* #10151F */
+  --surface2: 20 26 38;  /* #141A26 */
+  --line: 30 38 50;      /* #1E2632 */
+  --fg: 226 232 240;     /* slate-200 */
+  --muted: 100 116 139;  /* slate-500 */
+  --faint: 71 85 105;    /* slate-600 */
+  --accent: 52 225 196;  /* #34E1C4 teal */
+  --accentfg: 6 35 31;
+}
+.light {
+  --bg: 241 245 249;     /* slate-100 */
+  --surface: 255 255 255;
+  --surface2: 238 242 247;
+  --line: 226 232 240;   /* slate-200 */
+  --fg: 15 23 42;        /* slate-900 */
+  --muted: 100 116 139;
+  --faint: 148 163 184;  /* slate-400 */
+  --accent: 13 148 136;  /* teal-600 */
+  --accentfg: 255 255 255;
+}
+
+@layer base {
+  body { @apply bg-bg text-fg; }
+}
+
+/* Table rows: clear hover/select in both themes (left accent when selected). */
+.lm-row:hover { background: rgb(var(--fg) / 0.05); }
+.light .lm-row:hover { background: rgb(var(--accent) / 0.10); }
+.lm-row.sel { background: rgb(var(--accent) / 0.14); box-shadow: inset 3px 0 0 rgb(var(--accent)); }

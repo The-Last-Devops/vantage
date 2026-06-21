@@ -1,0 +1,6 @@
+/* Custom styles cho prototype. Phần lớn dùng class Tailwind inline trong HTML;
+   file này chỉ chứa thứ Tailwind chưa cover (animation, override nhỏ...). */
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

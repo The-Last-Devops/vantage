@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Systems · last-monitor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        colors: {
+          ink: '#0B0E14', panel: '#10151F', panel2: '#141A26', line: '#1E2632',
+          teal: { DEFAULT: '#34E1C4', fg: '#06231F' },
+        },
+        fontFamily: { mono: ['ui-monospace','SF Mono','JetBrains Mono','Menlo','monospace'] },
+      } },
+    };
+  </script>
+</head>
+<body class="min-h-screen bg-ink font-mono text-slate-200 antialiased">
+  <div id="page" data-title="Systems" data-active="systems" data-root=".">
+    <div class="space-y-5">
+        <!-- ===== Fleet health hero ===== -->
+        <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="rounded-xl border border-line bg-panel p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Systems online</div>
+            <div class="mt-1.5 flex items-baseline gap-2">
+              <span id="hOnline" class="text-2xl font-semibold text-slate-100">—</span>
+              <span id="hTotal" class="text-sm text-slate-600">/ —</span>
+            </div>
+            <div class="mt-2 h-1 overflow-hidden rounded bg-line"><div id="hOnlineBar" class="h-full bg-teal" style="width:0%"></div></div>
+          </div>
+          <div class="rounded-xl border border-line bg-panel p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Active alerts</div>
+            <div class="mt-1.5 text-2xl font-semibold text-amber-400">2</div>
+            <div class="mt-2 text-xs text-slate-600">1 critical · 1 warning</div>
+          </div>
+          <div class="rounded-xl border border-line bg-panel p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Avg CPU</div>
+            <div id="hCpu" class="mt-1.5 text-2xl font-semibold text-slate-100">—</div>
+            <div class="mt-2 h-1 overflow-hidden rounded bg-line"><div id="hCpuBar" class="h-full bg-teal" style="width:0%"></div></div>
+          </div>
+          <div class="rounded-xl border border-line bg-panel p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-500">Avg memory</div>
+            <div id="hMem" class="mt-1.5 text-2xl font-semibold text-slate-100">—</div>
+            <div class="mt-2 h-1 overflow-hidden rounded bg-line"><div id="hMemBar" class="h-full bg-amber-400" style="width:0%"></div></div>
+          </div>
+        </section>
+
+        <!-- ===== Toolbar ===== -->
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <div class="relative">
+              <svg class="absolute left-2.5 top-2.5 h-4 w-4 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input id="filterInput" placeholder="Filter systems…" class="w-56 rounded-lg border border-line bg-panel2 py-2 pl-8 pr-3 text-sm text-slate-200 outline-none focus:border-teal/50" />
+            </div>
+            <button class="flex items-center gap-1.5 rounded-lg border border-line bg-panel2 px-3 py-2 text-sm text-slate-400 hover:border-teal/50">
+              Columns
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+          </div>
+          <div class="relative">
+            <button onclick="toggleAddMenu()" class="flex items-center gap-1.5 rounded-lg bg-teal px-3.5 py-2 text-sm font-semibold text-teal-fg hover:opacity-90">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              Add system
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div id="addMenu" class="absolute right-0 z-20 mt-1.5 hidden w-60 overflow-hidden rounded-lg border border-line bg-panel2 shadow-xl">
+              <button onclick="openAdd('node')" class="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-panel">
+                <svg class="mt-0.5 h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                <span><span class="block text-sm text-slate-100">Node</span><span class="block text-xs text-slate-500">A single host’s own metrics</span></span>
+              </button>
+              <button onclick="openAdd('docker')" class="flex w-full items-start gap-2.5 border-t border-line px-3 py-2.5 text-left hover:bg-panel">
+                <svg class="mt-0.5 h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12.5c-1 .5-2.5.5-3.5 0M3 9h18v3a8 8 0 0 1-16 0V9Z"/><path d="M6 9V6M9 9V6M12 9V6M15 9V6"/></svg>
+                <span><span class="block text-sm text-slate-100">Docker host</span><span class="block text-xs text-slate-500">Host + container stats</span></span>
+              </button>
+              <button onclick="openAdd('k8s')" class="flex w-full items-start gap-2.5 border-t border-line px-3 py-2.5 text-left hover:bg-panel">
+                <svg class="mt-0.5 h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><path d="m12 7 5 3v4l-5 3-5-3v-4l5-3Z"/></svg>
+                <span><span class="block text-sm text-slate-100">Kubernetes cluster</span><span class="block text-xs text-slate-500">All nodes + workloads</span></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== Systems sections (servers / docker / k8s) ===== -->
+        <div class="space-y-6 pb-20">
+          <section id="sec-nodes"></section>
+          <section id="sec-docker"></section>
+          <section id="sec-k8s"></section>
+        </div>
+
+      <!-- ===== bulk action bar ===== -->
+      <div id="actionBar" class="fixed inset-x-0 bottom-4 z-30 mx-auto hidden w-fit max-w-[calc(100%-2rem)]">
+        <div class="flex items-center gap-4 rounded-xl border border-line bg-panel2 px-4 py-2.5 shadow-2xl">
+          <span class="text-sm text-slate-300"><span id="selCount" class="font-semibold text-teal">0</span> selected</span>
+          <div class="h-4 w-px bg-line"></div>
+          <button onclick="bulkDelete()" class="flex items-center gap-1.5 rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-medium text-red-400 hover:bg-red-500/25">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Delete
+          </button>
+          <button onclick="clearSel()" class="text-sm text-slate-400 hover:text-slate-100">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Add System modal ===== -->
+  <div id="addModalRoot" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/60" onclick="closeAdd()"></div>
+    <div class="absolute inset-0 flex items-start justify-center overflow-y-auto p-4 sm:p-8">
+      <div id="addCard" class="relative w-full max-w-lg rounded-xl border border-line bg-panel shadow-2xl"></div>
+    </div>
+  </div>
+
+  <script src="js/shell.js"></script>
+  <script>
+    // ---- mobile sidebar ----
+    // ---- add-system menu ----
+    function toggleAddMenu() {
+      document.getElementById('addMenu').classList.toggle('hidden');
+    }
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('addMenu');
+      if (!menu.classList.contains('hidden') && !e.target.closest('#addMenu') && !e.target.closest('[onclick="toggleAddMenu()"]')) {
+        menu.classList.add('hidden');
+      }
+      // custom namespace dropdown trong modal (chỉ tồn tại khi modal mở)
+      const ns = document.getElementById('nsMenu');
+      if (ns && !ns.classList.contains('hidden') && !e.target.closest('#nsField')) {
+        ns.classList.add('hidden');
+      }
+    });
+
+    // ---- Add System modal ----
+    const HUB = 'https://hub.example.com';
+    const addTypes = {
+      node: {
+        title: 'Add Node', label: 'host', placeholder: 'e.g. web-03',
+        icon: '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+        desc: 'A single host — only this node’s own metrics (CPU/mem/disk/net). No container stats.',
+        methods: [
+          { id: 'binary', label: 'Binary', snippet: (t) => `curl -fsSL ${HUB}/install.sh | \\\n  HUB_URL=${HUB} AGENT_TOKEN=${t} INTERVAL=15 sh` },
+          { id: 'docker', label: 'Docker', snippet: (t) => `docker run -d --name last-agent \\\n  --network host --pid host \\\n  -e HUB_URL=${HUB} \\\n  -e AGENT_TOKEN=${t} \\\n  -e INTERVAL=15 \\\n  -v /proc:/host/proc:ro -v /sys:/host/sys:ro \\\n  ghcr.io/itlboy/last-agent:latest` },
+          { id: 'compose', label: 'Compose', snippet: (t) => `# docker-compose.yml\nservices:\n  last-agent:\n    image: ghcr.io/itlboy/last-agent:latest\n    network_mode: host\n    pid: host\n    environment:\n      HUB_URL: ${HUB}\n      AGENT_TOKEN: ${t}\n      INTERVAL: 15\n    volumes:\n      - /proc:/host/proc:ro\n      - /sys:/host/sys:ro\n    restart: unless-stopped` },
+        ],
+      },
+      docker: {
+        title: 'Add Docker host', label: 'host', placeholder: 'e.g. docker-03',
+        icon: '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12.5c-1 .5-2.5.5-3.5 0M3 9h18v3a8 8 0 0 1-16 0V9Z"/><path d="M6 9V6M9 9V6M12 9V6M15 9V6"/></svg>',
+        desc: 'Host metrics plus per-container stats. Mounts the Docker socket read-only.',
+        methods: [
+          { id: 'docker', label: 'Docker', snippet: (t) => `docker run -d --name last-agent \\\n  --network host --pid host \\\n  -e HUB_URL=${HUB} \\\n  -e AGENT_TOKEN=${t} \\\n  -e INTERVAL=15 \\\n  -v /proc:/host/proc:ro -v /sys:/host/sys:ro \\\n  -v /var/run/docker.sock:/var/run/docker.sock:ro \\\n  ghcr.io/itlboy/last-agent:latest` },
+          { id: 'compose', label: 'Compose', snippet: (t) => `# docker-compose.yml\nservices:\n  last-agent:\n    image: ghcr.io/itlboy/last-agent:latest\n    network_mode: host\n    pid: host\n    environment:\n      HUB_URL: ${HUB}\n      AGENT_TOKEN: ${t}\n      INTERVAL: 15\n    volumes:\n      - /proc:/host/proc:ro\n      - /sys:/host/sys:ro\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n    restart: unless-stopped` },
+        ],
+      },
+      k8s: {
+        title: 'Add Kubernetes cluster', label: 'cluster', placeholder: 'e.g. prod-cluster',
+        icon: '<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><path d="m12 7 5 3v4l-5 3-5-3v-4l5-3Z"/></svg>',
+        desc: 'Deploys a DaemonSet — every node in the cluster reports in.',
+        methods: [
+          { id: 'helm', label: 'Helm', snippet: (t) => `helm repo add last-monitor ${HUB}/charts\nhelm install last-agent last-monitor/agent \\\n  --set hub.url=${HUB} \\\n  --set token=${t}` },
+          { id: 'manifest', label: 'Manifest', snippet: (t) => `kubectl apply -f "${HUB}/k8s/agent.yaml?token=${t}"` },
+        ],
+      },
+    };
+
+    const NAMESPACES = ['production', 'staging', 'edge'];
+    let addState = { type: null, token: '', ns: 'production', method: 0 };
+    function setMethod(i) { addState.method = i; renderAddBody(); }
+
+    function nsDropdownHTML() {
+      const chevron = '<svg class="h-4 w-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>';
+      const check = '<svg class="h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>';
+      const opts = NAMESPACES.map(n => {
+        const on = n === addState.ns;
+        return `<button type="button" onclick="pickNs('${n}')" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-panel ${on ? 'text-teal' : 'text-slate-300'}">
+          <span class="flex items-center gap-2"><span class="h-1.5 w-1.5 rounded-full ${on ? 'bg-teal' : 'bg-slate-600'}"></span>${n}</span>${on ? check : ''}</button>`;
+      }).join('');
+      return `<div class="relative">
+        <button type="button" onclick="toggleSelect(event,'nsMenu')" class="flex w-full items-center justify-between rounded-lg border border-line bg-panel2 px-3 py-2 text-left text-sm text-slate-100 outline-none hover:border-teal/50">
+          <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-teal"></span><span id="nsLabel">${addState.ns}</span></span>${chevron}
+        </button>
+        <div id="nsMenu" class="absolute z-10 mt-1 hidden w-full overflow-hidden rounded-lg border border-line bg-panel2 py-1 shadow-xl">${opts}</div>
+      </div>`;
+    }
+    function toggleSelect(e, id) { e.stopPropagation(); document.getElementById(id).classList.toggle('hidden'); }
+    function pickNs(n) { addState.ns = n; document.getElementById('nsField').innerHTML = nsDropdownHTML(); }
+
+    function genToken() {
+      const h = '0123456789abcdef'; let s = '';
+      for (let i = 0; i < 40; i++) s += h[Math.floor(Math.random() * 16)];
+      return 'lm_' + s;
+    }
+    function openAdd(type) {
+      document.getElementById('addMenu').classList.add('hidden');
+      addState = { type, token: genToken(), ns: 'production', method: 0 };
+      renderAddBody();
+      document.getElementById('addModalRoot').classList.remove('hidden');
+    }
+    function closeAdd() { document.getElementById('addModalRoot').classList.add('hidden'); }
+    function copyEl(id, btn) {
+      const el = document.getElementById(id);
+      const text = el.tagName === 'INPUT' ? el.value : el.textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(text);
+      const o = btn.innerHTML; btn.innerHTML = 'Copied'; setTimeout(() => btn.innerHTML = o, 1200);
+    }
+
+    function renderAddBody() {
+      const cfg = addTypes[addState.type];
+      const tok = addState.token;
+      const copyBtn = (id) => `<button onclick="copyEl('${id}',this)" class="rounded-md border border-line bg-panel2 px-2 py-1 text-xs text-slate-400 hover:text-teal">Copy</button>`;
+      document.getElementById('addCard').innerHTML = `
+        <div class="flex items-start justify-between border-b border-line p-5">
+          <div class="flex items-center gap-3">
+            <span class="grid h-10 w-10 place-items-center rounded-lg bg-teal/10 text-teal">${cfg.icon}</span>
+            <div><h2 class="text-base font-semibold text-slate-100">${cfg.title}</h2>
+            <p class="mt-0.5 text-xs text-slate-500">${cfg.desc}</p></div>
+          </div>
+          <button onclick="closeAdd()" class="text-slate-500 hover:text-slate-200"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+
+        <div class="space-y-5 p-5">
+          <!-- details -->
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="block text-sm">
+              <span class="text-slate-400">Name (${cfg.label})</span>
+              <input placeholder="${cfg.placeholder}" class="mt-1.5 w-full rounded-lg border border-line bg-panel2 px-3 py-2 text-slate-100 outline-none focus:border-teal/50" />
+            </label>
+            <label class="block text-sm">
+              <span class="text-slate-400">Namespace</span>
+              <div id="nsField" class="mt-1.5">${nsDropdownHTML()}</div>
+            </label>
+          </div>
+
+          <!-- install method tabs + snippet (token nhúng sẵn, quản lý ngầm) -->
+          <div>
+            <div class="mb-2 flex items-center justify-between">
+              <div class="flex rounded-lg border border-line bg-panel2 p-0.5 text-xs">
+                ${cfg.methods.map((m, i) => `<button onclick="setMethod(${i})" class="rounded-md px-2.5 py-1 ${i === addState.method ? 'bg-teal/15 font-medium text-teal' : 'text-slate-400 hover:text-slate-100'}">${m.label}</button>`).join('')}
+              </div>
+              ${copyBtn('addSnippet')}
+            </div>
+            <pre id="addSnippet" class="overflow-x-auto rounded-lg border border-line bg-ink p-3 text-xs leading-relaxed text-slate-300">${cfg.methods[addState.method].snippet(tok).replace(/</g,'&lt;')}</pre>
+          </div>
+
+          <div class="flex items-center gap-2 rounded-lg border border-line bg-panel2 px-3 py-2.5 text-xs text-slate-500">
+            <span class="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-400"></span>
+            Waiting for first check-in… it will appear in the list automatically.
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 border-t border-line p-4">
+          <button onclick="closeAdd()" class="rounded-lg border border-line px-4 py-2 text-sm text-slate-400 hover:text-slate-100">Cancel</button>
+          <button onclick="closeAdd()" class="rounded-lg bg-teal px-4 py-2 text-sm font-semibold text-teal-fg hover:opacity-90">Done</button>
+        </div>`;
+    }
+
+    // Esc đóng modal
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAdd(); });
+
+    // ---- mock data (mỗi system có type + namespace) ----
+    const data = {
+      nodes: [
+        { id: 's1', name: 'web-01', sub: '10.0.1.11', ns: 'production', status: 'online', cpu: 22, mem: 48, disk: 61, down: 1.2, up: 0.4, agent: '0.7.1', spark: [18,20,25,22,19,24,30,22] },
+        { id: 's2', name: 'web-02', sub: '10.0.1.12', ns: 'production', status: 'online', cpu: 41, mem: 73, disk: 55, down: 2.8, up: 0.9, agent: '0.7.1', spark: [30,35,40,38,45,41,39,41] },
+        { id: 's3', name: 'db-primary', sub: '10.0.2.10', ns: 'production', status: 'online', cpu: 78, mem: 88, disk: 72, down: 0.6, up: 1.1, agent: '0.7.1', spark: [60,65,70,75,80,78,82,78] },
+        { id: 's4', name: 'cache-01', sub: '10.0.2.21', ns: 'staging', status: 'online', cpu: 12, mem: 34, disk: 20, down: 0.3, up: 0.2, agent: '0.7.0', spark: [10,12,11,13,12,10,14,12] },
+        { id: 's5', name: 'edge-eu', sub: '10.0.4.2', ns: 'edge', status: 'offline', cpu: 0, mem: 0, disk: 0, down: 0, up: 0, agent: '0.6.9', spark: [20,18,0,0,0,0,0,0] },
+      ],
+      docker: [
+        { id: 'd1', name: 'docker-01', sub: '4 containers', ns: 'production', status: 'online', cpu: 35, mem: 61, disk: 48, down: 2.1, up: 1.4, agent: '0.7.1', spark: [30,32,36,40,38,35,34,35], children: [
+          { name: 'nginx', status: 'online', cpu: 8, mem: 12, disk: 5 },
+          { name: 'api', status: 'online', cpu: 22, mem: 40, disk: 18 },
+          { name: 'postgres', status: 'online', cpu: 18, mem: 55, disk: 60 },
+          { name: 'redis', status: 'online', cpu: 4, mem: 20, disk: 8 },
+        ] },
+        { id: 'd2', name: 'docker-02', sub: '3 containers', ns: 'staging', status: 'online', cpu: 58, mem: 79, disk: 66, down: 3.4, up: 2.2, agent: '0.7.1', spark: [50,55,60,58,62,57,59,58], children: [
+          { name: 'worker', status: 'online', cpu: 45, mem: 62, disk: 30 },
+          { name: 'rabbitmq', status: 'warn', cpu: 71, mem: 84, disk: 40 },
+          { name: 'minio', status: 'online', cpu: 30, mem: 50, disk: 88 },
+        ] },
+      ],
+      k8s: [
+        { id: 'k1', name: 'prod-cluster', sub: '5 nodes', ns: 'production', status: 'online', cpu: 47, mem: 64, disk: 53, down: 8.2, up: 6.1, agent: '0.7.1', spark: [40,44,48,52,49,46,47,47], children: [
+          { name: 'cp-1', status: 'online', cpu: 38, mem: 55, disk: 40 },
+          { name: 'worker-1', status: 'online', cpu: 52, mem: 70, disk: 61 },
+          { name: 'worker-2', status: 'online', cpu: 49, mem: 66, disk: 58 },
+          { name: 'worker-3', status: 'online', cpu: 44, mem: 62, disk: 50 },
+          { name: 'worker-4', status: 'warn', cpu: 81, mem: 88, disk: 72 },
+        ] },
+        { id: 'k2', name: 'staging-cluster', sub: '3 nodes', ns: 'staging', status: 'warn', cpu: 71, mem: 82, disk: 60, down: 4.0, up: 3.1, agent: '0.7.0', spark: [60,65,70,72,75,71,73,71], children: [
+          { name: 'cp-1', status: 'online', cpu: 60, mem: 75, disk: 55 },
+          { name: 'worker-1', status: 'warn', cpu: 84, mem: 90, disk: 68 },
+          { name: 'worker-2', status: 'online', cpu: 68, mem: 80, disk: 57 },
+        ] },
+      ],
+    };
+
+    // version mới nhất (so semver) — bản này tô teal, cũ hơn tô amber
+    function cmpVer(a, b) {
+      const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+      for (let i = 0; i < 3; i++) { if ((pa[i]||0) !== (pb[i]||0)) return (pa[i]||0) - (pb[i]||0); }
+      return 0;
+    }
+    const LATEST_AGENT = Object.values(data).flat().map(x => x.agent).sort(cmpVer).pop();
+    const MIN_AGENT = '0.7.0'; // dưới mức này coi như không tương thích → đỏ
+
+    function agentBadge(ver) {
+      let cls, title;
+      if (ver === LATEST_AGENT) { cls = 'bg-teal/10 text-teal'; title = 'Up to date'; }
+      else if (cmpVer(ver, MIN_AGENT) >= 0) { cls = 'bg-amber-400/10 text-amber-400'; title = `Update available (latest v${LATEST_AGENT})`; }
+      else { cls = 'bg-red-500/10 text-red-400'; title = `Incompatible — upgrade required (min v${MIN_AGENT})`; }
+      return `<span title="${title}" class="rounded px-1.5 py-0.5 text-xs ${cls}">v${ver}</span>`;
+    }
+
+    const sections = [
+      { key: 'nodes', title: 'Nodes', icon: '<svg class="h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>' },
+      { key: 'docker', title: 'Docker', icon: '<svg class="h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12.5c-1 .5-2.5.5-3.5 0M3 9h18v3a8 8 0 0 1-16 0V9Z"/><path d="M6 9V6M9 9V6M12 9V6M15 9V6"/></svg>' },
+      { key: 'k8s', title: 'Kubernetes', icon: '<svg class="h-4 w-4 text-teal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><path d="m12 7 5 3v4l-5 3-5-3v-4l5-3Z"/></svg>' },
+    ];
+
+    // sortable columns: key on item + how to compare
+    const columns = [
+      { key: 'name', label: 'System', sort: (a,b) => a.name.localeCompare(b.name) },
+      { key: 'ns', label: 'Namespace', sort: (a,b) => a.ns.localeCompare(b.ns) },
+      { key: 'status', label: 'Status', sort: (a,b) => a.status.localeCompare(b.status) },
+      { key: 'cpu', label: 'CPU', sort: (a,b) => a.cpu - b.cpu },
+      { key: 'mem', label: 'Memory', sort: (a,b) => a.mem - b.mem },
+      { key: 'disk', label: 'Disk', sort: (a,b) => a.disk - b.disk },
+      { key: 'net', label: 'Net ↓↑', sort: (a,b) => a.down - b.down },
+      { key: 'spark', label: '1h', sort: null },
+      { key: 'agent', label: 'Agent', sort: (a,b) => a.agent.localeCompare(b.agent) },
+    ];
+
+    const sortState = {}; // key -> {col, dir}
+    const selected = new Set();
+    const expanded = new Set(); // cluster ids đang xổ node con
+    let filterText = '';
+
+    // namespace filter dùng chung từ shell.js (window.NS.selected)
+    const inNs = (it) => window.NS.selected.has(it.ns);
+
+    const barColor = (v) => v >= 90 ? 'bg-red-400' : v >= 70 ? 'bg-amber-400' : 'bg-teal';
+    const txtColor = (v) => v >= 90 ? 'text-red-400' : v >= 70 ? 'text-amber-400' : 'text-slate-300';
+    function gauge(v) {
+      return `<div class="flex items-center gap-2"><div class="h-1.5 w-16 overflow-hidden rounded bg-line"><div class="h-full ${barColor(v)}" style="width:${v}%"></div></div><span class="${txtColor(v)} tabular-nums">${v}%</span></div>`;
+    }
+    function sparkline(pts) {
+      const w = 72, h = 22, max = Math.max(...pts, 1), step = w / (pts.length - 1);
+      const d = pts.map((p, i) => `${(i*step).toFixed(1)},${(h - (p/max)*h).toFixed(1)}`).join(' ');
+      return `<svg viewBox="0 0 ${w} ${h}" class="h-6 w-[72px]"><polyline points="${d}" fill="none" stroke="#34E1C4" stroke-width="1.5" stroke-linejoin="round"/></svg>`;
+    }
+    function statusDot(s) {
+      const map = { online: 'bg-teal', offline: 'bg-red-400', warn: 'bg-amber-400' };
+      return `<span class="inline-block h-2 w-2 rounded-full ${map[s] || 'bg-slate-500'}"></span>`;
+    }
+    function nsBadge(ns) {
+      return `<span class="rounded bg-panel2 px-1.5 py-0.5 text-xs text-slate-400">${ns}</span>`;
+    }
+
+    function rowsFor(key) {
+      let items = data[key].filter(it => inNs(it) && (!filterText || (it.name + ' ' + it.sub + ' ' + it.ns).toLowerCase().includes(filterText)));
+      const st = sortState[key];
+      if (st && st.col && st.col.sort) {
+        items = [...items].sort(st.col.sort);
+        if (st.dir === 'desc') items.reverse();
+      }
+      return items;
+    }
+
+    function renderSection(sec) {
+      const items = rowsFor(sec.key);
+      const st = sortState[sec.key] || {};
+      const allSel = items.length && items.every(it => selected.has(it.id));
+
+      const headCells = columns.map((c, ci) => {
+        const active = st.col === c;
+        const arrow = active ? (st.dir === 'desc' ? ' ↓' : ' ↑') : '';
+        const cls = c.sort ? 'cursor-pointer hover:text-slate-300 select-none' : '';
+        const handler = c.sort ? `onclick="sortBy('${sec.key}',${ci})"` : '';
+        return `<th class="px-4 py-2.5 font-medium ${cls} ${active ? 'text-teal' : ''}" ${handler}>${c.label}${arrow}</th>`;
+      }).join('');
+
+      const body = items.map(it => {
+        const off = it.status === 'offline';
+        const sel = selected.has(it.id);
+        const hasKids = it.children && it.children.length;
+        const isOpen = expanded.has(it.id);
+        const chevron = hasKids
+          ? `<button onclick="event.preventDefault();toggleExpand('${it.id}')" class="text-slate-500 hover:text-teal"><svg class="h-4 w-4 transition-transform ${isOpen ? 'rotate-90' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>`
+          : '<span class="inline-block w-4"></span>';
+
+        let rows = `<tr class="lm-row border-b border-line${sel ? ' sel' : ''}">
+          <td class="px-3 py-3"><input type="checkbox" data-id="${it.id}" ${sel ? 'checked' : ''} onclick="toggleRow('${it.id}')" class="h-4 w-4 rounded border-line bg-panel2 accent-[#34E1C4]"></td>
+          <td class="px-4 py-3"><div class="flex items-center gap-1.5">${chevron}<a href="pages/server.html?type=${sec.key === 'nodes' ? 'node' : sec.key}&name=${encodeURIComponent(it.name)}&ns=${it.ns}" class="flex items-center gap-2.5">${statusDot(it.status)}<span><span class="text-slate-100">${it.name}</span><span class="block text-xs text-slate-600">${it.sub}</span></span></a></div></td>
+          <td class="px-4 py-3">${nsBadge(it.ns)}</td>
+          <td class="px-4 py-3 text-sm ${off ? 'text-red-400' : it.status === 'warn' ? 'text-amber-400' : 'text-teal'}">${it.status}</td>
+          <td class="px-4 py-3">${off ? '<span class="text-slate-600">—</span>' : gauge(it.cpu)}</td>
+          <td class="px-4 py-3">${off ? '<span class="text-slate-600">—</span>' : gauge(it.mem)}</td>
+          <td class="px-4 py-3">${off ? '<span class="text-slate-600">—</span>' : gauge(it.disk)}</td>
+          <td class="px-4 py-3 tabular-nums text-slate-400">${off ? '—' : `<span class="text-teal">↓${it.down}</span> <span class="text-slate-500">↑${it.up}</span>`}</td>
+          <td class="px-4 py-3">${sparkline(it.spark)}</td>
+          <td class="px-4 py-3">${agentBadge(it.agent)}</td>
+        </tr>`;
+
+        if (hasKids && isOpen) {
+          const kidLabel = sec.key === 'docker' ? 'container' : 'node';
+          rows += it.children.map((c, ci) => {
+            const last = ci === it.children.length - 1;
+            return `<tr class="border-b border-line bg-ink/40">
+              <td class="px-3 py-2"></td>
+              <td class="px-4 py-2"><div class="flex items-center gap-2 pl-7 text-slate-300"><span class="text-slate-700">${last ? '└' : '├'}</span>${statusDot(c.status)}<span class="text-sm">${c.name}</span></div></td>
+              <td class="px-4 py-2"><span class="text-xs text-slate-700">${kidLabel}</span></td>
+              <td class="px-4 py-2 text-sm ${c.status === 'warn' ? 'text-amber-400' : 'text-teal'}">${c.status}</td>
+              <td class="px-4 py-2">${gauge(c.cpu)}</td>
+              <td class="px-4 py-2">${gauge(c.mem)}</td>
+              <td class="px-4 py-2">${gauge(c.disk)}</td>
+              <td class="px-4 py-2 text-slate-700">—</td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2"></td>
+            </tr>`;
+          }).join('');
+        }
+        return rows;
+      }).join('');
+
+      return `
+        <div class="mb-2 flex items-center gap-2">
+          ${sec.icon}<h2 class="text-sm font-semibold text-slate-200">${sec.title}</h2>
+          <span class="rounded-full bg-panel2 px-2 py-0.5 text-xs text-slate-500">${items.length}</span>
+        </div>
+        <div class="overflow-x-auto rounded-xl border border-line">
+          <table class="w-full min-w-[900px] text-sm">
+            <thead class="border-b border-line bg-panel text-left text-xs uppercase tracking-wider text-slate-500">
+              <tr>
+                <th class="px-3 py-2.5"><input type="checkbox" ${allSel ? 'checked' : ''} onclick="toggleAll('${sec.key}')" class="h-4 w-4 rounded border-line bg-panel2 accent-[#34E1C4]"></th>
+                ${headCells}
+              </tr>
+            </thead>
+            <tbody>${body || `<tr><td colspan="${columns.length+1}" class="px-4 py-6 text-center text-slate-600">No systems</td></tr>`}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderAll() {
+      sections.forEach(sec => { document.getElementById('sec-' + sec.key).innerHTML = renderSection(sec); });
+      const bar = document.getElementById('actionBar');
+      document.getElementById('selCount').textContent = selected.size;
+      bar.classList.toggle('hidden', selected.size === 0);
+      updateHero();
+    }
+
+    function updateHero() {
+      const all = Object.values(data).flat().filter(inNs);
+      const total = all.length;
+      const online = all.filter(it => it.status !== 'offline').length;
+      const live = all.filter(it => it.status !== 'offline');
+      const avg = (arr, k) => arr.length ? Math.round(arr.reduce((s, it) => s + it[k], 0) / arr.length) : 0;
+      const cpu = avg(live, 'cpu'), mem = avg(live, 'mem');
+      document.getElementById('hOnline').textContent = online;
+      document.getElementById('hTotal').textContent = '/ ' + total;
+      document.getElementById('hOnlineBar').style.width = (total ? (online / total) * 100 : 0) + '%';
+      document.getElementById('hCpu').textContent = cpu + '%';
+      document.getElementById('hCpuBar').style.width = cpu + '%';
+      document.getElementById('hMem').textContent = mem + '%';
+      document.getElementById('hMemBar').style.width = mem + '%';
+    }
+
+    function sortBy(key, ci) {
+      const col = columns[ci];
+      const st = sortState[key] || { col: null, dir: 'asc' };
+      if (st.col === col) st.dir = st.dir === 'asc' ? 'desc' : 'asc';
+      else { st.col = col; st.dir = 'asc'; }
+      sortState[key] = st;
+      renderAll();
+    }
+    function toggleExpand(id) { expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderAll(); }
+    function toggleRow(id) { selected.has(id) ? selected.delete(id) : selected.add(id); renderAll(); }
+    function toggleAll(key) {
+      const items = rowsFor(key);
+      const allSel = items.length && items.every(it => selected.has(it.id));
+      items.forEach(it => allSel ? selected.delete(it.id) : selected.add(it.id));
+      renderAll();
+    }
+    function clearSel() { selected.clear(); renderAll(); }
+    function bulkDelete() {
+      Object.keys(data).forEach(k => { data[k] = data[k].filter(it => !selected.has(it.id)); });
+      selected.clear();
+      renderAll();
+    }
+
+    // global filter (top toolbar input)
+    document.getElementById('filterInput').addEventListener('input', (e) => {
+      filterText = e.target.value.trim().toLowerCase();
+      renderAll();
+    });
+
+    // shell.js gọi hook này khi đổi namespace filter
+    window.onNamespaceChange = renderAll;
+    renderAll();
+  </script>
+</body>
+</html>

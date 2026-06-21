@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use shared::{ContainerStat, GpuStat, IngestAck, MetricsReport, TempReading, AGENT_TOKEN_HEADER};
+use shared::{ContainerStat, GpuStat, IngestAck, MetricsReport, TempReading, API_KEY_HEADER};
 use sysinfo::{Components, Networks, System};
 
 struct Config {
@@ -19,6 +19,14 @@ struct Config {
     /// Filesystem path whose usage we report. In Docker, mount the host root and
     /// set DISK_PATH=/host so the host's disk (not the container's) is measured.
     disk_path: String,
+    /// System kind: "node" (default), "docker", or "k8s" (set via AGENT_KIND).
+    kind: String,
+    /// Cluster name for k8s nodes (set via CLUSTER); empty otherwise.
+    cluster: String,
+    /// Override the reported hostname (set via HOSTNAME_OVERRIDE or NODE_NAME).
+    /// On k8s the DaemonSet injects the node name so identity is stable per node
+    /// (not the ephemeral pod name).
+    hostname_override: String,
 }
 
 fn load_config() -> Result<Config> {
@@ -29,11 +37,19 @@ fn load_config() -> Result<Config> {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(15);
     let disk_path = std::env::var("DISK_PATH").unwrap_or_else(|_| "/".to_string());
+    let kind = std::env::var("AGENT_KIND").unwrap_or_else(|_| "node".to_string());
+    let cluster = std::env::var("CLUSTER").unwrap_or_default();
+    let hostname_override = std::env::var("HOSTNAME_OVERRIDE")
+        .or_else(|_| std::env::var("NODE_NAME"))
+        .unwrap_or_default();
     Ok(Config {
         hub_url: hub_url.trim_end_matches('/').to_string(),
         token,
         interval: Duration::from_secs(interval.max(1)),
         disk_path,
+        kind,
+        cluster,
+        hostname_override,
     })
 }
 
@@ -107,6 +123,8 @@ fn collect(
         net_tx,
         load1: System::load_average().one,
         uptime: System::uptime(),
+        kind: String::new(), // set from config in the push loop
+        cluster: String::new(),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         kernel: System::kernel_version().unwrap_or_default(),
         cpu_model: sys
@@ -336,13 +354,18 @@ async fn main() -> Result<()> {
 
     loop {
         let mut report = collect(&mut sys, &mut nets, &mut components, &cfg.disk_path);
+        report.kind = cfg.kind.clone();
+        report.cluster = cfg.cluster.clone();
+        if !cfg.hostname_override.is_empty() {
+            report.hostname = cfg.hostname_override.clone();
+        }
         if let Some(d) = &docker {
             report.containers = collect_containers(d).await;
         }
         report.gpus = collect_gpus().await;
         match client
             .post(&ingest_url)
-            .header(AGENT_TOKEN_HEADER, &cfg.token)
+            .header(API_KEY_HEADER, &cfg.token)
             .json(&report)
             .send()
             .await

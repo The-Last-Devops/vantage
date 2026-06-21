@@ -1,0 +1,64 @@
+{{- if .Values.timescaledb.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lm.db" . }}-init
+data:
+  # Create the second (data) database; migrations enable timescaledb inside it.
+  init.sh: |
+    #!/bin/bash
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+      CREATE DATABASE lastmon_data;
+    EOSQL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lm.db" . }}
+spec:
+  selector: { app: {{ include "lm.db" . }} }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "lm.db" . }}
+spec:
+  serviceName: {{ include "lm.db" . }}
+  replicas: 1
+  selector:
+    matchLabels: { app: {{ include "lm.db" . }} }
+  template:
+    metadata:
+      labels: { app: {{ include "lm.db" . }} }
+    spec:
+      containers:
+        - name: db
+          image: {{ .Values.timescaledb.image }}
+          env:
+            - { name: POSTGRES_USER, value: lastmon }
+            - { name: POSTGRES_PASSWORD, value: {{ .Values.timescaledb.password | quote }} }
+            - { name: POSTGRES_DB, value: lastmon_config }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "lastmon"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: init
+          configMap: { name: {{ include "lm.db" . }}-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.timescaledb.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.timescaledb.storage }}
+{{- end }}

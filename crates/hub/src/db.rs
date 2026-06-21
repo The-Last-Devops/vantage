@@ -38,10 +38,10 @@ pub async fn bootstrap_local_server(pool: &sqlx::PgPool) -> Result<()> {
     )
     .fetch_one(pool)
     .await?;
-    // Reusable enrollment token; servers auto-register on first push.
+    // Reusable API key; systems auto-register on first push.
     sqlx::query(
-        "INSERT INTO enrollment_tokens (namespace_id, name, token) VALUES ($1, 'local', $2) \
-         ON CONFLICT (token) DO NOTHING",
+        "INSERT INTO api_keys (namespace_id, name, key) VALUES ($1, 'local', $2) \
+         ON CONFLICT (key) DO NOTHING",
     )
     .bind(ns)
     .bind(&token)

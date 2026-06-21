@@ -237,68 +237,66 @@ pub async fn add_member(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ---- servers ----------------------------------------------------------------
-
-// ---- enrollment tokens (reusable; servers auto-register) --------------------
+// ---- API keys (reusable; systems auto-register) -----------------------------
 
 #[derive(Serialize)]
-pub struct CreatedToken {
+pub struct CreatedKey {
     pub id: Uuid,
     pub name: String,
-    /// The reusable enrollment token (use as AGENT_TOKEN on any number of hosts).
-    pub token: String,
+    /// The reusable API key (sent as x-api-key on any number of hosts).
+    pub key: String,
 }
 
 #[derive(Deserialize)]
-pub struct CreateToken {
+pub struct CreateKey {
     pub name: String,
 }
 
-/// POST /api/namespaces/:id/tokens — editors+ mint a reusable enrollment token.
-pub async fn create_token(
+/// POST /api/namespaces/:id/keys — editors+ mint a reusable API key.
+pub async fn create_key(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(ns): Path<Uuid>,
-    Json(req): Json<CreateToken>,
-) -> Result<Json<CreatedToken>, StatusCode> {
+    Json(req): Json<CreateKey>,
+) -> Result<Json<CreatedKey>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
     let name = req.name.trim().to_string();
-    if name.is_empty() || name.chars().count() > 32 {
+    if name.is_empty() || name.chars().count() > 64 {
         return Err(StatusCode::BAD_REQUEST);
     }
-    // Standardized 32-char token (UUIDv4, hex, ~122 bits of entropy).
-    let token = Uuid::new_v4().simple().to_string();
+    // 32-char key (UUIDv4 hex, ~122 bits of entropy).
+    let key = Uuid::new_v4().simple().to_string();
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO enrollment_tokens (namespace_id, name, token) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO api_keys (namespace_id, name, key) VALUES ($1, $2, $3) RETURNING id",
     )
     .bind(ns)
     .bind(&name)
-    .bind(&token)
+    .bind(&key)
     .fetch_one(&state.config)
     .await
     .map_err(internal)?;
-    Ok(Json(CreatedToken { id, name, token }))
+    Ok(Json(CreatedKey { id, name, key }))
 }
 
 #[derive(Serialize)]
-pub struct TokenRow {
+pub struct KeyRow {
     pub id: Uuid,
     pub name: String,
-    pub token: String,
-    pub server_count: i64,
+    pub key: String,
+    pub system_count: i64,
 }
 
-/// GET /api/namespaces/:id/tokens
-pub async fn list_tokens(
+/// GET /api/namespaces/:id/keys
+pub async fn list_keys(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(ns): Path<Uuid>,
-) -> Result<Json<Vec<TokenRow>>, StatusCode> {
+) -> Result<Json<Vec<KeyRow>>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
     let rows: Vec<(Uuid, String, String, i64)> = sqlx::query_as(
-        "SELECT t.id, t.name, t.token, count(s.id) \
-         FROM enrollment_tokens t LEFT JOIN servers s ON s.token_id = t.id \
-         WHERE t.namespace_id = $1 GROUP BY t.id ORDER BY t.name",
+        "SELECT k.id, k.name, k.key, count(s.id) \
+         FROM api_keys k LEFT JOIN systems s ON s.key_id = k.id \
+         WHERE k.namespace_id = $1 GROUP BY k.id ORDER BY k.name",
     )
     .bind(ns)
     .fetch_all(&state.config)
@@ -306,66 +304,66 @@ pub async fn list_tokens(
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, token, server_count)| TokenRow {
+            .map(|(id, name, key, system_count)| KeyRow {
                 id,
                 name,
-                token,
-                server_count,
+                key,
+                system_count,
             })
             .collect(),
     ))
 }
 
 #[derive(Serialize)]
-pub struct TokenServers {
-    pub token_name: String,
-    pub servers: Vec<String>,
+pub struct KeySystems {
+    pub key_name: String,
+    pub systems: Vec<String>,
 }
 
-/// GET /api/tokens/:id/servers — which servers a token enrolled (for delete warning).
-pub async fn token_servers(
+/// GET /api/keys/:id/systems — which systems a key enrolled (for delete warning).
+pub async fn key_systems(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<TokenServers>, StatusCode> {
+) -> Result<Json<KeySystems>, StatusCode> {
     let ns = ns_of(
         &state,
-        "SELECT namespace_id FROM enrollment_tokens WHERE id = $1",
+        "SELECT namespace_id FROM api_keys WHERE id = $1",
         id,
     )
     .await?;
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
-    let token_name: (String,) = sqlx::query_as("SELECT name FROM enrollment_tokens WHERE id = $1")
+    let key_name: (String,) = sqlx::query_as("SELECT name FROM api_keys WHERE id = $1")
         .bind(id)
         .fetch_one(&state.config)
         .await
         .map_err(internal)?;
-    let servers: Vec<(String, String)> =
-        sqlx::query_as("SELECT name, hostname FROM servers WHERE token_id = $1 ORDER BY hostname")
+    let systems: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, hostname FROM systems WHERE key_id = $1 ORDER BY hostname")
             .bind(id)
             .fetch_all(&state.config)
             .await
             .map_err(internal)?;
-    Ok(Json(TokenServers {
-        token_name: token_name.0,
-        servers: servers.into_iter().map(|(_, h)| h).collect(),
+    Ok(Json(KeySystems {
+        key_name: key_name.0,
+        systems: systems.into_iter().map(|(_, h)| h).collect(),
     }))
 }
 
-/// DELETE /api/tokens/:id — removes the token and cascades to every server it enrolled.
-pub async fn delete_token(
+/// DELETE /api/keys/:id — removes the key and cascades to every system it enrolled.
+pub async fn delete_key(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     let ns = ns_of(
         &state,
-        "SELECT namespace_id FROM enrollment_tokens WHERE id = $1",
+        "SELECT namespace_id FROM api_keys WHERE id = $1",
         id,
     )
     .await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    sqlx::query("DELETE FROM enrollment_tokens WHERE id = $1")
+    sqlx::query("DELETE FROM api_keys WHERE id = $1")
         .bind(id)
         .execute(&state.config)
         .await
@@ -433,13 +431,12 @@ pub async fn list_channels(
     Path(ns): Path<Uuid>,
 ) -> Result<Json<Vec<ChannelRow>>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
-    let rows: Vec<(Uuid, String, String)> = sqlx::query_as(
-        "SELECT id, name, kind FROM notification_channels WHERE namespace_id = $1 ORDER BY name",
-    )
-    .bind(ns)
-    .fetch_all(&state.config)
-    .await
-    .map_err(internal)?;
+    let rows: Vec<(Uuid, String, String)> =
+        sqlx::query_as("SELECT id, name, kind FROM channels WHERE namespace_id = $1 ORDER BY name")
+            .bind(ns)
+            .fetch_all(&state.config)
+            .await
+            .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
             .map(|(id, name, kind)| ChannelRow { id, name, kind })
@@ -467,7 +464,7 @@ pub async fn create_channel(
         return Err(StatusCode::BAD_REQUEST);
     }
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO notification_channels (namespace_id, name, kind, config) \
+        "INSERT INTO channels (namespace_id, name, kind, config) \
          VALUES ($1, $2, $3, $4) RETURNING id",
     )
     .bind(ns)
@@ -488,7 +485,7 @@ pub async fn create_channel(
 pub struct AlertRow {
     pub id: Uuid,
     pub monitor_id: Option<Uuid>,
-    pub server_id: Option<Uuid>,
+    pub system_id: Option<Uuid>,
     pub channel_id: Uuid,
     pub cooldown_secs: i32,
     pub enabled: bool,
@@ -502,10 +499,10 @@ pub async fn list_alerts(
 ) -> Result<Json<Vec<AlertRow>>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
     let rows: Vec<(Uuid, Option<Uuid>, Option<Uuid>, Uuid, i32, bool)> = sqlx::query_as(
-        "SELECT r.id, r.monitor_id, r.server_id, r.channel_id, r.cooldown_secs, r.enabled \
-         FROM alert_rules r \
+        "SELECT r.id, r.monitor_id, r.system_id, r.channel_id, r.cooldown_secs, r.enabled \
+         FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
-         LEFT JOIN servers s ON s.id = r.server_id \
+         LEFT JOIN systems s ON s.id = r.system_id \
          WHERE COALESCE(m.namespace_id, s.namespace_id) = $1",
     )
     .bind(ns)
@@ -515,10 +512,10 @@ pub async fn list_alerts(
     Ok(Json(
         rows.into_iter()
             .map(
-                |(id, monitor_id, server_id, channel_id, cooldown_secs, enabled)| AlertRow {
+                |(id, monitor_id, system_id, channel_id, cooldown_secs, enabled)| AlertRow {
                     id,
                     monitor_id,
-                    server_id,
+                    system_id,
                     channel_id,
                     cooldown_secs,
                     enabled,
@@ -533,7 +530,7 @@ pub struct CreateAlert {
     #[serde(default)]
     pub monitor_id: Option<Uuid>,
     #[serde(default)]
-    pub server_id: Option<Uuid>,
+    pub system_id: Option<Uuid>,
     pub channel_id: Uuid,
     #[serde(default)]
     pub condition: Option<Value>,
@@ -549,12 +546,12 @@ pub async fn create_alert(
     Json(req): Json<CreateAlert>,
 ) -> Result<Json<Uuid>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    if req.monitor_id.is_none() && req.server_id.is_none() {
+    if req.monitor_id.is_none() && req.system_id.is_none() {
         return Err(StatusCode::BAD_REQUEST);
     }
     // The channel must belong to this namespace.
     let ok: Option<(Uuid,)> =
-        sqlx::query_as("SELECT id FROM notification_channels WHERE id = $1 AND namespace_id = $2")
+        sqlx::query_as("SELECT id FROM channels WHERE id = $1 AND namespace_id = $2")
             .bind(req.channel_id)
             .bind(ns)
             .fetch_optional(&state.config)
@@ -565,11 +562,11 @@ pub async fn create_alert(
     }
 
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO alert_rules (monitor_id, server_id, channel_id, condition, cooldown_secs) \
+        "INSERT INTO alerts (monitor_id, system_id, channel_id, condition, cooldown_secs) \
          VALUES ($1, $2, $3, $4, $5) RETURNING id",
     )
     .bind(req.monitor_id)
-    .bind(req.server_id)
+    .bind(req.system_id)
     .bind(req.channel_id)
     .bind(sqlx::types::Json(
         req.condition.unwrap_or_else(|| serde_json::json!({})),
@@ -598,16 +595,16 @@ pub struct PatchServer {
     pub name: String,
 }
 
-/// PATCH /api/servers/:id — rename (cosmetic; namespace is governed by the token).
-pub async fn patch_server(
+/// PATCH /api/systems/:id — rename (cosmetic; namespace is governed by the token).
+pub async fn patch_system(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     Json(req): Json<PatchServer>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(&state, "SELECT namespace_id FROM servers WHERE id = $1", id).await?;
+    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    sqlx::query("UPDATE servers SET name = $2 WHERE id = $1")
+    sqlx::query("UPDATE systems SET name = $2 WHERE id = $1")
         .bind(id)
         .bind(&req.name)
         .execute(&state.config)
@@ -616,16 +613,16 @@ pub async fn patch_server(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// DELETE /api/servers/:id — removes a single server row (it re-registers if its
+/// DELETE /api/systems/:id — removes a single server row (it re-registers if its
 /// agent is still pushing; use token delete to stop enrollment entirely).
-pub async fn delete_server(
+pub async fn delete_system(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(&state, "SELECT namespace_id FROM servers WHERE id = $1", id).await?;
+    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    sqlx::query("DELETE FROM servers WHERE id = $1")
+    sqlx::query("DELETE FROM systems WHERE id = $1")
         .bind(id)
         .execute(&state.config)
         .await
@@ -703,12 +700,12 @@ pub async fn delete_channel(
 ) -> Result<StatusCode, StatusCode> {
     let ns = ns_of(
         &state,
-        "SELECT namespace_id FROM notification_channels WHERE id = $1",
+        "SELECT namespace_id FROM channels WHERE id = $1",
         id,
     )
     .await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    sqlx::query("DELETE FROM notification_channels WHERE id = $1")
+    sqlx::query("DELETE FROM channels WHERE id = $1")
         .bind(id)
         .execute(&state.config)
         .await
@@ -745,14 +742,14 @@ pub async fn delete_alert(
 ) -> Result<StatusCode, StatusCode> {
     let ns = ns_of(
         &state,
-        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alert_rules r \
+        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
-         LEFT JOIN servers s ON s.id = r.server_id WHERE r.id = $1",
+         LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
         id,
     )
     .await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    sqlx::query("DELETE FROM alert_rules WHERE id = $1")
+    sqlx::query("DELETE FROM alerts WHERE id = $1")
         .bind(id)
         .execute(&state.config)
         .await

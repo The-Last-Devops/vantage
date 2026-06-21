@@ -20,7 +20,8 @@ chrono.workspace = true
 uuid.workspace = true
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
-maud = { version = "0.27", features = ["axum"] }
+rust-embed = "8"
+mime_guess = "2"
 argon2 = "0.5"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "trace"] }

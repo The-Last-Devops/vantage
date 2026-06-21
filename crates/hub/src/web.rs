@@ -16,20 +16,20 @@ use crate::auth::CurrentUser;
 use crate::AppState;
 
 /// True if the user may view the given server (admin, or member of its namespace).
-pub async fn can_view_server(
+pub async fn can_view_system(
     state: &AppState,
     user: &CurrentUser,
-    server_id: Uuid,
+    system_id: Uuid,
 ) -> Result<bool, StatusCode> {
     if user.is_admin {
         return Ok(true);
     }
     let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM servers s \
+        "SELECT 1 FROM systems s \
          JOIN memberships m ON m.namespace_id = s.namespace_id \
          WHERE s.id = $1 AND m.user_id = $2",
     )
-    .bind(server_id)
+    .bind(system_id)
     .bind(user.id)
     .fetch_optional(&state.config)
     .await
@@ -56,14 +56,14 @@ pub struct RangeQuery {
     pub range: Option<String>,
 }
 
-/// GET /api/servers/:id/metrics?range=1h|6h|24h — samples for charting (newest last).
-pub async fn server_metrics(
+/// GET /api/systems/:id/metrics?range=1h|6h|24h — samples for charting (newest last).
+pub async fn system_metrics_series(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     axum::extract::Query(q): axum::extract::Query<RangeQuery>,
 ) -> Result<Json<MetricsHistory>, StatusCode> {
-    if !can_view_server(&state, &user, id).await? {
+    if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     let interval = match q.range.as_deref() {
@@ -74,7 +74,7 @@ pub async fn server_metrics(
     let sql = format!(
         "SELECT time, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, \
                 COALESCE(disk_read,0), COALESCE(disk_write,0) \
-         FROM metrics WHERE server_id = $1 AND time > now() - interval '{interval}' \
+         FROM system_metrics WHERE system_id = $1 AND time > now() - interval '{interval}' \
          ORDER BY time ASC LIMIT 2000"
     );
     let rows: Vec<(
@@ -143,30 +143,38 @@ pub async fn server_metrics(
 }
 
 #[derive(Serialize)]
-pub struct ServerRow {
+pub struct SystemRow {
     pub id: Uuid,
     pub name: String,
     pub hostname: Option<String>,
+    pub kind: String,
+    pub cluster: Option<String>,
+    pub agent_version: Option<String>,
     pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
     pub cpu_percent: Option<f64>,
     pub mem_used: Option<i64>,
     pub mem_total: Option<i64>,
+    pub disk_used: Option<i64>,
+    pub disk_total: Option<i64>,
 }
 
-/// GET /api/servers — each server (in namespaces the caller can see) plus its
+/// GET /api/systems — each server (in namespaces the caller can see) plus its
 /// most recent sample. Latest metric is fetched from the data DB per server
 /// (no cross-DB JOIN). Admins see every server.
-pub async fn list_servers(
+pub async fn list_systems(
     State(state): State<AppState>,
     user: CurrentUser,
-) -> Result<Json<Vec<ServerRow>>, StatusCode> {
+) -> Result<Json<Vec<SystemRow>>, StatusCode> {
     let servers: Vec<(
         Uuid,
         String,
         Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
         Option<chrono::DateTime<chrono::Utc>>,
     )> = sqlx::query_as(
-        "SELECT s.id, s.name, s.hostname, s.last_seen FROM servers s \
+        "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, s.agent_version, s.last_seen FROM systems s \
              WHERE $1 OR s.namespace_id IN ( \
                 SELECT namespace_id FROM memberships WHERE user_id = $2) \
              ORDER BY s.name",
@@ -178,28 +186,33 @@ pub async fn list_servers(
     .map_err(internal)?;
 
     let mut rows = Vec::with_capacity(servers.len());
-    for (id, name, hostname, last_seen) in servers {
-        let latest: Option<(f64, i64, i64)> = sqlx::query_as(
-            "SELECT cpu_percent, mem_used, mem_total FROM metrics \
-             WHERE server_id = $1 ORDER BY time DESC LIMIT 1",
+    for (id, name, hostname, kind, cluster, agent_version, last_seen) in servers {
+        let latest: Option<(f64, i64, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT cpu_percent, mem_used, mem_total, disk_used, disk_total FROM system_metrics \
+             WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
         )
         .bind(id)
         .fetch_optional(&state.data)
         .await
         .map_err(internal)?;
 
-        let (cpu_percent, mem_used, mem_total) = match latest {
-            Some((c, u, t)) => (Some(c), Some(u), Some(t)),
-            None => (None, None, None),
+        let (cpu_percent, mem_used, mem_total, disk_used, disk_total) = match latest {
+            Some((c, u, t, du, dt)) => (Some(c), Some(u), Some(t), du, dt),
+            None => (None, None, None, None, None),
         };
-        rows.push(ServerRow {
+        rows.push(SystemRow {
             id,
             name,
             hostname,
+            kind,
+            cluster,
+            agent_version,
             last_seen,
             cpu_percent,
             mem_used,
             mem_total,
+            disk_used,
+            disk_total,
         });
     }
     Ok(Json(rows))
@@ -298,15 +311,15 @@ fn align(
         .collect()
 }
 
-/// GET /api/servers/:id/containers?range= — per-container CPU% and memory,
+/// GET /api/systems/:id/containers?range= — per-container CPU% and memory,
 /// aligned onto one timeline for stacked charts.
-pub async fn server_containers(
+pub async fn system_containers(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     axum::extract::Query(q): axum::extract::Query<RangeQuery>,
 ) -> Result<Json<ContainersHistory>, StatusCode> {
-    if !can_view_server(&state, &user, id).await? {
+    if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     let interval = match q.range.as_deref() {
@@ -315,8 +328,8 @@ pub async fn server_containers(
         _ => "1 hour",
     };
     let sql = format!(
-        "SELECT time, name, cpu_percent, mem_used, net_rx, net_tx FROM container_stats \
-         WHERE server_id = $1 AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 20000"
+        "SELECT time, name, cpu_percent, mem_used, net_rx, net_tx FROM container_metrics \
+         WHERE system_id = $1 AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 20000"
     );
     let rows: Vec<(chrono::DateTime<chrono::Utc>, String, f64, i64, i64, i64)> =
         sqlx::query_as(&sql)
@@ -367,14 +380,14 @@ pub struct TempsHistory {
     pub series: Vec<Series>,
 }
 
-/// GET /api/servers/:id/temps?range= — temperature sensors over time.
-pub async fn server_temps(
+/// GET /api/systems/:id/temps?range= — temperature sensors over time.
+pub async fn system_temps(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     axum::extract::Query(q): axum::extract::Query<RangeQuery>,
 ) -> Result<Json<TempsHistory>, StatusCode> {
-    if !can_view_server(&state, &user, id).await? {
+    if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     let interval = match q.range.as_deref() {
@@ -383,7 +396,7 @@ pub async fn server_temps(
         _ => "1 hour",
     };
     let sql = format!(
-        "SELECT time, temps FROM metrics WHERE server_id = $1 AND temps IS NOT NULL \
+        "SELECT time, temps FROM system_metrics WHERE system_id = $1 AND temps IS NOT NULL \
          AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"
     );
     let rows: Vec<(
@@ -419,14 +432,14 @@ pub struct GpuHistory {
     pub power: Vec<Series>,
 }
 
-/// GET /api/servers/:id/gpu?range= — per-GPU utilization / VRAM% / power.
-pub async fn server_gpu(
+/// GET /api/systems/:id/gpu?range= — per-GPU utilization / VRAM% / power.
+pub async fn system_gpu(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     axum::extract::Query(q): axum::extract::Query<RangeQuery>,
 ) -> Result<Json<GpuHistory>, StatusCode> {
-    if !can_view_server(&state, &user, id).await? {
+    if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
     let interval = match q.range.as_deref() {
@@ -435,7 +448,7 @@ pub async fn server_gpu(
         _ => "1 hour",
     };
     let sql = format!(
-        "SELECT time, gpus FROM metrics WHERE server_id = $1 AND gpus IS NOT NULL \
+        "SELECT time, gpus FROM system_metrics WHERE system_id = $1 AND gpus IS NOT NULL \
          AND gpus <> '[]'::jsonb AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"
     );
     let rows: Vec<(

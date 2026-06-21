@@ -14,7 +14,7 @@ mod db;
 mod ingest;
 mod probe;
 mod rbac;
-mod ui;
+mod spa;
 mod web;
 
 use std::net::SocketAddr;
@@ -53,35 +53,14 @@ async fn main() -> Result<()> {
 
     use axum::routing::{delete, patch, post};
     let app = Router::new()
-        // pages
-        .route("/", get(ui::dashboard))
-        .route("/login", get(ui::login_page))
-        .route("/monitors", get(ui::monitors_page))
-        .route("/manage", get(ui::manage_redirect))
-        .route("/manage/namespaces", get(ui::manage_namespaces))
-        .route("/manage/servers", get(ui::manage_servers))
-        .route("/manage/monitors", get(ui::manage_monitors))
-        .route("/manage/notifications", get(ui::manage_notifications))
-        .route("/manage/members", get(ui::manage_members))
-        .route("/manage/status", get(ui::manage_status))
-        .route("/manage/users", get(ui::manage_users))
-        .route("/manage/data", get(ui::manage_data))
-        .route("/server/{id}", get(ui::server_detail))
-        // public, unauthenticated status page
-        .route("/status/{slug}", get(ui::public_status))
-        // live HTML fragments
-        .route("/ui/hero", get(ui::frag_hero))
-        .route("/ui/servers", get(ui::frag_servers))
-        .route("/ui/monitors", get(ui::frag_monitors))
-        // embedded static assets
-        .route("/static/app.css", get(ui::app_css))
-        .route("/static/htmx.min.js", get(ui::htmx_js))
-        .route("/static/uPlot.iife.min.js", get(ui::uplot_js))
-        .route("/static/uPlot.min.css", get(ui::uplot_css))
         .route("/healthz", get(|| async { "ok" }))
-        // agent ingest (token-authenticated, not session)
+        // agent ingest (api-key-authenticated, not session)
         .route("/api/ingest", post(ingest::ingest))
-        // auth
+        // auth + first-run setup
+        .route(
+            "/api/setup",
+            get(auth::setup_status).post(auth::setup_create),
+        )
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/me", get(auth::me))
@@ -95,12 +74,13 @@ async fn main() -> Result<()> {
             get(api::list_namespaces).post(api::create_namespace),
         )
         .route("/api/namespaces/{id}/members", post(api::add_member))
+        // API keys (reusable; systems auto-register)
         .route(
-            "/api/namespaces/{id}/tokens",
-            get(api::list_tokens).post(api::create_token),
+            "/api/namespaces/{id}/keys",
+            get(api::list_keys).post(api::create_key),
         )
-        .route("/api/tokens/{id}", delete(api::delete_token))
-        .route("/api/tokens/{id}/servers", get(api::token_servers))
+        .route("/api/keys/{id}", delete(api::delete_key))
+        .route("/api/keys/{id}/systems", get(api::key_systems))
         .route("/api/namespaces/{id}/monitors", post(api::create_monitor))
         .route(
             "/api/namespaces/{id}/channels",
@@ -116,8 +96,8 @@ async fn main() -> Result<()> {
         )
         // edit / delete resources
         .route(
-            "/api/servers/{id}",
-            patch(api::patch_server).delete(api::delete_server),
+            "/api/systems/{id}",
+            patch(api::patch_system).delete(api::delete_system),
         )
         .route(
             "/api/monitors/{id}",
@@ -131,13 +111,15 @@ async fn main() -> Result<()> {
             delete(api::delete_member),
         )
         // read views (scoped to caller)
-        .route("/api/servers", get(web::list_servers))
-        .route("/api/servers/{id}/metrics", get(web::server_metrics))
-        .route("/api/servers/{id}/containers", get(web::server_containers))
-        .route("/api/servers/{id}/temps", get(web::server_temps))
-        .route("/api/servers/{id}/gpu", get(web::server_gpu))
+        .route("/api/systems", get(web::list_systems))
+        .route("/api/systems/{id}/metrics", get(web::system_metrics_series))
+        .route("/api/systems/{id}/containers", get(web::system_containers))
+        .route("/api/systems/{id}/temps", get(web::system_temps))
+        .route("/api/systems/{id}/gpu", get(web::system_gpu))
         .route("/api/monitors", get(web::list_monitors))
         .with_state(state)
+        // SPA: anything not matched above is served from the embedded Vue build.
+        .fallback(spa::handler)
         .layer(TraceLayer::new_for_http());
 
     let addr: SocketAddr = std::env::var("BIND_ADDR")

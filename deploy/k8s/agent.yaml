@@ -1,0 +1,71 @@
+# last-monitor agent — DaemonSet (one pod per node, reports host metrics).
+# Edit the 4 placeholders below, then:  kubectl apply -f agent.yaml
+#
+#   <HUB_URL>     URL the cluster can reach the hub at (NOT localhost) e.g. https://mon.example.com
+#   <API_KEY>     key from "Add system → Kubernetes" in the UI
+#   <CLUSTER>     cluster name shown in the dashboard, e.g. prod-cluster
+#   <IMAGE>       agent image, e.g. ghcr.io/the-last-devops/last-monitor-agent:main
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: last-monitor
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: last-agent
+  namespace: last-monitor
+type: Opaque
+stringData:
+  api-key: "<API_KEY>"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: last-agent
+  namespace: last-monitor
+  labels: { app: last-agent }
+spec:
+  selector:
+    matchLabels: { app: last-agent }
+  template:
+    metadata:
+      labels: { app: last-agent }
+    spec:
+      hostNetwork: true              # report host interfaces
+      hostPID: true                  # see host processes (host-level CPU/mem)
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:                   # also run on control-plane nodes
+        - operator: Exists
+      containers:
+        - name: agent
+          image: "<IMAGE>"
+          env:
+            - name: HUB_URL
+              value: "<HUB_URL>"
+            - name: AGENT_KIND
+              value: "k8s"
+            - name: CLUSTER
+              value: "<CLUSTER>"
+            - name: INTERVAL
+              value: "15"
+            - name: DISK_PATH
+              value: "/host"
+            - name: NODE_NAME            # stable identity = k8s node name
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AGENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: last-agent
+                  key: api-key
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: host-root, mountPath: /host, readOnly: true }
+      volumes:
+        - name: host-root
+          hostPath: { path: / }

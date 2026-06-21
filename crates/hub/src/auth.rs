@@ -126,25 +126,9 @@ pub async fn login(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let expires = chrono::Utc::now() + chrono::Duration::days(SESSION_DAYS);
-    sqlx::query("INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)")
-        .bind(&token)
-        .bind(id)
-        .bind(expires)
-        .execute(&state.config)
-        .await
-        .map_err(internal)?;
-
-    let cookie = Cookie::build((SESSION_COOKIE, token))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        // .secure(true) once served over HTTPS
-        .build();
-
+    let jar = mint_session(&state, jar, id).await?;
     Ok((
-        jar.add(cookie),
+        jar,
         Json(CurrentUser {
             id,
             email,
@@ -168,6 +152,87 @@ pub async fn logout(
 
 pub async fn me(user: CurrentUser) -> Json<CurrentUser> {
     Json(user)
+}
+
+// ---- first-run setup --------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct SetupStatus {
+    /// True when no users exist yet → show the "create admin" wizard.
+    pub needs_setup: bool,
+}
+
+/// GET /api/setup — public. Tells the SPA whether to show first-run admin creation.
+pub async fn setup_status(State(state): State<AppState>) -> Json<SetupStatus> {
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(&state.config)
+        .await
+        .unwrap_or((0,));
+    Json(SetupStatus {
+        needs_setup: count.0 == 0,
+    })
+}
+
+/// POST /api/setup — public, but ONLY succeeds while the users table is empty.
+/// Creates the first admin and logs them in (mints a session). Idempotency is by
+/// the empty-table guard: once an admin exists this returns 403.
+pub async fn setup_create(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Json(req): Json<LoginReq>,
+) -> Result<(CookieJar, Json<CurrentUser>), StatusCode> {
+    let count: (i64,) = sqlx::query_as("SELECT count(*) FROM users")
+        .fetch_one(&state.config)
+        .await
+        .map_err(internal)?;
+    if count.0 != 0 {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let email = req.email.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') || req.password.len() < 6 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let hash = hash_password(&req.password).map_err(internal)?;
+    let (id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, password_hash, is_admin) VALUES ($1, $2, true) RETURNING id",
+    )
+    .bind(&email)
+    .bind(&hash)
+    .fetch_one(&state.config)
+    .await
+    .map_err(internal)?;
+    let jar = mint_session(&state, jar, id).await?;
+    Ok((
+        jar,
+        Json(CurrentUser {
+            id,
+            email,
+            is_admin: true,
+        }),
+    ))
+}
+
+/// Creates a session row + sets the httpOnly cookie. Shared by login & setup.
+async fn mint_session(
+    state: &AppState,
+    jar: CookieJar,
+    user_id: Uuid,
+) -> Result<CookieJar, StatusCode> {
+    let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let expires = chrono::Utc::now() + chrono::Duration::days(SESSION_DAYS);
+    sqlx::query("INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)")
+        .bind(&token)
+        .bind(user_id)
+        .bind(expires)
+        .execute(&state.config)
+        .await
+        .map_err(internal)?;
+    let cookie = Cookie::build((SESSION_COOKIE, token))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .build();
+    Ok(jar.add(cookie))
 }
 
 // ---- bootstrap --------------------------------------------------------------
