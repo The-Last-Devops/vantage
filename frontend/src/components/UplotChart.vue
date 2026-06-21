@@ -13,6 +13,7 @@ const props = defineProps({
   syncKey: { type: String, default: '' }, // charts sharing a key sync their cursor
   spanSeconds: { type: Number, default: 0 }, // >0 → x-axis spans the full [now-span, now]
   showLegend: { type: Boolean, default: true },
+  tooltip: { type: Boolean, default: false }, // floating cursor tooltip (overlay charts)
   legendValuesAlways: { type: Boolean, default: true }, // false → show values only on hover
   area: { type: Boolean, default: true }, // false → lines only (cleaner for many-host overlay)
   spanGaps: { type: Boolean, default: false }, // true → connect across missing buckets
@@ -32,6 +33,7 @@ const ui = useUi()
 const el = ref(null)
 const hoverIdx = ref(null) // data index under cursor; null when not hovering
 const lineHover = ref(null) // series name nearest the cursor (local; brightens its legend row)
+const tip = ref({ show: false, x: 0, y: 0, name: '', color: '', val: '', time: '' }) // floating tooltip
 let u = null
 let ro = null
 let zoomed = false // user drag-zoomed → freeze the view; live data keeps appending off-screen
@@ -121,7 +123,24 @@ function opts() {
       { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: 46, values: (_u, vals) => vals.map(fmt) },
     ],
     hooks: {
-      setCursor: [(up) => { hoverIdx.value = up.cursor.idx }],
+      setCursor: [(up) => {
+        hoverIdx.value = up.cursor.idx
+        if (!props.tooltip) return
+        const { idx, left, top } = up.cursor
+        const s = focusIdx ? props.series[focusIdx - 1] : null
+        if (idx == null || !s) { tip.value = { ...tip.value, show: false }; return }
+        const realIdx = Math.max(0, idx - padded.value.prepend)
+        const ts = props.time[realIdx]
+        tip.value = {
+          show: true,
+          x: up.over.offsetLeft + left,
+          y: up.over.offsetTop + top,
+          name: s.name,
+          color: s.color,
+          val: fmt(s.data[realIdx]),
+          time: ts ? new Date(ts * 1000).toLocaleString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '',
+        }
+      }],
       // nearest line under the cursor → brighten its legend row (local only; uPlot's
       // focus.alpha dims the other lines on the canvas). Click on the plot pins it.
       setSeries: [(_up, i, o) => {
@@ -175,7 +194,7 @@ function build() {
   applyFocus()
   applyViewRange()
   u.over.addEventListener('mousedown', () => { dragging = true })
-  u.over.addEventListener('mouseleave', () => { focusIdx = null; lineHover.value = null })
+  u.over.addEventListener('mouseleave', () => { focusIdx = null; lineHover.value = null; tip.value = { ...tip.value, show: false } })
   // a plain click (no drag) on/near a line pins that host; real drags fire no click
   u.over.addEventListener('click', () => { if (focusIdx) emit('legend-toggle', props.series[focusIdx - 1]?.name) })
   // double-click resets the zoom back to the full window
@@ -210,7 +229,14 @@ watch([hoverIdx, cursorTime], () => emit('cursor-time', hoverIdx.value != null ?
 
 <template>
   <div>
-    <div ref="el" class="w-full"></div>
+    <div class="relative">
+      <div ref="el" class="w-full"></div>
+      <!-- floating cursor tooltip (overlay charts): nearest host + value at time -->
+      <div v-if="tooltip && tip.show" class="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+10px)] whitespace-nowrap rounded-md border border-line bg-surface2 px-2 py-1 text-xs shadow-xl" :style="{ left: tip.x + 'px', top: tip.y + 'px' }">
+        <div class="text-faint">{{ tip.time }}</div>
+        <div class="mt-0.5 flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :style="{ background: tip.color }"></span><span class="text-fg">{{ short(tip.name) }}</span><span class="tabular-nums font-medium text-fg">{{ tip.val }}</span></div>
+      </div>
+    </div>
     <!-- fixed-column grid so values appearing on hover never change the row
          count (→ no height jump); the time sits on its own always-present line -->
     <!-- flex-wrap so few series sit on one row; the value slot has a reserved

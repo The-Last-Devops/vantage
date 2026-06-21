@@ -142,10 +142,16 @@ function setFzoom(r) { router.replace({ query: { ...route.query, fzoom: encodeZo
 const headerTime = computed(() => fleetTime.value || (fviewRange.value ? `${fmtTs(fviewRange.value[0])} – ${fmtTs(fviewRange.value[1])}` : 'now'))
 const fleet = ref(null)
 async function loadFleet() { try { fleet.value = await api.get(`/api/fleet?range=${frange.value}`) } catch {} }
-const hostColor = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
+// stable host → color map (by sorted name) so chart lines and table dots match
+const colorOf = computed(() => {
+  const names = [...new Set(servers.value.map((s) => s.name))].sort()
+  const m = {}
+  names.forEach((n, i) => { m[n] = `hsl(${(i * 47) % 360} 70% 58%)` })
+  return m
+})
 // overlay only the hosts that pass the current filter + namespace
 const visibleNames = computed(() => new Set(visible.value.map((s) => s.name)))
-const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s, i) => ({ name: s.name, color: hostColor(i), data: s.data }))
+const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s) => ({ name: s.name, color: colorOf.value[s.name] || '#888', data: s.data }))
 // hover a legend → show only that node on every chart; click → pin (multi), in URL
 const selectedNodes = computed(() => (route.query.fsel || '').split(',').filter(Boolean))
 const hoverNode = ref(null)
@@ -246,7 +252,7 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
         <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div v-for="c in fleetCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
             <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.series.length }} hosts</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-            <UplotChart :time="gappedFleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :legend-values-always="false" :area="false" sync-key="fleet"
+            <UplotChart :time="gappedFleet?.t || []" :series="c.series" :unit="c.unit" :span-seconds="FSPAN[frange]" :show-legend="false" :tooltip="true" :area="false" sync-key="fleet"
               :focus-names="fleetFocus" :selected-names="selectedNodes" :view-range="fviewRange" @legend-hover="hoverNode = $event" @legend-toggle="toggleNode" @cursor-time="fleetTime = $event" @zoom="setFzoom" />
           </div>
         </div>
@@ -269,11 +275,12 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
             </tr></thead>
             <tbody>
               <template v-for="s in sec.rows" :key="s.id">
-                <tr class="lm-row border-b border-line" :class="selected.has(s.id) ? 'sel' : ''">
+                <tr class="lm-row border-b border-line" :class="selected.has(s.id) ? 'sel' : ''" @mouseenter="hoverNode = s.name" @mouseleave="hoverNode = null">
                   <td class="px-3 py-3"><input type="checkbox" :checked="selected.has(s.id)" @change="toggleRow(s.id)" class="h-4 w-4 accent-accent" /></td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5">
                       <button v-if="sec.key === 'docker'" @click="toggleDocker(s)" class="text-muted hover:text-accent"><svg class="h-4 w-4 transition-transform" :class="expanded.has(s.id) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
+                      <button @click="toggleNode(s.name)" :title="selectedNodes.includes(s.name) ? 'Unpin from charts' : 'Pin on charts'" class="h-2.5 w-2.5 shrink-0 rounded-full" :class="selectedNodes.includes(s.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: colorOf[s.name], '--tw-ring-color': colorOf[s.name] }"></button>
                       <RouterLink :to="detailLink(s)" class="flex items-center gap-2.5"><span class="h-2 w-2 rounded-full" :class="online(s)?'bg-accent':'bg-red-500'"></span><span><span class="text-fg">{{ s.name }}</span><span class="block text-xs text-faint">{{ s.hostname }}</span></span></RouterLink>
                     </div>
                   </td>
@@ -318,9 +325,9 @@ const detailLink = (s) => `/system/${s.id}?type=${s.kind}&name=${encodeURICompon
                   <td class="px-4 py-3"><Gauge :v="c.cpu_percent" /></td>
                   <td class="px-4 py-3"><Gauge :v="c.memPct" /></td>
                 </tr>
-                <tr v-for="(n,i) in c.nodes" v-show="expanded.has('k8s:'+c.cluster)" :key="n.id" class="lm-row border-b border-line bg-bg/40">
+                <tr v-for="(n,i) in c.nodes" v-show="expanded.has('k8s:'+c.cluster)" :key="n.id" class="lm-row border-b border-line bg-bg/40" @mouseenter="hoverNode = n.name" @mouseleave="hoverNode = null">
                   <td class="px-3 py-2"><input type="checkbox" :checked="selected.has(n.id)" @change="toggleRow(n.id)" class="h-4 w-4 accent-accent" /></td>
-                  <td class="px-4 py-2"><RouterLink :to="`/system/${n.id}?type=node&name=${encodeURIComponent(n.name)}&parent=${encodeURIComponent(c.cluster)}&ptype=k8s`" class="flex items-center gap-2 pl-6 text-sm text-fg hover:text-accent"><span class="text-faint">{{ i===c.nodes.length-1?'└':'├' }}</span>{{ n.name }}</RouterLink></td>
+                  <td class="px-4 py-2"><div class="flex items-center gap-2 pl-6"><span class="text-faint">{{ i===c.nodes.length-1?'└':'├' }}</span><button @click="toggleNode(n.name)" :title="selectedNodes.includes(n.name) ? 'Unpin' : 'Pin on charts'" class="h-2.5 w-2.5 shrink-0 rounded-full" :class="selectedNodes.includes(n.name) ? 'ring-2 ring-offset-1 ring-offset-surface' : ''" :style="{ background: colorOf[n.name], '--tw-ring-color': colorOf[n.name] }"></button><RouterLink :to="`/system/${n.id}?type=node&name=${encodeURIComponent(n.name)}&parent=${encodeURIComponent(c.cluster)}&ptype=k8s`" class="text-sm text-fg hover:text-accent">{{ n.name }}</RouterLink></div></td>
                   <td class="px-4 py-2 text-sm" :class="online(n)?'text-accent':'text-red-500'">{{ online(n)?'online':'offline' }}</td>
                   <td class="px-4 py-2"><Gauge :v="r(n.cpu_percent)" /></td>
                   <td class="px-4 py-2"><Gauge :v="pct(n.mem_used,n.mem_total)" /></td>
