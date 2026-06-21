@@ -14,6 +14,7 @@ const props = defineProps({
 
 const ui = useUi()
 const el = ref(null)
+const hoverIdx = ref(null) // data index under cursor; null when not hovering
 let u = null
 let ro = null
 
@@ -25,40 +26,44 @@ function fmt(v) {
   if (v == null) return '—'
   if (props.unit === '%' || props.unit === '°C') return Math.round(v) + props.unit
   if (/B\/?s?/.test(props.unit)) {
-    const u = ['B', 'K', 'M', 'G']; let i = 0; let n = v
+    const us = ['B', 'K', 'M', 'G']; let i = 0; let n = v
     while (n >= 1024 && i < 3) { n /= 1024; i++ }
-    return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i] + (props.unit.includes('/s') ? '/s' : '')
+    return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + us[i] + (props.unit.includes('/s') ? '/s' : '')
   }
   return v.toFixed(0) + props.unit
 }
 
 const uData = computed(() => [props.time, ...props.series.map((s) => s.data)])
+// index used for the legend: cursor when hovering, else the latest sample
+const valueIdx = computed(() => (hoverIdx.value != null ? hoverIdx.value : props.time.length - 1))
+const legend = computed(() =>
+  props.series.map((s) => ({ name: s.name, color: s.color, value: fmt(s.data[valueIdx.value]) })),
+)
+const cursorTime = computed(() => {
+  const t = props.time[valueIdx.value]
+  if (!t) return ''
+  const d = new Date(t * 1000)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+})
 
 function opts() {
-  const axis = cssVar('--muted')
-  const grid = cssVar('--line')
+  const axis = cssVar('--muted'), grid = cssVar('--line')
   return {
     width: el.value?.clientWidth || 400,
     height: props.height,
-    padding: [8, 8, 0, 0],
-    legend: { show: true },
+    padding: [10, 8, 0, 0],
+    legend: { show: false }, // we render our own
     cursor: { points: { size: 7 }, focus: { prox: 30 } },
     scales: { x: { time: true } },
     series: [
-      { label: 'time' },
-      ...props.series.map((s) => ({
-        label: s.name,
-        stroke: s.color,
-        width: 1.6,
-        fill: s.color + '22',
-        points: { show: false },
-        value: (_u, v) => fmt(v),
-      })),
+      {},
+      ...props.series.map((s) => ({ label: s.name, stroke: s.color, width: 1.6, fill: s.color + '22', points: { show: false } })),
     ],
     axes: [
       { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace' },
-      { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: 44, values: (_u, vals) => vals.map(fmt) },
+      { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: 46, values: (_u, vals) => vals.map(fmt) },
     ],
+    hooks: { setCursor: [(up) => { hoverIdx.value = up.cursor.idx }] },
   }
 }
 
@@ -74,23 +79,24 @@ onMounted(() => {
   ro.observe(el.value)
 })
 onBeforeUnmount(() => { ro && ro.disconnect(); u && u.destroy() })
-
-// live data updates: just push new data into the existing chart
 watch(uData, (d) => { if (u) u.setData(d) })
-// theme change → rebuild with new axis/grid colors
 watch(() => ui.light, () => build())
 </script>
 
 <template>
-  <div ref="el" class="uplot-host w-full"></div>
+  <div>
+    <div ref="el" class="w-full"></div>
+    <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+      <span v-for="s in legend" :key="s.name" class="flex items-center gap-1.5">
+        <span class="h-2 w-2 rounded-full" :style="{ background: s.color }"></span>
+        <span class="text-muted">{{ s.name }}</span>
+        <span class="tabular-nums text-fg">{{ s.value }}</span>
+      </span>
+      <span class="ml-auto tabular-nums text-faint">{{ hoverIdx != null ? cursorTime : 'now' }}</span>
+    </div>
+  </div>
 </template>
 
 <style>
-/* uPlot legend: blend into the dark/light theme */
-.uplot, .u-legend { font-family: ui-monospace, monospace; }
-.u-legend { color: rgb(var(--muted)); font-size: 11px; }
-.u-legend .u-marker { width: 10px; height: 10px; }
-.u-legend th { color: rgb(var(--fg)); font-weight: 500; }
-.u-legend .u-value { color: rgb(var(--fg)); }
-.u-tooltip { background: rgb(var(--surface2)); color: rgb(var(--fg)); }
+.uplot { font-family: ui-monospace, monospace; }
 </style>

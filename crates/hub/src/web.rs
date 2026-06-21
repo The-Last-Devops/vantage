@@ -56,6 +56,18 @@ pub struct RangeQuery {
     pub range: Option<String>,
 }
 
+/// Maps a UI range key to a Postgres interval. Bounded by raw retention (1 day).
+fn range_interval(range: &Option<String>) -> &'static str {
+    match range.as_deref() {
+        Some("30m") => "30 minutes",
+        Some("3h") => "3 hours",
+        Some("6h") => "6 hours",
+        Some("12h") => "12 hours",
+        Some("24h") => "24 hours",
+        _ => "1 hour",
+    }
+}
+
 /// GET /api/systems/:id/metrics?range=1h|6h|24h — samples for charting (newest last).
 pub async fn system_metrics_series(
     State(state): State<AppState>,
@@ -66,11 +78,7 @@ pub async fn system_metrics_series(
     if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
-    let interval = match q.range.as_deref() {
-        Some("6h") => "6 hours",
-        Some("24h") => "24 hours",
-        _ => "1 hour",
-    };
+    let interval = range_interval(&q.range);
     let sql = format!(
         "SELECT time, cpu_percent, mem_used, mem_total, disk_used, disk_total, net_rx, net_tx, \
                 COALESCE(disk_read,0), COALESCE(disk_write,0) \
@@ -322,11 +330,7 @@ pub async fn system_containers(
     if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
-    let interval = match q.range.as_deref() {
-        Some("6h") => "6 hours",
-        Some("24h") => "24 hours",
-        _ => "1 hour",
-    };
+    let interval = range_interval(&q.range);
     let sql = format!(
         "SELECT time, name, cpu_percent, mem_used, net_rx, net_tx FROM container_metrics \
          WHERE system_id = $1 AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 20000"
@@ -390,11 +394,7 @@ pub async fn system_temps(
     if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
-    let interval = match q.range.as_deref() {
-        Some("6h") => "6 hours",
-        Some("24h") => "24 hours",
-        _ => "1 hour",
-    };
+    let interval = range_interval(&q.range);
     let sql = format!(
         "SELECT time, temps FROM system_metrics WHERE system_id = $1 AND temps IS NOT NULL \
          AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"
@@ -442,11 +442,7 @@ pub async fn system_gpu(
     if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
-    let interval = match q.range.as_deref() {
-        Some("6h") => "6 hours",
-        Some("24h") => "24 hours",
-        _ => "1 hour",
-    };
+    let interval = range_interval(&q.range);
     let sql = format!(
         "SELECT time, gpus FROM system_metrics WHERE system_id = $1 AND gpus IS NOT NULL \
          AND gpus <> '[]'::jsonb AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"

@@ -1,21 +1,24 @@
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import UplotChart from '../components/UplotChart.vue'
 import Gauge from '../components/Gauge.vue'
 
 const route = useRoute()
+const router = useRouter()
 const id = computed(() => route.params.id)
 const type = computed(() => route.query.type || 'node')
 const name = computed(() => route.query.name || id.value)
 const parent = computed(() => route.query.parent || '')
 const ptype = computed(() => route.query.ptype || '')
 const TYPE_LABEL = { node: 'Node', host: 'Host', docker: 'Docker', k8s: 'Kubernetes', container: 'Container' }
-const RANGES = [['1h', '1m'], ['6h', '5m'], ['24h', '15m']]
-const range = ref('6h')
+const RANGES = [['30m', '1m'], ['1h', '1m'], ['3h', '1m'], ['6h', '5m'], ['12h', '5m'], ['24h', '15m']]
+// range persisted in the URL so F5 keeps it
+const range = computed(() => route.query.range || '6h')
 const resOf = computed(() => RANGES.find(([r]) => r === range.value)?.[1] || '1m')
+function setRange(r) { router.replace({ query: { ...route.query, range: r } }) }
 
 const metrics = ref(null)
 const containersList = ref([])
@@ -32,9 +35,11 @@ const hostCharts = computed(() => {
   const m = metrics.value
   if (!m) return []
   return [
-    { title: 'CPU Usage', sub: 'overall %', unit: '%', series: [{ name: 'total', color: C.teal, data: m.cpu }] },
-    { title: 'Memory', sub: 'used %', unit: '%', series: [{ name: 'RAM', color: C.teal, data: m.mem_pct }] },
-    { title: 'Disk Usage', sub: 'used %', unit: '%', series: [{ name: 'used', color: C.teal, data: m.disk_pct }] },
+    { title: 'Utilization', sub: 'CPU / memory / disk %', unit: '%', series: [
+      { name: 'CPU', color: C.teal, data: m.cpu },
+      { name: 'Memory', color: C.blue, data: m.mem_pct },
+      { name: 'Disk', color: C.purple, data: m.disk_pct },
+    ] },
     { title: 'Disk I/O', sub: 'read / write', unit: 'B/s', series: [{ name: 'read', color: C.teal, data: m.dr }, { name: 'write', color: C.amber, data: m.dw }] },
     { title: 'Network', sub: 'rx / tx', unit: 'B/s', series: [{ name: 'rx', color: C.teal, data: m.net_rx }, { name: 'tx', color: C.blue, data: m.net_tx }] },
   ]
@@ -97,9 +102,9 @@ async function reload() {
   if (type.value === 'docker') await loadContainers()
 }
 let timer = null
-onMounted(() => { reload(); timer = setInterval(reload, 5000) })
+onMounted(() => { reload(); timer = setInterval(reload, 2000) })
 onBeforeUnmount(() => clearInterval(timer))
-watch(range, reload)
+// range lives in the URL → fullPath changes cover both range switch and navigation
 watch(() => route.fullPath, () => { metrics.value = null; containersList.value = []; reload() })
 </script>
 
@@ -129,7 +134,7 @@ watch(() => route.fullPath, () => { metrics.value = null; containersList.value =
     <!-- range (charts views) -->
     <div v-if="['node','host','container'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
       <div class="flex rounded-lg border border-line bg-surface2 p-0.5 text-sm">
-        <button v-for="[rr] in RANGES" :key="rr" @click="range = rr" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
+        <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
       </div>
       <span class="text-xs text-muted">Resolution <span class="rounded bg-surface2 px-1.5 py-0.5 text-fg">{{ resOf }}</span></span>
       <span class="ml-auto flex items-center gap-1.5 text-xs text-accent"><span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>Live 1s</span>
