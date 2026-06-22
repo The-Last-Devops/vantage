@@ -54,15 +54,17 @@ jobs:
           key: build
       - run: cargo build --workspace --release
 
-  # Build & push dev images to GHCR on every main commit. One job per component,
-  # multi-arch via QEMU. cargo-chef caches the dependency layer so the emulated
-  # arm64 build only recompiles the workspace crates (fast). The hub runs
-  # centrally (amd64 only); only the agent needs arm64.
+  # Build each arch on its NATIVE runner (no QEMU = fast), push by digest, then the
+  # manifest job stitches them into one multi-arch tag. The Docker Hub login makes
+  # the buildx engine image (moby/buildkit, a Docker Hub image — NOT ours) pull
+  # reliably instead of hitting anonymous rate-limits/blips. Add repo secrets
+  # DOCKERHUB_USERNAME + DOCKERHUB_TOKEN to enable it (skipped if unset).
+  # hub runs centrally (amd64 only); only the agent needs arm64.
   image:
-    name: Image (${{ matrix.component }})
+    name: Image ${{ matrix.component }} (${{ matrix.arch }})
     if: github.event_name == 'push'
     needs: [fmt, clippy, test]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -70,10 +72,69 @@ jobs:
       fail-fast: false
       matrix:
         component: [hub, agent]
+        arch: [amd64, arm64]
+        exclude:
+          - component: hub
+            arch: arm64
+    env:
+      IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
+      - name: Docker Hub login (reliable buildkit image pull)
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: deploy/Dockerfile.${{ matrix.component }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.component }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}-${{ matrix.arch }}
+      - name: Export digest
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"   # filename can't contain ':'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.component }}-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  # Stitch the per-arch digests into one multi-arch tag (:main, :sha). imagetools is
+  # a pure registry op — no builder/buildkit pull needed, so no Docker Hub dep here.
+  manifest:
+    name: Manifest (${{ matrix.component }})
+    if: github.event_name == 'push'
+    needs: [image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [hub, agent]
+    env:
+      IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-${{ matrix.component }}-*
+          merge-multiple: true
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -82,18 +143,17 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=main
             type=sha
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/Dockerfile.${{ matrix.component }}
-          # hub runs centrally (amd64); only the agent needs arm64.
-          platforms: ${{ matrix.component == 'agent' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Create manifest list
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(for f in *; do printf '%s@sha256:%s ' "$IMAGE" "$f"; done)
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+      - name: Inspect
+        run: docker buildx imagetools inspect "$IMAGE:main"
