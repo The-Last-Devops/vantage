@@ -158,7 +158,7 @@ let hoverTimer = null
 function onLegendHover(name) {
   clearTimeout(hoverTimer)
   if (!name) { hoverNode.value = null; return }
-  hoverTimer = setTimeout(() => { hoverNode.value = name }, 200)
+  hoverTimer = setTimeout(() => { hoverNode.value = name }, 500)
 }
 const fleetTime = ref('') // hovered timestamp (empty when not hovering)
 const fmtTs = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
