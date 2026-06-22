@@ -1,0 +1,63 @@
+{{- if .Values.timescaledb.enabled }}
+{{- /*
+  Two separate Postgres instances, matching the app's two-database split:
+    - config DB: plain Postgres (users, RBAC, config, alert rules, status pages)
+    - data DB:   TimescaleDB (metrics & heartbeat hypertables)
+  Each gets its own Service, StatefulSet, and PVC so they can scale/move
+  independently. They never JOIN — related only by IDs at the app layer.
+*/}}
+{{- range $role := (list "config" "data") }}
+{{- $isData := eq $role "data" }}
+{{- $name := ternary (include "lm.dbData" $) (include "lm.dbConfig" $) $isData }}
+{{- $image := ternary $.Values.timescaledb.image $.Values.timescaledb.configImage $isData }}
+{{- $storage := ternary $.Values.timescaledb.dataStorage $.Values.timescaledb.configStorage $isData }}
+{{- $database := printf "lastmon_%s" $role }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector: { app: {{ $name }} }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels: { app: {{ $name }} }
+  template:
+    metadata:
+      labels: { app: {{ $name }} }
+    spec:
+      containers:
+        - name: db
+          image: {{ $image }}
+          env:
+            - { name: POSTGRES_USER, value: lastmon }
+            - { name: POSTGRES_PASSWORD, value: {{ include "lm.dbPassword" $ | quote }} }
+            - { name: POSTGRES_DB, value: {{ $database }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "lastmon"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $.Values.timescaledb.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $storage }}
+{{- end }}
+{{- end }}

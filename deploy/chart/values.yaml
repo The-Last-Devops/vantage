@@ -16,12 +16,16 @@ admin:
 apiKey: ""
 cluster: my-cluster
 
+# Two separate in-cluster Postgres instances (config + data), each its own PVC.
+# Set enabled=false to use external databases (hub.configDatabaseUrl/dataDatabaseUrl).
 timescaledb:
-  enabled: true                       # set false to use an external DB
-  image: timescale/timescaledb:latest-pg16
+  enabled: true
+  image: timescale/timescaledb:latest-pg16   # data DB (metrics/heartbeat hypertables)
+  configImage: postgres:16-alpine            # config DB (plain Postgres)
   password: ""                        # leave empty — auto-generated, stable across upgrades
-  storage: 5Gi
-  storageClass: ""                    # "" = cluster default
+  storageClass: ""                    # "" = cluster default; applies to both DBs
+  configStorage: 1Gi                  # config DB volume (small: users/config/rules)
+  dataStorage: 5Gi                    # data DB volume (grows with metrics history)
 
 hub:
   replicas: 1

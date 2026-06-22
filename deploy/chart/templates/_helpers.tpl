@@ -1,5 +1,6 @@
 {{- define "lm.name" -}}{{ .Release.Name }}{{- end -}}
-{{- define "lm.db" -}}{{ .Release.Name }}-db{{- end -}}
+{{- define "lm.dbConfig" -}}{{ .Release.Name }}-db-config{{- end -}}
+{{- define "lm.dbData" -}}{{ .Release.Name }}-db-data{{- end -}}
 {{- define "lm.hub" -}}{{ .Release.Name }}-hub{{- end -}}
 
 {{- /*
@@ -25,13 +26,13 @@
 
 {{- define "lm.configUrl" -}}
 {{- if .Values.timescaledb.enabled -}}
-postgres://lastmon:{{ include "lm.dbPassword" . }}@{{ include "lm.db" . }}:5432/lastmon_config
+postgres://lastmon:{{ include "lm.dbPassword" . }}@{{ include "lm.dbConfig" . }}:5432/lastmon_config
 {{- else -}}{{ .Values.hub.configDatabaseUrl }}{{- end -}}
 {{- end -}}
 
 {{- define "lm.dataUrl" -}}
 {{- if .Values.timescaledb.enabled -}}
-postgres://lastmon:{{ include "lm.dbPassword" . }}@{{ include "lm.db" . }}:5432/lastmon_data
+postgres://lastmon:{{ include "lm.dbPassword" . }}@{{ include "lm.dbData" . }}:5432/lastmon_data
 {{- else -}}{{ .Values.hub.dataDatabaseUrl }}{{- end -}}
 {{- end -}}
 
