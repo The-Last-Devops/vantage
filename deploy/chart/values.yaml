@@ -19,7 +19,7 @@ cluster: my-cluster
 timescaledb:
   enabled: true                       # set false to use an external DB
   image: timescale/timescaledb:latest-pg16
-  password: lastmon
+  password: ""                        # leave empty — auto-generated, stable across upgrades
   storage: 5Gi
   storageClass: ""                    # "" = cluster default
 

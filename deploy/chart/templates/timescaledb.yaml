@@ -38,7 +38,7 @@ spec:
           image: {{ .Values.timescaledb.image }}
           env:
             - { name: POSTGRES_USER, value: lastmon }
-            - { name: POSTGRES_PASSWORD, value: {{ .Values.timescaledb.password | quote }} }
+            - { name: POSTGRES_PASSWORD, value: {{ include "lm.dbPassword" . | quote }} }
             - { name: POSTGRES_DB, value: lastmon_config }
           ports: [{ containerPort: 5432 }]
           volumeMounts:
