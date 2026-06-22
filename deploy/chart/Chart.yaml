@@ -1,6 +1,6 @@
 apiVersion: v2
 name: last-monitor
-description: last-monitor hub + TimescaleDB + agent DaemonSet
+description: last-monitor hub + its config/data databases (agents deploy separately)
 type: application
 version: 0.1.0
 appVersion: "main"

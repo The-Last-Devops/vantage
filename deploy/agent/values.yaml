@@ -1,0 +1,23 @@
+# last-monitor AGENT chart — deploy after the hub, with a token you create in the
+# UI under Add System. One DaemonSet pod runs per node and pushes host metrics.
+
+image: ghcr.io/the-last-devops/last-monitor-agent:main
+pullPolicy: IfNotPresent
+pullSecrets: []          # e.g. [ghcr] for private packages
+
+# Where the hub is reachable from inside this cluster.
+#  - same cluster as the hub:  http://<release>-hub.<hub-namespace>:8080
+#  - different cluster:         the hub's public URL, e.g. https://monitor.senprints.net
+hubUrl: ""
+
+# Enrollment token from the UI (Add System). Required.
+token: ""
+
+# Label that groups this cluster's nodes in the UI (Kubernetes › <cluster>).
+cluster: my-cluster
+
+interval: 15             # seconds between metric pushes
+
+resources:
+  requests: { cpu: 20m, memory: 32Mi }
+  limits: { memory: 128Mi }

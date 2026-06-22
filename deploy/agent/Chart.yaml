@@ -1,0 +1,6 @@
+apiVersion: v2
+name: last-monitor-agent
+description: last-monitor agent DaemonSet — one pod per node, pushes metrics to a hub
+type: application
+version: 0.1.0
+appVersion: "main"

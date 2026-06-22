@@ -1,6 +1,9 @@
+# last-monitor HUB chart — installs the hub + its two databases only.
+# Agents are deployed separately (deploy/agent) with a token created in the UI
+# under Add System.
+
 image:
   hub: ghcr.io/the-last-devops/last-monitor-hub:main
-  agent: ghcr.io/the-last-devops/last-monitor-agent:main
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]
@@ -10,11 +13,6 @@ image:
 admin:
   email: admin@local
   password: ""
-
-# Agent enrollment key. Leave empty — the chart auto-generates one (kept stable
-# across upgrades) so agents enroll with no manual step. Set to override.
-apiKey: ""
-cluster: my-cluster
 
 # Two separate in-cluster Postgres instances (config + data), each its own PVC.
 # Set enabled=false to use external databases (hub.configDatabaseUrl/dataDatabaseUrl).
@@ -42,7 +40,3 @@ hub:
     host: ""                          # e.g. mon.example.com
     annotations: {}                   # e.g. cert-manager.io/cluster-issuer: letsencrypt
     tls: false                        # true → terminate HTTPS using <release>-tls secret
-
-agent:
-  enabled: true
-  interval: 15

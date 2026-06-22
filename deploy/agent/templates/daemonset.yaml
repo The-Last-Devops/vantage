@@ -1,0 +1,54 @@
+{{- if not .Values.hubUrl }}{{ fail "set hubUrl to where the hub is reachable (e.g. --set hubUrl=https://monitor.senprints.net)" }}{{- end }}
+{{- if not .Values.token }}{{ fail "set token to an enrollment token created in the UI under Add System (--set token=...)" }}{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}
+type: Opaque
+stringData:
+  token: {{ .Values.token | quote }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}
+  labels: { app: {{ .Release.Name }} }
+spec:
+  selector:
+    matchLabels: { app: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }} }
+    spec:
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: agent
+          image: {{ .Values.image }}
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          env:
+            - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
+            - { name: AGENT_KIND, value: "k8s" }
+            - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
+            - { name: INTERVAL, value: {{ .Values.interval | quote }} }
+            - { name: DISK_PATH, value: "/host" }
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: AGENT_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ .Release.Name }}, key: token } }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: host-root, mountPath: /host, readOnly: true }
+      volumes:
+        - name: host-root
+          hostPath: { path: / }

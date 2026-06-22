@@ -67,10 +67,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # Helm chart published as an OCI artifact to GHCR (public alongside the images).
-  # Install: helm install lm oci://ghcr.io/<owner>/charts/last-monitor --version <tag>
-  chart:
-    name: Publish Helm chart
+  # Helm charts published as OCI artifacts to GHCR (public alongside the images).
+  #   hub:   helm install lm oci://ghcr.io/<owner>/charts/last-monitor --version <tag>
+  #   agent: helm install lm-agent oci://ghcr.io/<owner>/charts/last-monitor-agent --version <tag>
+  charts:
+    name: Publish Helm charts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,5 +80,8 @@ jobs:
       - name: Package & push
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          helm package deploy/chart --version "$VERSION" --app-version "$VERSION"
+          for c in chart agent; do
+            helm package "deploy/$c" --version "$VERSION" --app-version "$VERSION"
+          done
           helm push "last-monitor-${VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+          helm push "last-monitor-agent-${VERSION}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
