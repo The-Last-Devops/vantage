@@ -90,30 +90,35 @@ pub struct NamespaceRow {
     pub id: Uuid,
     pub name: String,
     pub role: String,
+    pub system_count: i64,
+    pub member_count: i64,
 }
 
-/// GET /api/namespaces — namespaces visible to the caller (all for admins).
+/// GET /api/namespaces — namespaces visible to the caller (all for admins),
+/// each with its system and member counts for the management view.
 pub async fn list_namespaces(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<Vec<NamespaceRow>>, StatusCode> {
-    let rows: Vec<(Uuid, String, Option<String>)> = if user.is_admin {
-        sqlx::query_as(
-            "SELECT n.id, n.name, m.role::text \
+    let counts = "(SELECT count(*) FROM systems s WHERE s.namespace_id = n.id), \
+                  (SELECT count(*) FROM memberships mm WHERE mm.namespace_id = n.id)";
+    let rows: Vec<(Uuid, String, Option<String>, i64, i64)> = if user.is_admin {
+        sqlx::query_as(&format!(
+            "SELECT n.id, n.name, m.role::text, {counts} \
              FROM namespaces n \
              LEFT JOIN memberships m ON m.namespace_id = n.id AND m.user_id = $1 \
              ORDER BY n.name",
-        )
+        ))
         .bind(user.id)
         .fetch_all(&state.config)
         .await
     } else {
-        sqlx::query_as(
-            "SELECT n.id, n.name, m.role::text \
+        sqlx::query_as(&format!(
+            "SELECT n.id, n.name, m.role::text, {counts} \
              FROM namespaces n \
              JOIN memberships m ON m.namespace_id = n.id \
              WHERE m.user_id = $1 ORDER BY n.name",
-        )
+        ))
         .bind(user.id)
         .fetch_all(&state.config)
         .await
@@ -122,10 +127,12 @@ pub async fn list_namespaces(
 
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, role)| NamespaceRow {
+            .map(|(id, name, role, system_count, member_count)| NamespaceRow {
                 id,
                 name,
                 role: role.unwrap_or_else(|| "admin".into()),
+                system_count,
+                member_count,
             })
             .collect(),
     ))
@@ -196,7 +203,47 @@ pub async fn create_namespace(
         id,
         name: req.name,
         role: "owner".into(),
+        system_count: 0,
+        member_count: 1,
     }))
+}
+
+/// DELETE /api/namespaces/:id — owners (and admins) only. Refuses to delete the
+/// 'default' namespace, or any namespace that still has systems attached
+/// (avoids cascading away live hosts by accident).
+pub async fn delete_namespace(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    rbac::require_role(&state, &user, id, Role::Owner).await?;
+
+    let (name,): (String,) = sqlx::query_as("SELECT name FROM namespaces WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&state.config)
+        .await
+        .map_err(internal)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if name == "default" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let (systems,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM systems WHERE namespace_id = $1")
+            .bind(id)
+            .fetch_one(&state.config)
+            .await
+            .map_err(internal)?;
+    if systems > 0 {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    sqlx::query("DELETE FROM namespaces WHERE id = $1")
+        .bind(id)
+        .execute(&state.config)
+        .await
+        .map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ---- members ----------------------------------------------------------------

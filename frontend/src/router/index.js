@@ -5,6 +5,7 @@ const routes = [
   { path: '/login', name: 'login', component: () => import('../pages/Login.vue'), meta: { public: true } },
   { path: '/', name: 'systems', component: () => import('../pages/Systems.vue') },
   { path: '/system/:id', name: 'system', component: () => import('../pages/SystemDetail.vue') },
+  { path: '/namespaces', name: 'namespaces', component: () => import('../pages/Namespaces.vue') },
 ]
 
 const router = createRouter({

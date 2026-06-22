@@ -209,20 +209,17 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
 </script>
 
 <template>
-  <AppShell :title="name">
+  <AppShell :title="name" hide-title>
+    <!-- breadcrumb sits in the top bar (left); status on the right -->
     <template #title-after>
-      <!-- type + cluster: click to filter the fleet (Systems) page -->
-      <RouterLink v-if="kind !== 'container'" :to="{ path: '/', query: { q: `kind:${kind}` } }" :title="`Filter kind:${kind}`" class="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent hover:bg-accent/20">{{ typeLabel }}</RouterLink>
-      <span v-else class="rounded bg-accent/10 px-2 py-0.5 text-xs text-accent">{{ typeLabel }}</span>
-      <RouterLink v-if="ptype === 'k8s' && parent" :to="{ path: '/', query: { q: `cluster:${parent}` } }" :title="`Filter cluster:${parent}`" class="rounded bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">{{ parent }}</RouterLink>
-      <RouterLink v-if="meta && meta.namespace" :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" :title="`Filter ns:${meta.namespace}`" class="rounded bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">{{ meta.namespace }}</RouterLink>
+      <nav class="flex items-center gap-1.5 text-base font-semibold">
+        <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="text-muted hover:text-accent">Systems</RouterLink>
+        <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
+      </nav>
+    </template>
+    <template #header>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusUp ? 'bg-accent' : 'bg-red-500'"></span><span class="text-xs font-medium" :class="statusUp ? 'text-accent' : 'text-red-500'">{{ statusUp ? 'Up' : 'Down' }}</span></span>
     </template>
-    <!-- breadcrumb (simple: back to the fleet) -->
-    <nav class="mb-4 flex items-center gap-1.5 text-sm text-muted">
-      <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="hover:text-accent">Systems</RouterLink>
-      <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
-    </nav>
 
     <!-- node metadata — every field links to the fleet filtered by that value -->
     <div v-if="meta && type !== 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">

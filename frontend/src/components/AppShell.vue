@@ -5,7 +5,10 @@ import { api } from '../lib/api'
 import { useAuth } from '../stores/auth'
 import { useUi } from '../stores/ui'
 
-const props = defineProps({ title: { type: String, default: '' } })
+const props = defineProps({
+  title: { type: String, default: '' },
+  hideTitle: { type: Boolean, default: false },
+})
 
 const auth = useAuth()
 const ui = useUi()
@@ -69,14 +72,34 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
         <span class="text-base font-semibold tracking-tight text-fg">Last Monitor</span>
       </div>
 
-      <!-- namespace multi-select -->
-      <div ref="nsRef" class="relative px-3 pb-2">
+      <!-- nav -->
+      <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-2">
+        <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent" exact-active-class="!bg-accent/10 font-medium !text-accent">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          Systems
+        </RouterLink>
+        <div class="px-3 pb-1 pt-4 text-[11px] uppercase tracking-wider text-faint">Manage</div>
+        <RouterLink :to="{ name: 'namespaces' }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+          Namespaces
+        </RouterLink>
+        <!-- not built yet: disabled placeholders, no dead links -->
+        <span title="Systems config — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Systems<span class="lm-soon-pill">soon</span></span>
+        <span title="Notifications — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Notifications<span class="lm-soon-pill">soon</span></span>
+        <span title="Members — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Members<span class="lm-soon-pill">soon</span></span>
+        <span title="Data &amp; retention — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg>Data &amp; retention<span class="lm-soon-pill">soon</span></span>
+      </nav>
+
+      <!-- namespace multi-select — at the bottom so its dropdown opens upward
+           and never covers the nav links -->
+      <div ref="nsRef" class="relative border-t border-line px-3 py-2">
+        <div class="px-1 pb-1 text-[11px] uppercase tracking-wider text-faint">Namespace</div>
         <button @click="nsOpen = !nsOpen"
-          class="relative z-30 flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg hover:border-accent/50">
+          class="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg hover:border-accent/50">
           <span class="flex min-w-0 items-center gap-2"><span class="h-2 w-2 shrink-0 rounded-full bg-accent"></span><span class="truncate">{{ nsLabel }}</span></span>
-          <svg class="h-4 w-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+          <svg class="h-4 w-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
         </button>
-        <div v-if="nsOpen" class="absolute left-3 right-3 z-30 mt-1 overflow-hidden rounded-lg border border-line bg-surface2 py-1 shadow-xl">
+        <div v-if="nsOpen" class="absolute bottom-full left-3 right-3 z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-line bg-surface2 py-1 shadow-xl">
           <button @click="toggleAllNs()" class="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left text-sm hover:bg-surface" :class="allChecked ? 'text-accent' : 'text-muted'">
             <span class="grid h-4 w-4 place-items-center rounded border" :class="allChecked ? 'border-accent bg-accent' : 'border-line'"></span>All namespaces
           </button>
@@ -86,21 +109,6 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
           </button>
         </div>
       </div>
-
-      <!-- nav -->
-      <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent" exact-active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          Systems
-        </RouterLink>
-        <div class="px-3 pb-1 pt-4 text-[11px] uppercase tracking-wider text-faint">Manage</div>
-        <!-- not built yet: disabled placeholders, no dead links -->
-        <span title="Namespaces — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg>Namespaces<span class="lm-soon-pill">soon</span></span>
-        <span title="Systems config — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Systems<span class="lm-soon-pill">soon</span></span>
-        <span title="Notifications — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Notifications<span class="lm-soon-pill">soon</span></span>
-        <span title="Members — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Members<span class="lm-soon-pill">soon</span></span>
-        <span title="Data &amp; retention — coming soon" class="lm-soon"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg>Data &amp; retention<span class="lm-soon-pill">soon</span></span>
-      </nav>
 
       <div class="border-t border-line p-3">
         <div class="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
@@ -118,7 +126,7 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
           <button @click="drawer = true" class="rounded-lg border border-line bg-surface2 p-1.5 text-muted hover:text-accent md:hidden">
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
           </button>
-          <h1 class="text-lg font-semibold text-fg">{{ title }}</h1>
+          <h1 v-if="title && !hideTitle" class="text-lg font-semibold text-fg">{{ title }}</h1>
           <slot name="title-after" />
         </div>
         <div class="flex items-center gap-3">

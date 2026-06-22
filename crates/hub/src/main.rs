@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
             "/api/namespaces",
             get(api::list_namespaces).post(api::create_namespace),
         )
+        .route("/api/namespaces/{id}", delete(api::delete_namespace))
         .route("/api/namespaces/{id}/members", post(api::add_member))
         // API keys (reusable; systems auto-register)
         .route(
