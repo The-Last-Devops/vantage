@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { api } from '../lib/api'
 
 const emit = defineEmits(['close'])
@@ -26,7 +26,7 @@ const METHODS = {
 }
 
 const namespaces = ref([])
-const state = reactive({ type: 'node', method: 0, name: '', nsId: '', cluster: '', key: '', busy: false, error: '' })
+const state = reactive({ type: 'node', method: 0, name: '', nsId: '', cluster: '', key: '', keyId: '', connected: [], busy: false, error: '' })
 const cfg = computed(() => TYPES.find((t) => t.id === state.type))
 const methods = computed(() => METHODS[state.type])
 const snippet = computed(() => (state.key ? methods.value[state.method].snippet(state.key) : ''))
@@ -38,7 +38,7 @@ onMounted(async () => {
   } catch { namespaces.value = [] }
 })
 
-function pickType(t) { state.type = t; state.method = 0; state.key = '' }
+function pickType(t) { state.type = t; state.method = 0; state.key = ''; stopPolling(); state.connected = [] }
 
 async function createKey() {
   if (!state.nsId) { state.error = 'Pick a namespace'; return }
@@ -49,10 +49,29 @@ async function createKey() {
     const name = (label || `${state.type}-key`).slice(0, 64)
     const res = await api.post(`/api/namespaces/${state.nsId}/keys`, { name })
     state.key = res.key
+    state.keyId = res.id
+    startPolling()
   } catch (e) {
     state.error = 'Could not create key (need editor role)'
   } finally { state.busy = false }
 }
+
+// Poll the new key for enrolled hosts so the "waiting" box flips to success the
+// moment the agent checks in.
+let pollTimer = null
+function startPolling() {
+  stopPolling()
+  const tick = async () => {
+    try {
+      const r = await api.get(`/api/keys/${state.keyId}/systems`)
+      state.connected = r.systems || []
+    } catch {}
+  }
+  tick()
+  pollTimer = setInterval(tick, 3000)
+}
+function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+onBeforeUnmount(stopPolling)
 
 function copy(ev) {
   navigator.clipboard?.writeText(snippet.value)
@@ -107,9 +126,16 @@ function copy(ev) {
               <button @click="copy" class="rounded-md border border-line bg-surface2 px-2 py-1 text-xs text-muted hover:text-accent">Copy</button>
             </div>
             <pre class="overflow-x-auto rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">{{ snippet }}</pre>
-            <div class="mt-3 flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-xs text-muted">
+            <div v-if="!state.connected.length" class="mt-3 flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-xs text-muted">
               <span class="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500"></span>
               Waiting for first check-in… it will appear in the list automatically.
+            </div>
+            <div v-else class="mt-3 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2.5 text-xs text-accent">
+              <div class="flex items-center gap-2 font-medium">
+                <svg class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg>
+                {{ state.connected.length }} node{{ state.connected.length > 1 ? 's' : '' }} connected
+              </div>
+              <div class="mt-1 truncate text-muted">{{ state.connected.slice(0, 4).join(', ') }}<span v-if="state.connected.length > 4"> +{{ state.connected.length - 4 }}</span></div>
             </div>
           </div>
         </div>
