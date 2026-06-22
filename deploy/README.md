@@ -38,24 +38,26 @@ Nothing required to set:
 In the UI: **Add System** → choose namespace/kind → copy the **API key**.
 One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cluster>**.
 
-## 3. Install the agent (Helm)
-`deploy/agent` is a DaemonSet — one pod per node. Point it at the hub and pass the API key.
+## 3. Install the agent
 
+**Easiest — the hub serves a ready-to-apply manifest** (this is what the UI shows):
 ```bash
-# Hub in the SAME cluster — reach it over the in-cluster Service:
-helm install lm-agent ./deploy/agent \
-  --namespace last-monitor \
-  --set hubUrl=http://lm-hub.last-monitor:8080 \
-  --set apiKey=<api-key-from-Add-System> \
-  --set cluster=senprints
+kubectl apply -f "https://monitor.senprints.net/k8s/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
+```
+The hub fills in its own URL, the key, and the cluster — no clone, no chart registry.
 
-# Hub elsewhere — use its public URL:
-#   --set hubUrl=https://monitor.senprints.net
+**Helm** (if you prefer a release you manage) — `deploy/agent` is the same DaemonSet:
+```bash
+helm install lm-agent ./deploy/agent \
+  --namespace last-monitor --create-namespace \
+  --set hubUrl=https://monitor.senprints.net \
+  --set apiKey=<api-key-from-Add-System> \
+  --set cluster=k8s-hanoi
+# same cluster as the hub? use the in-cluster Service: --set hubUrl=http://lm-hub.last-monitor:8080
 ```
 
-For a single host outside k8s, run the agent container/binary directly:
-`HUB_URL=... API_KEY=<api-key> CLUSTER=... last-agent` (see the top-level README),
-or use the standalone manifest `deploy/k8s/agent.yaml`.
+For a single host outside k8s: `curl -fsSL https://monitor.senprints.net/install.sh | HUB_URL=… API_KEY=… sh`
+(native binary + systemd), or run the agent container directly.
 
 ## Images
 `ghcr.io/the-last-devops/last-monitor-{hub,agent}:main` (rolling latest from `main`;

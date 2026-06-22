@@ -1,0 +1,65 @@
+# last-monitor agent — DaemonSet (one pod per node, reports host metrics).
+# Rendered by the hub; apply directly:
+#   kubectl apply -f "<HUB_URL>/k8s/agent.yaml?key=YOUR_KEY&cluster=YOUR_CLUSTER"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: <NAMESPACE>
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: last-agent
+  namespace: <NAMESPACE>
+type: Opaque
+stringData:
+  api-key: "<API_KEY>"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: last-agent
+  namespace: <NAMESPACE>
+  labels: { app: last-agent }
+spec:
+  selector:
+    matchLabels: { app: last-agent }
+  template:
+    metadata:
+      labels: { app: last-agent }
+    spec:
+      hostNetwork: true              # report host interfaces
+      hostPID: true                  # see host processes (host-level CPU/mem)
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:                   # also run on control-plane nodes
+        - operator: Exists
+      containers:
+        - name: agent
+          image: "<IMAGE>"
+          env:
+            - name: HUB_URL
+              value: "<HUB_URL>"
+            - name: AGENT_KIND
+              value: "k8s"
+            - name: CLUSTER
+              value: "<CLUSTER>"
+            - name: DISK_PATH
+              value: "/host"
+            - name: NODE_NAME            # stable identity = k8s node name
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: last-agent
+                  key: api-key
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: host-root, mountPath: /host, readOnly: true }
+      volumes:
+        - name: host-root
+          hostPath: { path: / }
