@@ -180,11 +180,16 @@ const containersFleet = computed(() => {
     ].filter((c) => c.series.length),
   }
 })
-// Up if the latest sample is fresh (within ~90s)
+// Tri-state so a page reload doesn't flash "Down" before data arrives:
+//   null = unknown (no data fetched yet), true = Up, false = Down.
 const statusUp = computed(() => {
   const t = metrics.value?.t || containersTime.value
-  return !!(t && t.length && Date.now() / 1000 - t[t.length - 1] < 90)
+  if (!t || !t.length) return null
+  return Date.now() / 1000 - t[t.length - 1] < 90
 })
+const statusLabel = computed(() => (statusUp.value === null ? 'Checking…' : statusUp.value ? 'Up' : 'Down'))
+const statusText = computed(() => (statusUp.value === null ? 'text-muted' : statusUp.value ? 'text-accent' : 'text-red-500'))
+const statusDot = computed(() => (statusUp.value === null ? 'bg-faint animate-pulse' : statusUp.value ? 'bg-accent' : 'bg-red-500'))
 
 async function reload() {
   error.value = ''
@@ -218,7 +223,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       </nav>
     </template>
     <template #header>
-      <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusUp ? 'bg-accent' : 'bg-red-500'"></span><span class="text-xs font-medium" :class="statusUp ? 'text-accent' : 'text-red-500'">{{ statusUp ? 'Up' : 'Down' }}</span></span>
+      <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusDot"></span><span class="text-xs font-medium" :class="statusText">{{ statusLabel }}</span></span>
     </template>
 
     <!-- node metadata — every field links to the fleet filtered by that value -->
