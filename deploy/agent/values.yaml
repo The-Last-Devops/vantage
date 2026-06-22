@@ -10,8 +10,8 @@ pullSecrets: []          # e.g. [ghcr] for private packages
 #  - different cluster:         the hub's public URL, e.g. https://monitor.senprints.net
 hubUrl: ""
 
-# Enrollment token from the UI (Add System). Required.
-token: ""
+# API key from the UI (Add System). Required.
+apiKey: ""
 
 # Label that groups this cluster's nodes in the UI (Kubernetes › <cluster>).
 cluster: my-cluster

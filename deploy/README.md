@@ -34,19 +34,19 @@ Nothing required to set:
 ### External DB instead of in-cluster
 `--set timescaledb.enabled=false --set hub.configDatabaseUrl=... --set hub.dataDatabaseUrl=...`
 
-## 2. Add a system (get a token)
-In the UI: **Add System** → choose namespace/kind → copy the enrollment **token**.
-One token enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cluster>**.
+## 2. Add a system (get an API key)
+In the UI: **Add System** → choose namespace/kind → copy the **API key**.
+One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cluster>**.
 
 ## 3. Install the agent (Helm)
-`deploy/agent` is a DaemonSet — one pod per node. Point it at the hub and pass the token.
+`deploy/agent` is a DaemonSet — one pod per node. Point it at the hub and pass the API key.
 
 ```bash
 # Hub in the SAME cluster — reach it over the in-cluster Service:
 helm install lm-agent ./deploy/agent \
   --namespace last-monitor \
   --set hubUrl=http://lm-hub.last-monitor:8080 \
-  --set token=<token-from-Add-System> \
+  --set apiKey=<api-key-from-Add-System> \
   --set cluster=senprints
 
 # Hub elsewhere — use its public URL:
@@ -54,7 +54,7 @@ helm install lm-agent ./deploy/agent \
 ```
 
 For a single host outside k8s, run the agent container/binary directly:
-`HUB_URL=... AGENT_TOKEN=<token> CLUSTER=... last-agent` (see the top-level README),
+`HUB_URL=... AGENT_TOKEN=<api-key> CLUSTER=... last-agent` (see the top-level README),
 or use the standalone manifest `deploy/k8s/agent.yaml`.
 
 ## Images

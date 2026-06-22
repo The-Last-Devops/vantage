@@ -21,8 +21,7 @@ const METHODS = {
     { id: 'compose', label: 'Compose', snippet: (k) => `services:\n  last-agent:\n    image: ghcr.io/the-last-devops/last-monitor-agent:main\n    network_mode: host\n    pid: host\n    environment:\n      HUB_URL: ${HUB}\n      AGENT_TOKEN: ${k}\n      AGENT_KIND: docker\n    volumes:\n      - /proc:/host/proc:ro\n      - /sys:/host/sys:ro\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n    restart: unless-stopped` },
   ],
   k8s: [
-    { id: 'helm', label: 'Helm', snippet: (k) => `helm repo add last-monitor ${HUB}/charts\nhelm install last-agent last-monitor/agent \\\n  --set hub.url=${HUB} \\\n  --set apiKey=${k} \\\n  --set cluster=${state.cluster || 'my-cluster'}` },
-    { id: 'manifest', label: 'Manifest', snippet: (k) => `kubectl apply -f "${HUB}/k8s/agent.yaml?key=${k}&cluster=${state.cluster || 'my-cluster'}"` },
+    { id: 'helm', label: 'Helm', snippet: (k) => `helm install last-agent oci://ghcr.io/the-last-devops/charts/last-monitor-agent \\\n  --namespace last-monitor --create-namespace \\\n  --set hubUrl=${HUB} \\\n  --set apiKey=${k} \\\n  --set cluster=${state.cluster || 'my-cluster'}` },
   ],
 }
 
@@ -45,7 +44,9 @@ async function createKey() {
   if (!state.nsId) { state.error = 'Pick a namespace'; return }
   state.error = ''; state.busy = true
   try {
-    const name = (state.name.trim() || `${state.type}-key`).slice(0, 64)
+    // k8s uses the cluster name as the key's label; node/docker use Name.
+    const label = state.type === 'k8s' ? state.cluster.trim() : state.name.trim()
+    const name = (label || `${state.type}-key`).slice(0, 64)
     const res = await api.post(`/api/namespaces/${state.nsId}/keys`, { name })
     state.key = res.key
   } catch (e) {
@@ -80,16 +81,16 @@ function copy(ev) {
 
           <!-- details -->
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="block text-sm"><span class="text-muted">Name</span>
-              <input v-model="state.name" :placeholder="state.type === 'k8s' ? 'e.g. prod-cluster' : 'e.g. web-03'" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50" />
+            <label v-if="state.type !== 'k8s'" class="block text-sm"><span class="text-muted">Name</span>
+              <input v-model="state.name" placeholder="e.g. web-03" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50" />
+            </label>
+            <label v-if="state.type === 'k8s'" class="block text-sm"><span class="text-muted">Cluster name</span>
+              <input v-model="state.cluster" placeholder="e.g. prod-cluster" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50" />
             </label>
             <label class="block text-sm"><span class="text-muted">Namespace</span>
               <select v-model="state.nsId" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50">
                 <option v-for="n in namespaces" :key="n.id" :value="n.id">{{ n.name }}</option>
               </select>
-            </label>
-            <label v-if="state.type === 'k8s'" class="block text-sm sm:col-span-2"><span class="text-muted">Cluster name</span>
-              <input v-model="state.cluster" placeholder="my-cluster" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50" />
             </label>
           </div>
 

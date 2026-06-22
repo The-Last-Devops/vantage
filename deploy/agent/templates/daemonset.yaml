@@ -1,12 +1,12 @@
 {{- if not .Values.hubUrl }}{{ fail "set hubUrl to where the hub is reachable (e.g. --set hubUrl=https://monitor.senprints.net)" }}{{- end }}
-{{- if not .Values.token }}{{ fail "set token to an enrollment token created in the UI under Add System (--set token=...)" }}{{- end }}
+{{- if not .Values.apiKey }}{{ fail "set apiKey to an API key created in the UI under Add System (--set apiKey=...)" }}{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ .Release.Name }}
 type: Opaque
 stringData:
-  token: {{ .Values.token | quote }}
+  api-key: {{ .Values.apiKey | quote }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -44,7 +44,7 @@ spec:
             - name: NODE_NAME
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
             - name: AGENT_TOKEN
-              valueFrom: { secretKeyRef: { name: {{ .Release.Name }}, key: token } }
+              valueFrom: { secretKeyRef: { name: {{ .Release.Name }}, key: api-key } }
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
