@@ -127,13 +127,15 @@ pub async fn list_namespaces(
 
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, role, system_count, member_count)| NamespaceRow {
-                id,
-                name,
-                role: role.unwrap_or_else(|| "admin".into()),
-                system_count,
-                member_count,
-            })
+            .map(
+                |(id, name, role, system_count, member_count)| NamespaceRow {
+                    id,
+                    name,
+                    role: role.unwrap_or_else(|| "admin".into()),
+                    system_count,
+                    member_count,
+                },
+            )
             .collect(),
     ))
 }
@@ -228,12 +230,11 @@ pub async fn delete_namespace(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let (systems,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM systems WHERE namespace_id = $1")
-            .bind(id)
-            .fetch_one(&state.config)
-            .await
-            .map_err(internal)?;
+    let (systems,): (i64,) = sqlx::query_as("SELECT count(*) FROM systems WHERE namespace_id = $1")
+        .bind(id)
+        .fetch_one(&state.config)
+        .await
+        .map_err(internal)?;
     if systems > 0 {
         return Err(StatusCode::CONFLICT);
     }
