@@ -69,7 +69,7 @@ async function load() {
 
 // ---- create / edit form ----
 const blank = () => ({
-  id: null, name: '', kind: 'http', target: '', nsId: '', interval_secs: 60, timeout_secs: 15, retries: 0, upside_down: false,
+  id: null, name: '', kind: 'http', target: '', nsId: '', interval_secs: 60, timeout_secs: 15, retries: 1, upside_down: false,
   method: 'GET', accepted_status: '', max_redirects: 10, ignore_tls: false, headersText: '', body: '',
   authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false,
   password: '', expected_ip: '', cert_warn_days: 14, tags: '', description: '',

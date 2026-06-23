@@ -151,7 +151,7 @@ pub fn spawn(state: AppState) {
                                         beat.message = Some("up (inverted by upside-down)".into());
                                     }
                                 }
-                                let retries = cfg_u64(&m.config, "retries", 0);
+                                let retries = cfg_u64(&m.config, "retries", 1);
                                 let streak = {
                                     let mut g = streaks.lock().unwrap();
                                     let s = if beat.up {
