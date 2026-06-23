@@ -127,7 +127,8 @@ async function saveThr(ns) {
           <tbody>
             <tr v-if="loading"><td colspan="5" class="px-4 py-6 text-center text-muted">Loading…</td></tr>
             <tr v-else-if="!rows.length"><td colspan="5" class="px-4 py-6 text-center text-muted">No namespaces yet.</td></tr>
-            <tr v-for="ns in rows" :key="ns.id" class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
+            <template v-for="ns in rows" :key="ns.id">
+            <tr class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
               <td class="px-4 py-3">
                 <span class="font-medium text-fg">{{ ns.name }}</span>
                 <span v-if="ns.name === 'default'" class="ml-2 rounded bg-surface2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-faint">default</span>
@@ -150,7 +151,7 @@ async function saveThr(ns) {
               </td>
             </tr>
             <!-- threshold editor -->
-            <tr v-if="openThr === ns.id" :key="ns.id + '-thr'" class="border-b border-line/60 bg-surface2/40">
+            <tr v-if="openThr === ns.id" class="border-b border-line/60 bg-surface2/40">
               <td colspan="5" class="px-4 py-4">
                 <div class="mb-2 text-xs uppercase tracking-wider text-faint">Alert thresholds — when to flag a host in “Needs attention”</div>
                 <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -172,6 +173,7 @@ async function saveThr(ns) {
                 </div>
               </td>
             </tr>
+            </template>
           </tbody>
         </table>
       </div>
