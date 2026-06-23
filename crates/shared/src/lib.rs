@@ -81,6 +81,10 @@ pub struct MetricsReport {
     /// Disk bytes written since boot (cumulative; 0 if unavailable).
     #[serde(default)]
     pub disk_write: u64,
+    /// Disk I/O utilization: % of the interval the busiest disk was servicing I/O
+    /// (iostat-style %util, 0–100). 0 if unavailable (non-Linux).
+    #[serde(default)]
+    pub disk_util: f32,
 
     /// Temperature sensors (sensor label -> degrees Celsius).
     #[serde(default)]

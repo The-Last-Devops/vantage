@@ -146,10 +146,30 @@ fn collect(
         cpu_cores: sys.cpus().len() as u32,
         disk_read,
         disk_write,
+        disk_util: 0.0, // filled in the push loop from the io_ticks delta
         temps,
         containers: Vec::new(),
         gpus: Vec::new(),
     }
+}
+
+/// Per whole-disk cumulative "time spent doing I/O" in ms (/proc/diskstats field
+/// 13, io_ticks). Empty off Linux. Used to derive iostat-style %util.
+fn disk_io_ticks() -> std::collections::HashMap<String, u64> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(content) = std::fs::read_to_string("/proc/diskstats") else {
+        return out;
+    };
+    for line in content.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 13 || !is_whole_disk(f[2]) {
+            continue;
+        }
+        if let Ok(ticks) = f[12].parse::<u64>() {
+            out.insert(f[2].to_string(), ticks);
+        }
+    }
+    out
 }
 
 /// True for whole disks (not partitions) in /proc/diskstats.
@@ -459,12 +479,30 @@ async fn main() -> Result<()> {
 
     let mut interval = cfg.interval;
     let mut prev_cpu = read_cpu_times();
+    let mut prev_ticks = disk_io_ticks();
+    let mut prev_t = std::time::Instant::now();
     tracing::info!(hub = %cfg.hub_url, ?interval, "agent started");
 
     loop {
         let mut report = collect(&mut sys, &mut nets, &mut components, &cfg.disk_path);
         report.kind = cfg.kind.clone();
         report.cluster = cfg.cluster.clone();
+        // Disk %util = busiest disk's io_ticks delta over elapsed wall time (Linux).
+        let now = std::time::Instant::now();
+        let elapsed_ms = now.duration_since(prev_t).as_millis() as f64;
+        let cur_ticks = disk_io_ticks();
+        if elapsed_ms > 0.0 {
+            let mut util = 0.0f64;
+            for (name, ticks) in &cur_ticks {
+                if let Some(prev) = prev_ticks.get(name) {
+                    let busy = ticks.saturating_sub(*prev) as f64;
+                    util = util.max(busy / elapsed_ms * 100.0);
+                }
+            }
+            report.disk_util = util.min(100.0) as f32;
+        }
+        prev_ticks = cur_ticks;
+        prev_t = now;
         // CPU breakdown from the delta between successive /proc/stat reads (Linux).
         let cur_cpu = read_cpu_times();
         if let (Some(prev), Some(cur)) = (&prev_cpu, &cur_cpu) {

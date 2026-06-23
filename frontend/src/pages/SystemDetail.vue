@@ -88,7 +88,7 @@ const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTim
 const gappedMetrics = computed(() => {
   const m = metrics.value
   if (!m || !m.t || m.t.length < 3) return m
-  const keys = ['cpu', 'mem_pct', 'disk_pct', 'net_rx', 'net_tx', 'dr', 'dw', 'load1', 'load5', 'load15', 'cpu_user', 'cpu_system', 'cpu_iowait', 'cpu_steal'].filter((k) => Array.isArray(m[k]))
+  const keys = ['cpu', 'mem_pct', 'disk_pct', 'net_rx', 'net_tx', 'dr', 'dw', 'load1', 'load5', 'load15', 'cpu_user', 'cpu_system', 'cpu_iowait', 'cpu_steal', 'disk_util'].filter((k) => Array.isArray(m[k]))
   const { t, arrays } = insertGaps(m.t, keys.map((k) => m[k]))
   const out = { ...m, t }
   keys.forEach((k, i) => { out[k] = arrays[i] })
@@ -126,6 +126,7 @@ const hostCharts = computed(() => {
     { title: 'Memory', sub: 'used %', unit: '%', series: [{ name: 'Memory', color: C.blue, data: m.mem_pct }] },
     { title: 'Disk Usage', sub: 'used %', unit: '%', series: [{ name: 'Disk', color: C.purple, data: m.disk_pct }] },
     { title: 'Disk I/O', sub: 'read / write', unit: 'B/s', series: [{ name: 'read', color: C.teal, data: m.dr }, { name: 'write', color: C.amber, data: m.dw }] },
+    { title: 'Disk utilization', sub: 'busiest disk % busy', unit: '%', series: [{ name: 'util', color: C.purple, data: m.disk_util || [] }] },
     { title: 'Network', sub: 'rx / tx', unit: 'B/s', series: [{ name: 'rx', color: C.teal, data: m.net_rx }, { name: 'tx', color: C.blue, data: m.net_tx }] },
   )
   return charts

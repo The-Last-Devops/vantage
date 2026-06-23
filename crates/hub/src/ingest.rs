@@ -87,8 +87,8 @@ pub async fn ingest(
             swap_used, swap_total, disk_used, disk_total,
             net_rx, net_tx, load1, uptime, temps,
             disk_read, disk_write, gpus, load5, load15,
-            cpu_user, cpu_system, cpu_iowait, cpu_steal
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+            cpu_user, cpu_system, cpu_iowait, cpu_steal, disk_util
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
         "#,
     )
     .bind(ts)
@@ -114,6 +114,7 @@ pub async fn ingest(
     .bind(report.cpu_system as f64)
     .bind(report.cpu_iowait as f64)
     .bind(report.cpu_steal as f64)
+    .bind(report.disk_util as f64)
     .execute(&state.data)
     .await
     .map_err(|e| {

@@ -60,6 +60,8 @@ pub struct MetricsHistory {
     pub cpu_system: Vec<f64>,
     pub cpu_iowait: Vec<f64>,
     pub cpu_steal: Vec<f64>,
+    /// Disk I/O utilization (% of interval the busiest disk was busy).
+    pub disk_util: Vec<f64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -94,34 +96,38 @@ pub async fn system_metrics_series(
     // mem/disk percentages are computed in SQL to keep the row tuple within
     // sqlx's 16-element FromRow limit.
     let sql = format!(
-        "SELECT time, cpu_percent, \
-                CASE WHEN mem_total>0 THEN mem_used::float8/mem_total*100 ELSE 0 END, \
-                CASE WHEN disk_total>0 THEN disk_used::float8/disk_total*100 ELSE 0 END, \
-                net_rx, net_tx, COALESCE(disk_read,0), COALESCE(disk_write,0), \
-                load1, COALESCE(load5,0), COALESCE(load15,0), \
-                COALESCE(cpu_user,0), COALESCE(cpu_system,0), COALESCE(cpu_iowait,0), COALESCE(cpu_steal,0), \
-                mem_used \
+        "SELECT time, cpu_percent AS cpu, \
+                CASE WHEN mem_total>0 THEN mem_used::float8/mem_total*100 ELSE 0 END AS mem_pct, \
+                CASE WHEN disk_total>0 THEN disk_used::float8/disk_total*100 ELSE 0 END AS disk_pct, \
+                net_rx, net_tx, COALESCE(disk_read,0) AS dread, COALESCE(disk_write,0) AS dwrite, \
+                load1 AS l1, COALESCE(load5,0) AS l5, COALESCE(load15,0) AS l15, \
+                COALESCE(cpu_user,0) AS cu, COALESCE(cpu_system,0) AS cs, \
+                COALESCE(cpu_iowait,0) AS cio, COALESCE(cpu_steal,0) AS cst, \
+                mem_used AS mu, COALESCE(disk_util,0) AS disk_util \
          FROM system_metrics WHERE system_id = $1 AND time > now() - interval '{interval}' \
          ORDER BY time ASC LIMIT 4000"
     );
-    type Sample = (
-        chrono::DateTime<chrono::Utc>,
-        f64,
-        f64,
-        f64,
-        i64,
-        i64,
-        i64,
-        i64,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        i64,
-    );
+    // FromRow struct (not a tuple) so we're not capped at sqlx's 16-column limit.
+    #[derive(sqlx::FromRow)]
+    struct Sample {
+        time: chrono::DateTime<chrono::Utc>,
+        cpu: f64,
+        mem_pct: f64,
+        disk_pct: f64,
+        net_rx: i64,
+        net_tx: i64,
+        dread: i64,
+        dwrite: i64,
+        l1: f64,
+        l5: f64,
+        l15: f64,
+        cu: f64,
+        cs: f64,
+        cio: f64,
+        cst: f64,
+        mu: i64,
+        disk_util: f64,
+    }
     let rows: Vec<Sample> = sqlx::query_as(&sql)
         .bind(id)
         .fetch_all(&state.data)
@@ -145,11 +151,12 @@ pub async fn system_metrics_series(
         cpu_system: Vec::new(),
         cpu_iowait: Vec::new(),
         cpu_steal: Vec::new(),
+        disk_util: Vec::new(),
     };
     // Cumulative counters -> per-second rate from consecutive deltas.
     let mut prev: Option<(i64, i64, i64, i64, i64)> = None; // (ts, rx, tx, dr, dw)
     for row in rows {
-        let (
+        let Sample {
             time,
             cpu,
             mem_pct,
@@ -166,7 +173,8 @@ pub async fn system_metrics_series(
             cio,
             cst,
             mu,
-        ) = row;
+            disk_util,
+        } = row;
         let ts = time.timestamp();
         h.t.push(ts);
         h.cpu.push(cpu);
@@ -180,6 +188,7 @@ pub async fn system_metrics_series(
         h.cpu_system.push(cs);
         h.cpu_iowait.push(cio);
         h.cpu_steal.push(cst);
+        h.disk_util.push(disk_util);
         let (rx_rate, tx_rate, dr_rate, dw_rate) = match prev {
             Some((pt, prx, ptx, pdr, pdw)) if ts > pt => {
                 let dt = (ts - pt) as f64;
