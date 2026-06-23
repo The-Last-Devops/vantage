@@ -4,10 +4,12 @@
 //! system -> write the sample into the data DB hypertable.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
+    response::IntoResponse,
     Json,
 };
+use serde::Deserialize;
 use shared::{IngestAck, MetricsReport, API_KEY_HEADER};
 use uuid::Uuid;
 
@@ -145,27 +147,60 @@ pub async fn ingest(
     }))
 }
 
+/// Optional Uptime-Kuma-style query params for a push: `?status=up|down&msg=...&ping=<ms>`.
+#[derive(Deserialize)]
+pub struct PushQuery {
+    pub status: Option<String>,
+    pub msg: Option<String>,
+    pub ping: Option<f64>,
+}
+
 /// GET/POST /pub/push/:token — a push (passive) monitor. The external job calls
-/// this on its own schedule; we record an "up" heartbeat. The probe scheduler
-/// writes a "down" beat if no push arrives within the monitor's interval.
-pub async fn push(State(state): State<AppState>, Path(token): Path<String>) -> StatusCode {
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM monitors WHERE config->>'push_token' = $1 AND enabled = true",
+/// this on its own schedule; we record an "up" heartbeat (or "down" if
+/// `?status=down`). The probe scheduler writes a "down" beat if no push arrives
+/// within the monitor's interval. Returns a small JSON ack so a human hitting the
+/// URL in a browser sees confirmation instead of a blank page.
+pub async fn push(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Query(q): Query<PushQuery>,
+) -> impl IntoResponse {
+    let row: Option<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, name FROM monitors WHERE config->>'push_token' = $1 AND enabled = true",
     )
     .bind(&token)
     .fetch_optional(&state.config)
     .await
     .ok()
     .flatten();
-    let Some((id,)) = row else {
-        return StatusCode::NOT_FOUND;
+    let Some((id, name)) = row else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "ok": false, "msg": "unknown or disabled push token" })),
+        );
     };
+    let up = q.status.as_deref() != Some("down");
+    let msg = q.msg.filter(|s| !s.is_empty()).unwrap_or_else(|| {
+        if up {
+            "OK (push received)"
+        } else {
+            "down (reported by push)"
+        }
+        .into()
+    });
+    let latency = q.ping.map(|p| p.round() as i32);
     let _ = sqlx::query(
         "INSERT INTO heartbeats (time, monitor_id, up, latency_ms, status_code, message) \
-         VALUES (now(), $1, true, NULL, NULL, 'push received')",
+         VALUES (now(), $1, $2, $3, NULL, $4)",
     )
     .bind(id)
+    .bind(up)
+    .bind(latency)
+    .bind(&msg)
     .execute(&state.data)
     .await;
-    StatusCode::NO_CONTENT
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "ok": true, "monitor": name, "up": up, "msg": msg })),
+    )
 }
