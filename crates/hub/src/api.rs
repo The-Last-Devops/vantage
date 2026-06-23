@@ -151,6 +151,42 @@ pub async fn patch_user(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Serialize)]
+pub struct UserMembership {
+    pub namespace_id: Uuid,
+    pub namespace: String,
+    pub role: String,
+}
+
+/// GET /api/users/:id/memberships — admins list a user's per-namespace roles
+/// (for the user editor). Namespaces the user isn't in are simply absent.
+pub async fn user_memberships(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<UserMembership>>, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let rows: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT n.id, n.name, m.role::text FROM memberships m \
+         JOIN namespaces n ON n.id = m.namespace_id WHERE m.user_id = $1 ORDER BY n.name",
+    )
+    .bind(id)
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(namespace_id, namespace, role)| UserMembership {
+                namespace_id,
+                namespace,
+                role,
+            })
+            .collect(),
+    ))
+}
+
 /// DELETE /api/users/:id — admins remove an account (not their own).
 pub async fn delete_user(
     State(state): State<AppState>,

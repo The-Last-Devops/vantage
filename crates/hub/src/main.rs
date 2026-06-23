@@ -74,6 +74,7 @@ async fn main() -> Result<()> {
             "/api/users/{id}",
             patch(api::patch_user).delete(api::delete_user),
         )
+        .route("/api/users/{id}/memberships", get(api::user_memberships))
         .route("/api/admin/data", get(api::data_stats))
         .route("/api/admin/retention", post(api::set_retention))
         // management (session + RBAC)

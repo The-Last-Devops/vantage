@@ -300,7 +300,7 @@ const detailLink = (s) => {
             </button>
             <ul class="space-y-1">
               <li v-for="h in g.hosts.slice(0, 5)" :key="h.s.id" class="flex items-center justify-between gap-2 text-xs">
-                <RouterLink :to="{ name: 'system', params: { id: h.s.id } }" class="truncate text-fg hover:text-accent" :title="h.s.name">{{ shortName(h.s.name) }}</RouterLink>
+                <RouterLink :to="{ name: 'system', params: { id: h.s.id } }" class="truncate text-fg hover:text-accent" :title="h.s.name">{{ h.s.name }}</RouterLink>
                 <span v-if="h.v != null" class="shrink-0 tabular-nums" :class="h.crit ? 'text-red-400' : 'text-amber-400'">{{ Math.round(h.v) }}{{ g.unit }}</span>
                 <span v-else class="shrink-0 text-red-400">offline</span>
               </li>
