@@ -13,6 +13,7 @@ const routes = [
   { path: '/notifications', name: 'notifications', component: () => import('../pages/Notifications.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../pages/Alerts.vue') },
   { path: '/data', name: 'data', component: () => import('../pages/DataRetention.vue') },
+  { path: '/backup', name: 'backup', component: () => import('../pages/Backup.vue') },
   { path: '/audit', name: 'audit', component: () => import('../pages/Audit.vue') },
   { path: '/about', name: 'about', component: () => import('../pages/About.vue') },
 ]

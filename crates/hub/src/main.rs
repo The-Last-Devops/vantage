@@ -10,6 +10,7 @@ mod alert;
 mod api;
 mod audit;
 mod auth;
+mod backup;
 mod data_admin;
 mod db;
 mod ingest;
@@ -80,6 +81,20 @@ async fn main() -> Result<()> {
         .route("/api/users/{id}/memberships", get(api::user_memberships))
         .route("/api/admin/data", get(api::data_stats))
         .route("/api/admin/retention", post(api::set_retention))
+        // backup / restore (admin)
+        .route("/api/admin/backup", get(backup::download))
+        .route(
+            "/api/admin/restore",
+            post(backup::restore).layer(axum::extract::DefaultBodyLimit::max(512 * 1024 * 1024)),
+        )
+        .route(
+            "/api/admin/backup/s3",
+            get(backup::s3_get).put(backup::s3_put),
+        )
+        .route("/api/admin/backup/s3/test", post(backup::s3_test))
+        .route("/api/admin/backup/s3/upload", post(backup::s3_upload))
+        .route("/api/admin/backup/s3/list", get(backup::s3_list))
+        .route("/api/admin/backup/s3/restore", post(backup::s3_restore))
         .route("/api/audit", get(audit::list))
         .route("/api/about", get(api::about))
         // management (session + RBAC)
