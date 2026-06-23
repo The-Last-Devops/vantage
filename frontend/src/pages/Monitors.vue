@@ -179,8 +179,10 @@ onUnmounted(() => clearInterval(timer))
               <label class="text-xs text-faint">Max redirects<input v-model.number="f.max_redirects" type="number" min="0" class="mt-1 block w-24 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
               <label class="flex items-center gap-2 self-end pb-2 text-sm text-fg"><input v-model="f.ignore_tls" type="checkbox" class="h-4 w-4" />Ignore TLS errors</label>
             </div>
-            <label class="block text-xs text-faint">Headers (one per line, <code>Key: Value</code>)<textarea v-model="f.headersText" rows="2" class="mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-fg focus:border-accent/60 focus:outline-none"></textarea></label>
-            <label class="block text-xs text-faint">Body<textarea v-model="f.body" rows="2" class="mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-fg focus:border-accent/60 focus:outline-none"></textarea></label>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label class="block text-xs text-faint">Headers (one per line, <code>Key: Value</code>)<textarea v-model="f.headersText" rows="5" class="mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-fg focus:border-accent/60 focus:outline-none"></textarea></label>
+              <label class="block text-xs text-faint">Body<textarea v-model="f.body" rows="5" class="mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 font-mono text-xs text-fg focus:border-accent/60 focus:outline-none"></textarea></label>
+            </div>
             <div class="flex flex-wrap items-end gap-3">
               <label class="text-xs text-faint">Auth<select v-model="f.authType" class="mt-1 block rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none"><option value="none">None</option><option value="basic">Basic</option><option value="bearer">Bearer</option></select></label>
               <template v-if="f.authType === 'basic'">
