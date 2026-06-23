@@ -82,7 +82,8 @@ pub async fn list(
         return Err(StatusCode::FORBIDDEN);
     }
     let rows: Vec<(String, Option<String>, String, String, i32)> = sqlx::query_as(
-        "SELECT at::text, user_email, method, path, status FROM audit_log \
+        "SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+                user_email, method, path, status FROM audit_log \
          ORDER BY at DESC LIMIT 500",
     )
     .fetch_all(&state.config)

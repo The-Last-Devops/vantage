@@ -73,11 +73,10 @@ const childActive = (c) => {
   return true
 }
 const groupActive = (g) => g.children.some((c) => childActive(c))
-const hovered = ref(null)
-// The active group stays open always; hovering another group opens it *in
-// addition* (never collapses the active one) so rows below never shift and the
-// cursor doesn't slip off the item it was aiming for.
-const expanded = (g) => hovered.value === g.key || groupActive(g)
+// A group is expanded when it's the active route's group (always open) or when
+// the user has clicked its chevron open. No hover — opening is an explicit click.
+const openKey = ref(null)
+const expanded = (g) => openKey.value === g.key || groupActive(g)
 function openGroup(g) {
   const first = g.children[0]
   if (first && !childActive(first)) router.push(childTo(first))
@@ -137,7 +136,7 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
 
       <!-- nav -->
       <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        <div v-for="g in groups" :key="g.key" @mouseleave="hovered = null">
+        <div v-for="g in groups" :key="g.key">
           <div class="flex items-center rounded-lg text-sm transition hover:bg-surface2"
             :class="groupActive(g) ? 'font-medium text-fg' : 'text-muted'">
             <button @click="openGroup(g)" class="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-1 text-left"
@@ -148,8 +147,8 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
               <svg v-else class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
               <span class="flex-1 truncate">{{ g.label }}</span>
             </button>
-            <!-- only this arrow reveals the submenu on hover (click toggles too, for touch) -->
-            <button @mouseenter="hovered = g.key" @click.stop="hovered = hovered === g.key ? null : g.key"
+            <!-- the submenu opens only on clicking this chevron (no hover) -->
+            <button @click.stop="openKey = openKey === g.key ? null : g.key"
               class="shrink-0 px-3 py-2 text-faint hover:text-fg" :title="expanded(g) ? 'Hide submenu' : 'Show submenu'" aria-label="Toggle submenu">
               <svg class="h-3.5 w-3.5 transition-transform" :class="expanded(g) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
             </button>

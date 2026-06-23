@@ -173,10 +173,10 @@ onUnmounted(() => clearInterval(timer))
       <form v-if="formOpen" @submit.prevent="submit" class="space-y-4 rounded-xl border border-line bg-surface p-4">
         <div class="text-sm font-semibold text-fg">{{ isEdit ? 'Edit monitor' : 'New monitor' }}</div>
 
-        <!-- general -->
-        <div class="flex flex-wrap gap-2">
-          <label class="flex-1 text-xs text-faint">Name<input v-model="f.name" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
+        <!-- general — pick the type first, then a (short) name -->
+        <div class="flex flex-wrap items-end gap-3">
           <label class="text-xs text-faint">Type<select v-model="f.kind" :disabled="isEdit" class="mt-1 block rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none disabled:opacity-60"><option v-for="k in KINDS" :key="k.v" :value="k.v">{{ k.label }}</option></select></label>
+          <label class="text-xs text-faint">Name<input v-model="f.name" placeholder="My service" class="mt-1 block w-64 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" /></label>
           <label v-if="!isEdit" class="text-xs text-faint">Namespace<select v-model="f.nsId" class="mt-1 block rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none"><option v-for="n in namespaces" :key="n.id" :value="n.id">{{ n.name }}</option></select></label>
         </div>
         <label v-if="f.kind !== 'push'" class="block text-xs text-faint">Target<input v-model="f.target" :placeholder="KINDS.find((k) => k.v === f.kind)?.ph" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" /></label>
@@ -249,6 +249,7 @@ onUnmounted(() => clearInterval(timer))
             <th class="px-4 py-3 font-medium">Status</th>
             <th class="px-4 py-3 font-medium">Name</th>
             <th class="px-4 py-3 font-medium">Type</th>
+            <th class="px-4 py-3 font-medium">Namespace</th>
             <th class="px-4 py-3 font-medium">Target</th>
             <th class="px-4 py-3 font-medium text-right">Latency</th>
             <th class="px-4 py-3 font-medium text-right">Last check</th>
@@ -264,8 +265,12 @@ onUnmounted(() => clearInterval(timer))
                   {{ statusOf(m) === 'up' ? 'Up' : statusOf(m) === 'down' ? 'Down' : 'Pending' }}
                 </span>
               </td>
-              <td class="px-4 py-3 text-fg">{{ m.name }}<div v-if="m.message" class="text-xs text-faint">{{ m.message }}</div></td>
+              <td class="px-4 py-3">
+                <RouterLink :to="{ name: 'monitor', params: { id: m.id } }" class="font-medium text-fg hover:text-accent hover:underline">{{ m.name }}</RouterLink>
+                <div v-if="m.message" class="text-xs text-faint">{{ m.message }}</div>
+              </td>
               <td class="px-4 py-3 text-muted">{{ kindLabel(m.kind) }}</td>
+              <td class="px-4 py-3 text-muted">{{ m.namespace }}</td>
               <td class="px-4 py-3 font-mono text-xs text-muted">
                 <span v-if="m.kind === 'push'" class="inline-flex items-center gap-1.5">
                   <span class="truncate" :title="pushUrl(m)">{{ pushUrl(m) }}</span>
@@ -290,7 +295,7 @@ onUnmounted(() => clearInterval(timer))
               </td>
             </tr>
             <tr v-if="debugOpen === m.id" class="border-b border-line/60 bg-surface2/40">
-              <td colspan="7" class="px-4 py-4">
+              <td colspan="8" class="px-4 py-4">
                 <div v-if="!debugData" class="text-sm text-muted">Loading…</div>
                 <div v-else class="grid gap-4 lg:grid-cols-2">
                   <div>

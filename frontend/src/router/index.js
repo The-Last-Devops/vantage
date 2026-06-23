@@ -9,6 +9,7 @@ const routes = [
   { path: '/namespaces', name: 'namespaces', component: () => import('../pages/Namespaces.vue') },
   { path: '/members', name: 'members', component: () => import('../pages/Members.vue') },
   { path: '/monitors', name: 'monitors', component: () => import('../pages/Monitors.vue') },
+  { path: '/monitor/:id', name: 'monitor', component: () => import('../pages/MonitorDetail.vue') },
   { path: '/notifications', name: 'notifications', component: () => import('../pages/Notifications.vue') },
   { path: '/alerts', name: 'alerts', component: () => import('../pages/Alerts.vue') },
   { path: '/data', name: 'data', component: () => import('../pages/DataRetention.vue') },

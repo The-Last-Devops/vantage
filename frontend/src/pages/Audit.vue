@@ -16,7 +16,7 @@ async function load() {
 }
 onMounted(() => { if (isAdmin.value) load() })
 
-const fmt = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+const fmt = (s) => { const d = new Date(s); return isNaN(d) ? s : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) }
 const methodColor = (m) => ({ POST: 'text-accent', PATCH: 'text-amber-400', PUT: 'text-amber-400', DELETE: 'text-red-400' }[m] || 'text-muted')
 const statusColor = (s) => (s < 300 ? 'text-accent' : s < 400 ? 'text-amber-400' : 'text-red-400')
 </script>
