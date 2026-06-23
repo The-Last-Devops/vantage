@@ -73,6 +73,7 @@ function openEdit(m) {
     authType: auth.type || 'none', authUser: auth.username || '', authPass: auth.password || '', authToken: auth.token || '',
     keyword: c.keyword || '', keyword_invert: !!c.keyword_invert,
     password: c.password || '', expected_ip: c.expected_ip || '', cert_warn_days: c.cert_warn_days ?? 14, tags: (c.tags || []).join(', '), description: c.description || '',
+    push_token: c.push_token || '',
   }
   formErr.value = ''; formOpen.value = true
 }
@@ -99,6 +100,7 @@ function buildConfig() {
   if (v.kind === 'redis' && v.password) cfg.password = v.password
   if (v.kind === 'dns' && v.expected_ip.trim()) cfg.expected_ip = v.expected_ip.trim()
   if (v.kind === 'tls') cfg.cert_warn_days = Number(v.cert_warn_days) || 14
+  if (v.kind === 'push' && v.push_token) cfg.push_token = v.push_token // keep the token on edit
   return cfg
 }
 

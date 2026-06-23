@@ -1069,13 +1069,43 @@ pub async fn patch_monitor(
     Path(id): Path<Uuid>,
     Json(req): Json<PatchMonitor>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
-        &state,
-        "SELECT namespace_id FROM monitors WHERE id = $1",
-        id,
-    )
-    .await?;
+    let (ns, kind, existing): (Uuid, String, sqlx::types::Json<Value>) =
+        sqlx::query_as("SELECT namespace_id, kind::text, config FROM monitors WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.config)
+            .await
+            .map_err(internal)?
+            .ok_or(StatusCode::NOT_FOUND)?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
+
+    // Push monitors are addressed by their token; never let an edit drop it. The
+    // edit form rebuilds config from its fields and may omit push_token, so carry
+    // the existing one over (or mint one if somehow missing) whenever kind=push.
+    let config = if kind == "push" {
+        let mut cfg = req.config.clone().unwrap_or_else(|| existing.0.clone());
+        if !cfg.is_object() {
+            cfg = serde_json::json!({});
+        }
+        let obj = cfg.as_object_mut().expect("ensured object above");
+        let token = obj
+            .get("push_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .or_else(|| {
+                existing
+                    .0
+                    .get("push_token")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
+        obj.insert("push_token".into(), serde_json::json!(token));
+        Some(cfg)
+    } else {
+        req.config.clone()
+    };
+
     sqlx::query(
         "UPDATE monitors SET name = COALESCE($2, name), target = COALESCE($3, target), \
          interval_secs = COALESCE($4, interval_secs), enabled = COALESCE($5, enabled), \
@@ -1086,7 +1116,7 @@ pub async fn patch_monitor(
     .bind(req.target)
     .bind(req.interval_secs)
     .bind(req.enabled)
-    .bind(req.config.map(sqlx::types::Json))
+    .bind(config.map(sqlx::types::Json))
     .execute(&state.config)
     .await
     .map_err(internal)?;
