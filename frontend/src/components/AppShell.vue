@@ -20,6 +20,66 @@ const nsOpen = ref(false)
 const nsRef = ref(null)
 const namespaces = ref([]) // [{id,name}]
 
+// ---- primary nav (collapsible groups) ----------------------------------
+// Parent groups: clicking the parent jumps to its first child; hovering a
+// parent reveals its children. When nothing is hovered, the group owning the
+// current route stays expanded so you always see where you are.
+const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const isAdmin = computed(() => !!auth.user?.is_admin)
+const groups = computed(() =>
+  [
+    {
+      key: 'infra', label: 'Infra',
+      children: [
+        { label: 'All', name: 'systems' },
+        { label: 'Needs attention', name: 'attention' },
+      ],
+    },
+    {
+      key: 'services', label: 'Services',
+      children: [
+        { label: 'All', name: 'monitors' },
+        { label: 'Down', name: 'monitors', down: true },
+      ],
+    },
+    {
+      key: 'alert', label: 'Alert',
+      children: [
+        { label: 'All', name: 'alerts' },
+        { label: 'Notify channel', name: 'notifications' },
+      ],
+    },
+    {
+      key: 'settings', label: 'Settings',
+      children: [
+        { label: 'Namespace', name: 'namespaces' },
+        { label: 'Members', name: 'members', admin: true },
+        { label: 'Audit', name: 'audit', admin: true },
+        { label: 'Data & retention', name: 'data', admin: true },
+        { label: 'About', name: 'about' },
+      ],
+    },
+  ].map((g) => ({ ...g, children: g.children.filter((c) => !c.admin || isAdmin.value) })),
+)
+const NS_QUERY_PAGES = new Set(['systems', 'attention', 'monitors'])
+const childTo = (c) => {
+  const query = NS_QUERY_PAGES.has(c.name) ? { ...nsq.value } : {}
+  if (c.down) query.status = 'down'
+  return { name: c.name, query }
+}
+const childActive = (c) => {
+  if (route.name !== c.name) return false
+  if (c.name === 'monitors') return (route.query.status === 'down') === !!c.down
+  return true
+}
+const groupActive = (g) => g.children.some((c) => childActive(c))
+const hovered = ref(null)
+const expanded = (g) => hovered.value === g.key || (hovered.value === null && groupActive(g))
+function openGroup(g) {
+  const first = g.children[0]
+  if (first && !childActive(first)) router.push(childTo(first))
+}
+
 const nsNames = computed(() => namespaces.value.map((n) => n.name))
 // Selected namespaces live in the URL (?ns=a,b) so they're shareable; empty = all.
 const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
@@ -73,34 +133,24 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
       </div>
 
       <!-- nav -->
-      <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        <div class="flex items-center gap-2.5 px-3 py-2 text-sm text-fg">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-          Infrastructure
+      <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
+        <div v-for="g in groups" :key="g.key" @mouseenter="hovered = g.key" @mouseleave="hovered = null">
+          <button @click="openGroup(g)"
+            class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition hover:bg-surface2"
+            :class="groupActive(g) ? 'font-medium text-fg' : 'text-muted hover:text-fg'">
+            <svg v-if="g.key === 'infra'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+            <svg v-else-if="g.key === 'services'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <svg v-else-if="g.key === 'alert'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+            <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+            <span class="flex-1 text-left">{{ g.label }}</span>
+            <svg class="h-3.5 w-3.5 shrink-0 text-faint transition-transform" :class="expanded(g) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+          <div v-show="expanded(g)" class="mt-0.5 space-y-0.5">
+            <RouterLink v-for="c in g.children" :key="c.label + (c.down ? '-down' : '')" :to="childTo(c)"
+              class="flex items-center rounded-lg py-1.5 pl-10 pr-3 text-sm transition hover:bg-surface2 hover:text-fg"
+              :class="childActive(c) ? '!bg-accent/10 font-medium !text-accent' : 'text-muted'">{{ c.label }}</RouterLink>
+          </div>
         </div>
-        <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="flex items-center gap-2.5 rounded-lg py-2 pl-10 pr-3 text-sm text-muted transition hover:bg-surface2 hover:text-fg" exact-active-class="!bg-accent/10 font-medium !text-accent">All</RouterLink>
-        <RouterLink :to="{ name: 'attention', query: route.query.ns ? { ns: route.query.ns } : {} }" class="flex items-center justify-between gap-2.5 rounded-lg py-2 pl-10 pr-3 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">Needs attention</RouterLink>
-        <RouterLink :to="{ name: 'monitors', query: route.query.ns ? { ns: route.query.ns } : {} }" class="mt-1 flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-          Services
-        </RouterLink>
-        <div class="px-3 pb-1 pt-4 text-[11px] uppercase tracking-wider text-faint">Manage</div>
-        <RouterLink :to="{ name: 'namespaces' }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
-          Namespaces
-        </RouterLink>
-        <RouterLink :to="{ name: 'notifications' }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-          Notifications
-        </RouterLink>
-        <RouterLink v-if="auth.user?.is_admin" :to="{ name: 'members' }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          Members
-        </RouterLink>
-        <RouterLink v-if="auth.user?.is_admin" :to="{ name: 'data' }" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface2 hover:text-fg" active-class="!bg-accent/10 font-medium !text-accent">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/></svg>
-          Data &amp; retention
-        </RouterLink>
       </nav>
 
       <!-- namespace multi-select — at the bottom so its dropdown opens upward

@@ -34,6 +34,10 @@ const kindLabel = (k) => KINDS.find((x) => x.v === k)?.label || k
 const isHttp = (k) => k === 'http' || k === 'keyword'
 const pushUrl = (m) => `${location.origin}/pub/push/${m.config?.push_token || ''}`
 
+// "Down" sub-view (/monitors?status=down) shows only enabled monitors that are down.
+const downOnly = computed(() => route.query.status === 'down')
+const shown = computed(() => (downOnly.value ? monitors.value.filter((m) => m.enabled && m.up === false) : monitors.value))
+
 async function load() {
   try { monitors.value = await api.get('/api/monitors'); err.value = '' }
   catch { if (!monitors.value.length) err.value = 'Failed to load monitors' }
@@ -155,7 +159,7 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
-  <AppShell title="Services">
+  <AppShell :title="downOnly ? 'Services — Down' : 'Services'">
     <div class="space-y-4">
       <div class="flex items-center justify-between gap-3">
         <p class="text-sm text-muted">Service checks — HTTP / TCP / ping / keyword. Status comes from the latest heartbeat.</p>
@@ -236,7 +240,7 @@ onUnmounted(() => clearInterval(timer))
 
       <p v-if="loading" class="text-sm text-muted">Loading…</p>
       <p v-else-if="err" class="text-sm text-rose-400">{{ err }}</p>
-      <p v-else-if="!monitors.length" class="rounded-xl border border-line bg-surface p-6 text-center text-sm text-muted">No monitors yet. Add a service check above.</p>
+      <p v-else-if="!shown.length" class="rounded-xl border border-line bg-surface p-6 text-center text-sm text-muted">{{ downOnly ? 'No services are currently down. 🎉' : 'No monitors yet. Add a service check above.' }}</p>
 
       <div v-else class="overflow-hidden rounded-xl border border-line bg-surface">
         <table class="w-full text-sm">
@@ -250,7 +254,7 @@ onUnmounted(() => clearInterval(timer))
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <template v-for="m in monitors" :key="m.id">
+            <template v-for="m in shown" :key="m.id">
             <tr class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
               <td class="px-4 py-3">
                 <span v-if="!m.enabled" class="inline-flex items-center gap-1.5 text-xs font-medium text-faint"><span class="h-2 w-2 rounded-full bg-faint"></span>Paused</span>

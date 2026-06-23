@@ -5,6 +5,9 @@ services:
       POSTGRES_USER: lastmon
       POSTGRES_PASSWORD: lastmon
       POSTGRES_DB: lastmon_config
+      # Postgres 18 moved the image's default data dir; init into an explicit
+      # subdir of our mount so the entrypoint doesn't trip over the mount root.
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./deploy/init-db.sh:/docker-entrypoint-initdb.d/10-init-db.sh:ro

@@ -16,7 +16,7 @@ export DATA_DATABASE_URL="postgres://lastmon:lastmon@localhost:5432/lastmon_data
 export BIND_ADDR="0.0.0.0:8080"
 export ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local}"
 export ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
-export LOCAL_AGENT_TOKEN="${LOCAL_AGENT_TOKEN:-local-dev-token}"
+export LOCAL_API_KEY="${LOCAL_API_KEY:-local-dev-token}"
 export RUST_LOG="${RUST_LOG:-info,sqlx=warn}"
 echo "hub (cargo run) → :8080 ; now run: bash scripts/frontend.sh dev  (→ http://localhost:5173)"
 exec cargo run -p hub

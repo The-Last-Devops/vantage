@@ -35,8 +35,12 @@ pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> 
     let path = req.uri().path().to_string();
     let jar = CookieJar::from_headers(req.headers());
     let mutating = matches!(method.as_str(), "POST" | "PATCH" | "PUT" | "DELETE");
-    // Skip login (noise + would log before a session exists) and non-API paths.
-    let interesting = mutating && path.starts_with("/api/") && path != "/api/auth/login";
+    // This is a *user* action log. Skip login (would log before a session exists),
+    // agent ingest (machine traffic, no session, fires constantly), and non-API paths.
+    let interesting = mutating
+        && path.starts_with("/api/")
+        && path != "/api/auth/login"
+        && !path.starts_with("/api/ingest");
 
     let email = if interesting {
         caller_email(&state, &jar).await
@@ -45,7 +49,8 @@ pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> 
     };
     let res = next.run(req).await;
 
-    if interesting {
+    // Only record actions tied to a human session; anonymous machine calls are noise.
+    if interesting && email.is_some() {
         let _ = sqlx::query(
             "INSERT INTO audit_log (user_email, method, path, status) VALUES ($1, $2, $3, $4)",
         )

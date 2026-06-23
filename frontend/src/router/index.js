@@ -10,7 +10,10 @@ const routes = [
   { path: '/members', name: 'members', component: () => import('../pages/Members.vue') },
   { path: '/monitors', name: 'monitors', component: () => import('../pages/Monitors.vue') },
   { path: '/notifications', name: 'notifications', component: () => import('../pages/Notifications.vue') },
+  { path: '/alerts', name: 'alerts', component: () => import('../pages/Alerts.vue') },
   { path: '/data', name: 'data', component: () => import('../pages/DataRetention.vue') },
+  { path: '/audit', name: 'audit', component: () => import('../pages/Audit.vue') },
+  { path: '/about', name: 'about', component: () => import('../pages/About.vue') },
 ]
 
 const router = createRouter({

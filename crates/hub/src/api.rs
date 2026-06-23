@@ -902,6 +902,7 @@ pub struct AlertRow {
     pub channel_id: Uuid,
     pub cooldown_secs: i32,
     pub enabled: bool,
+    pub condition: Value,
 }
 
 /// GET /api/namespaces/:id/alerts — rules whose target lives in this namespace.
@@ -911,27 +912,31 @@ pub async fn list_alerts(
     Path(ns): Path<Uuid>,
 ) -> Result<Json<Vec<AlertRow>>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
-    let rows: Vec<(Uuid, Option<Uuid>, Option<Uuid>, Uuid, i32, bool)> = sqlx::query_as(
-        "SELECT r.id, r.monitor_id, r.system_id, r.channel_id, r.cooldown_secs, r.enabled \
-         FROM alerts r \
-         LEFT JOIN monitors m ON m.id = r.monitor_id \
-         LEFT JOIN systems s ON s.id = r.system_id \
-         WHERE COALESCE(m.namespace_id, s.namespace_id) = $1",
-    )
-    .bind(ns)
-    .fetch_all(&state.config)
-    .await
-    .map_err(internal)?;
+    let rows: Vec<(Uuid, Option<Uuid>, Option<Uuid>, Uuid, i32, bool, sqlx::types::Json<Value>)> =
+        sqlx::query_as(
+            "SELECT r.id, r.monitor_id, r.system_id, r.channel_id, r.cooldown_secs, r.enabled, r.condition \
+             FROM alerts r \
+             LEFT JOIN monitors m ON m.id = r.monitor_id \
+             LEFT JOIN systems s ON s.id = r.system_id \
+             WHERE COALESCE(m.namespace_id, s.namespace_id) = $1",
+        )
+        .bind(ns)
+        .fetch_all(&state.config)
+        .await
+        .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
             .map(
-                |(id, monitor_id, system_id, channel_id, cooldown_secs, enabled)| AlertRow {
-                    id,
-                    monitor_id,
-                    system_id,
-                    channel_id,
-                    cooldown_secs,
-                    enabled,
+                |(id, monitor_id, system_id, channel_id, cooldown_secs, enabled, condition)| {
+                    AlertRow {
+                        id,
+                        monitor_id,
+                        system_id,
+                        channel_id,
+                        cooldown_secs,
+                        enabled,
+                        condition: condition.0,
+                    }
                 },
             )
             .collect(),
