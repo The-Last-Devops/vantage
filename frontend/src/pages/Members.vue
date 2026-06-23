@@ -118,7 +118,7 @@ onMounted(async () => {
     <div v-if="!isAdmin" class="mx-auto max-w-md rounded-xl border border-line bg-surface p-6 text-center text-muted">
       Only system admins can manage members.
     </div>
-    <div v-else class="mx-auto max-w-4xl space-y-4">
+    <div v-else class="space-y-4">
       <!-- add user -->
       <form @submit.prevent="addUser" class="max-w-xl space-y-2">
         <input v-model="nu.email" placeholder="email@company.com" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />

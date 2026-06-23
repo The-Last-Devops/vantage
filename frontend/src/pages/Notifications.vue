@@ -59,7 +59,7 @@ onMounted(async () => {
 
 <template>
   <AppShell title="Notifications">
-    <div class="mx-auto max-w-3xl space-y-5">
+    <div class="space-y-5">
       <div class="flex items-center gap-3">
         <h2 class="text-sm font-semibold text-fg">Channels</h2>
         <select v-model="nsId" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg focus:border-accent/60 focus:outline-none">

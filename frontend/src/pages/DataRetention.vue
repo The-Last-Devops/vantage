@@ -36,7 +36,7 @@ async function save(tier) {
     <div v-if="!isAdmin" class="mx-auto max-w-md rounded-xl border border-line bg-surface p-6 text-center text-muted">
       Only system admins can manage data retention.
     </div>
-    <div v-else class="mx-auto max-w-4xl space-y-6">
+    <div v-else class="space-y-6">
       <p v-if="loading" class="text-sm text-muted">Loading…</p>
       <template v-else-if="stats">
         <!-- DB size + tables -->

@@ -98,7 +98,7 @@ async function saveThr(ns) {
 
 <template>
   <AppShell title="Namespaces">
-    <div class="mx-auto max-w-4xl space-y-6">
+    <div class="space-y-6">
       <!-- create -->
       <form @submit.prevent="create" class="flex flex-wrap items-start gap-2">
         <div class="flex-1 min-w-56">

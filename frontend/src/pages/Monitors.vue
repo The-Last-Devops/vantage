@@ -136,7 +136,7 @@ onUnmounted(() => clearInterval(timer))
 
 <template>
   <AppShell title="Services">
-    <div class="mx-auto max-w-5xl space-y-4">
+    <div class="space-y-4">
       <div class="flex items-center justify-between gap-3">
         <p class="text-sm text-muted">Service checks — HTTP / TCP / ping / keyword. Status comes from the latest heartbeat.</p>
         <button @click="formOpen ? (formOpen = false) : openCreate()" class="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
