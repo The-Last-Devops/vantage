@@ -739,9 +739,29 @@ pub async fn create_monitor(
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
     if !matches!(
         req.kind.as_str(),
-        "http" | "tcp" | "ping" | "keyword" | "postgres" | "redis" | "dns" | "rabbitmq"
+        "http"
+            | "tcp"
+            | "ping"
+            | "keyword"
+            | "postgres"
+            | "redis"
+            | "dns"
+            | "rabbitmq"
+            | "mysql"
+            | "mongodb"
+            | "tls"
+            | "push"
     ) {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let mut config = req.config.unwrap_or_else(|| serde_json::json!({}));
+    // Push monitors get a generated token; the agent/cron calls /pub/push/<token>.
+    if req.kind == "push" {
+        if let Some(obj) = config.as_object_mut() {
+            obj.entry("push_token")
+                .or_insert_with(|| serde_json::json!(Uuid::new_v4().simple().to_string()));
+        }
     }
 
     let (id,): (Uuid,) = sqlx::query_as(
@@ -753,9 +773,7 @@ pub async fn create_monitor(
     .bind(&req.kind)
     .bind(&req.target)
     .bind(req.interval_secs.unwrap_or(60).max(1))
-    .bind(sqlx::types::Json(
-        req.config.unwrap_or_else(|| serde_json::json!({})),
-    ))
+    .bind(sqlx::types::Json(config))
     .fetch_one(&state.config)
     .await
     .map_err(internal)?;

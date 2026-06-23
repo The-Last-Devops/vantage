@@ -107,6 +107,38 @@ pub fn spawn(state: AppState) {
                             let config = state.config.clone();
                             let streaks = streaks.clone();
                             tokio::spawn(async move {
+                                // Push monitors aren't probed; we just check staleness — the
+                                // "up" beats arrive via /pub/push/<token>.
+                                if m.kind == "push" {
+                                    let last: Option<(chrono::DateTime<chrono::Utc>,)> = sqlx::query_as(
+                                        "SELECT time FROM heartbeats WHERE monitor_id = $1 ORDER BY time DESC LIMIT 1",
+                                    )
+                                    .bind(m.id)
+                                    .fetch_optional(&data)
+                                    .await
+                                    .ok()
+                                    .flatten();
+                                    let stale = match last {
+                                        Some((t,)) => {
+                                            (chrono::Utc::now() - t).num_seconds().max(0) as u64
+                                                > m.interval.as_secs()
+                                        }
+                                        None => true,
+                                    };
+                                    if stale {
+                                        let beat = Beat {
+                                            up: false,
+                                            latency_ms: None,
+                                            status_code: None,
+                                            message: Some(
+                                                "no push received within interval".into(),
+                                            ),
+                                            debug: None,
+                                        };
+                                        let _ = write_beat(&data, m.id, &beat).await;
+                                    }
+                                    return;
+                                }
                                 let mut beat = probe(&m).await;
                                 // The raw check result (before upside-down / retries) is what
                                 // we classify the debug record by.
@@ -183,9 +215,12 @@ async fn probe(m: &Monitor) -> Beat {
         "tcp" => probe_tcp(m, start).await,
         "ping" => probe_ping(m).await,
         "postgres" => probe_postgres(m, start).await,
+        "mysql" => probe_mysql(m, start).await,
+        "mongodb" => probe_mongodb(m, start).await,
         "redis" => probe_redis(m, start).await,
         "rabbitmq" => probe_rabbitmq(m, start).await,
         "dns" => probe_dns(m, start).await,
+        "tls" => probe_tls(m, start).await,
         other => down(&format!("unsupported monitor kind: {other}")),
     }
 }
@@ -433,7 +468,11 @@ async fn probe_redis(m: &Monitor, start: Instant) -> Beat {
     };
     match timeout(Duration::from_secs(to), fut).await {
         Ok(Ok(resp)) if resp.contains("PONG") => ok_beat(start, &m.target, None),
-        Ok(Ok(resp)) => err_beat(start, &m.target, format!("unexpected reply: {}", resp.trim())),
+        Ok(Ok(resp)) => err_beat(
+            start,
+            &m.target,
+            format!("unexpected reply: {}", resp.trim()),
+        ),
         Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
         Err(_) => err_beat(start, &m.target, "connect timeout".into()),
     }
@@ -471,7 +510,11 @@ async fn probe_dns(m: &Monitor, start: Instant) -> Beat {
             }
             if let Some(e) = exp {
                 if !ips.iter().any(|ip| ip.contains(e)) {
-                    return err_beat(start, &m.target, format!("expected {e}, got {}", ips.join(", ")));
+                    return err_beat(
+                        start,
+                        &m.target,
+                        format!("expected {e}, got {}", ips.join(", ")),
+                    );
                 }
             }
             Beat {
@@ -483,6 +526,137 @@ async fn probe_dns(m: &Monitor, start: Instant) -> Beat {
             }
         }
         Err(e) => err_beat(start, &m.target, e.to_string()),
+    }
+}
+
+/// MySQL/MariaDB: connect (target is a `mysql://…` URL) and run `SELECT 1`.
+async fn probe_mysql(m: &Monitor, start: Instant) -> Beat {
+    use sqlx::Connection;
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let fut = async {
+        let mut conn = sqlx::mysql::MySqlConnection::connect(&m.target).await?;
+        sqlx::query("SELECT 1").execute(&mut conn).await?;
+        let _ = conn.close().await;
+        Ok::<(), sqlx::Error>(())
+    };
+    match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(())) => ok_beat(start, &m.target, None),
+        Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
+        Err(_) => err_beat(start, &m.target, "connect timeout".into()),
+    }
+}
+
+/// MongoDB: connect (target is a `mongodb://…` URI) and run `{ping:1}`.
+async fn probe_mongodb(m: &Monitor, start: Instant) -> Beat {
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let fut = async {
+        let client = mongodb::Client::with_uri_str(&m.target).await?;
+        client
+            .database("admin")
+            .run_command(mongodb::bson::doc! { "ping": 1 })
+            .await?;
+        Ok::<(), mongodb::error::Error>(())
+    };
+    match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(())) => ok_beat(start, &m.target, None),
+        Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
+        Err(_) => err_beat(start, &m.target, "connect timeout".into()),
+    }
+}
+
+/// TLS certificate expiry: handshake to host:port (cert verification disabled so
+/// we can read even an expired/self-signed cert) and report days until notAfter.
+/// Down when expired or within `cert_warn_days` (default 14).
+async fn probe_tls(m: &Monitor, start: Instant) -> Beat {
+    use tokio_rustls::rustls;
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let warn = cfg_u64(&m.config, "cert_warn_days", 14) as i64;
+    let host = m
+        .target
+        .rsplit_once(':')
+        .map(|(h, _)| h)
+        .unwrap_or(&m.target)
+        .to_string();
+
+    #[derive(Debug)]
+    struct NoVerify(rustls::crypto::CryptoProvider);
+    impl rustls::client::danger::ServerCertVerifier for NoVerify {
+        fn verify_server_cert(
+            &self,
+            _e: &rustls::pki_types::CertificateDer,
+            _i: &[rustls::pki_types::CertificateDer],
+            _s: &rustls::pki_types::ServerName,
+            _o: &[u8],
+            _n: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _m: &[u8],
+            _c: &rustls::pki_types::CertificateDer,
+            _d: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _m: &[u8],
+            _c: &rustls::pki_types::CertificateDer,
+            _d: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.0.signature_verification_algorithms.supported_schemes()
+        }
+    }
+
+    let provider = rustls::crypto::ring::default_provider();
+    let config = match rustls::ClientConfig::builder_with_provider(provider.clone().into())
+        .with_safe_default_protocol_versions()
+    {
+        Ok(b) => b
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(NoVerify(provider)))
+            .with_no_client_auth(),
+        Err(e) => return err_beat(start, &m.target, e.to_string()),
+    };
+    let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+    let server_name = match rustls::pki_types::ServerName::try_from(host.clone()) {
+        Ok(s) => s,
+        Err(e) => return err_beat(start, &m.target, e.to_string()),
+    };
+
+    let fut = async {
+        let tcp = tokio::net::TcpStream::connect(&m.target).await?;
+        let tls = connector.connect(server_name, tcp).await?;
+        let der = tls
+            .get_ref()
+            .1
+            .peer_certificates()
+            .and_then(|c| c.first())
+            .map(|c| c.as_ref().to_vec());
+        Ok::<Option<Vec<u8>>, std::io::Error>(der)
+    };
+    let der = match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(Some(d))) => d,
+        Ok(Ok(None)) => return err_beat(start, &m.target, "no peer certificate".into()),
+        Ok(Err(e)) => return err_beat(start, &m.target, e.to_string()),
+        Err(_) => return err_beat(start, &m.target, "handshake timeout".into()),
+    };
+    let not_after = match x509_parser::parse_x509_certificate(&der) {
+        Ok((_, cert)) => cert.validity().not_after.timestamp(),
+        Err(e) => return err_beat(start, &m.target, format!("parse cert: {e}")),
+    };
+    let days = (not_after - chrono::Utc::now().timestamp()) / 86_400;
+    let msg = format!("cert expires in {days} days");
+    Beat {
+        up: days > warn,
+        latency_ms: Some(start.elapsed().as_millis() as i32),
+        status_code: Some(days as i32),
+        message: Some(msg),
+        debug: Some(json!({ "target": m.target, "days_left": days, "warn_days": warn })),
     }
 }
 

@@ -4,7 +4,7 @@
 //! system -> write the sample into the data DB hypertable.
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -143,4 +143,29 @@ pub async fn ingest(
         ok: true,
         next_interval_secs: 0, // 0 => agent keeps its current interval
     }))
+}
+
+/// GET/POST /pub/push/:token — a push (passive) monitor. The external job calls
+/// this on its own schedule; we record an "up" heartbeat. The probe scheduler
+/// writes a "down" beat if no push arrives within the monitor's interval.
+pub async fn push(State(state): State<AppState>, Path(token): Path<String>) -> StatusCode {
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM monitors WHERE config->>'push_token' = $1 AND enabled = true",
+    )
+    .bind(&token)
+    .fetch_optional(&state.config)
+    .await
+    .ok()
+    .flatten();
+    let Some((id,)) = row else {
+        return StatusCode::NOT_FOUND;
+    };
+    let _ = sqlx::query(
+        "INSERT INTO heartbeats (time, monitor_id, up, latency_ms, status_code, message) \
+         VALUES (now(), $1, true, NULL, NULL, 'push received')",
+    )
+    .bind(id)
+    .execute(&state.data)
+    .await;
+    StatusCode::NO_CONTENT
 }

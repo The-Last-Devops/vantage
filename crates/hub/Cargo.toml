@@ -30,9 +30,14 @@ rand = "0.8"
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",
     "postgres",
+    "mysql",
     "chrono",
     "uuid",
     "macros",
     "migrate",
     "json",
 ] }
+mongodb = "3"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+x509-parser = "0.16"

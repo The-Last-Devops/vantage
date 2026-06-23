@@ -22,12 +22,17 @@ const KINDS = [
   { v: 'tcp', label: 'TCP port', ph: 'host:port' },
   { v: 'ping', label: 'Ping', ph: 'host or IP' },
   { v: 'postgres', label: 'PostgreSQL', ph: 'postgres://user:pass@host:5432/db' },
+  { v: 'mysql', label: 'MySQL', ph: 'mysql://user:pass@host:3306/db' },
+  { v: 'mongodb', label: 'MongoDB', ph: 'mongodb://user:pass@host:27017' },
   { v: 'redis', label: 'Redis', ph: 'host:6379' },
   { v: 'rabbitmq', label: 'RabbitMQ', ph: 'host:5672' },
   { v: 'dns', label: 'DNS', ph: 'example.com' },
+  { v: 'tls', label: 'TLS cert', ph: 'host:443' },
+  { v: 'push', label: 'Push (passive)', ph: '' },
 ]
 const kindLabel = (k) => KINDS.find((x) => x.v === k)?.label || k
 const isHttp = (k) => k === 'http' || k === 'keyword'
+const pushUrl = (m) => `${location.origin}/pub/push/${m.config?.push_token || ''}`
 
 async function load() {
   try { monitors.value = await api.get('/api/monitors'); err.value = '' }
@@ -40,7 +45,7 @@ const blank = () => ({
   id: null, name: '', kind: 'http', target: '', nsId: '', interval_secs: 60, timeout_secs: 15, retries: 0, upside_down: false,
   method: 'GET', accepted_status: '', max_redirects: 10, ignore_tls: false, headersText: '', body: '',
   authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false,
-  password: '', expected_ip: '', tags: '', description: '',
+  password: '', expected_ip: '', cert_warn_days: 14, tags: '', description: '',
 })
 const f = ref(blank())
 const formOpen = ref(false)
@@ -63,7 +68,7 @@ function openEdit(m) {
     headersText: c.headers ? Object.entries(c.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '', body: c.body || '',
     authType: auth.type || 'none', authUser: auth.username || '', authPass: auth.password || '', authToken: auth.token || '',
     keyword: c.keyword || '', keyword_invert: !!c.keyword_invert,
-    password: c.password || '', expected_ip: c.expected_ip || '', tags: (c.tags || []).join(', '), description: c.description || '',
+    password: c.password || '', expected_ip: c.expected_ip || '', cert_warn_days: c.cert_warn_days ?? 14, tags: (c.tags || []).join(', '), description: c.description || '',
   }
   formErr.value = ''; formOpen.value = true
 }
@@ -89,21 +94,24 @@ function buildConfig() {
   if (v.kind === 'keyword') { cfg.keyword = v.keyword; cfg.keyword_invert = v.keyword_invert }
   if (v.kind === 'redis' && v.password) cfg.password = v.password
   if (v.kind === 'dns' && v.expected_ip.trim()) cfg.expected_ip = v.expected_ip.trim()
+  if (v.kind === 'tls') cfg.cert_warn_days = Number(v.cert_warn_days) || 14
   return cfg
 }
 
 async function submit() {
   formErr.value = ''
   const v = f.value
-  if (!v.name.trim() || !v.target.trim()) { formErr.value = 'Name and target are required.'; return }
+  if (!v.name.trim()) { formErr.value = 'Name is required.'; return }
+  if (v.kind !== 'push' && !v.target.trim()) { formErr.value = 'Target is required.'; return }
   if (v.kind === 'keyword' && !v.keyword.trim()) { formErr.value = 'Keyword is required for keyword monitors.'; return }
+  const target = v.kind === 'push' ? 'push' : v.target.trim()
   const config = buildConfig()
   try {
     if (isEdit.value) {
-      await api.patch(`/api/monitors/${v.id}`, { name: v.name.trim(), target: v.target.trim(), interval_secs: Number(v.interval_secs) || 60, config })
+      await api.patch(`/api/monitors/${v.id}`, { name: v.name.trim(), target, interval_secs: Number(v.interval_secs) || 60, config })
     } else {
       if (!v.nsId) { formErr.value = 'Pick a namespace.'; return }
-      await api.post(`/api/namespaces/${v.nsId}/monitors`, { name: v.name.trim(), kind: v.kind, target: v.target.trim(), interval_secs: Number(v.interval_secs) || 60, config })
+      await api.post(`/api/namespaces/${v.nsId}/monitors`, { name: v.name.trim(), kind: v.kind, target, interval_secs: Number(v.interval_secs) || 60, config })
     }
     formOpen.value = false; await load()
   } catch (e) { formErr.value = e.status === 403 ? 'You need editor access to that namespace.' : `Failed (${e.status}).` }
@@ -124,6 +132,10 @@ async function toggleDebug(m) {
 const fmtDebug = (d) => JSON.stringify(d?.detail ?? {}, null, 2)
 function copyDebug(d, ev) {
   navigator.clipboard?.writeText(fmtDebug(d))
+  const b = ev.target; const o = b.textContent; b.textContent = 'Copied'; setTimeout(() => (b.textContent = o), 1200)
+}
+function copyText(text, ev) {
+  navigator.clipboard?.writeText(text)
   const b = ev.target; const o = b.textContent; b.textContent = 'Copied'; setTimeout(() => (b.textContent = o), 1200)
 }
 
@@ -162,7 +174,10 @@ onUnmounted(() => clearInterval(timer))
           <label class="text-xs text-faint">Type<select v-model="f.kind" :disabled="isEdit" class="mt-1 block rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none disabled:opacity-60"><option v-for="k in KINDS" :key="k.v" :value="k.v">{{ k.label }}</option></select></label>
           <label v-if="!isEdit" class="text-xs text-faint">Namespace<select v-model="f.nsId" class="mt-1 block rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none"><option v-for="n in namespaces" :key="n.id" :value="n.id">{{ n.name }}</option></select></label>
         </div>
-        <label class="block text-xs text-faint">Target<input v-model="f.target" :placeholder="KINDS.find((k) => k.v === f.kind)?.ph" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" /></label>
+        <label v-if="f.kind !== 'push'" class="block text-xs text-faint">Target<input v-model="f.target" :placeholder="KINDS.find((k) => k.v === f.kind)?.ph" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" /></label>
+        <p v-else class="rounded-lg border border-line bg-surface2/40 px-3 py-2 text-xs text-muted">Passive check — a push URL is generated after you create it. Have your job call it on schedule; if no call arrives within the interval, it goes Down.</p>
+        <!-- tls -->
+        <label v-if="f.kind === 'tls'" class="block w-56 text-xs text-faint">Warn when expiring within (days)<input v-model.number="f.cert_warn_days" type="number" min="1" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
 
         <div class="flex flex-wrap gap-3">
           <label class="text-xs text-faint">Interval (s)<input v-model.number="f.interval_secs" type="number" min="5" class="mt-1 block w-24 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
@@ -246,7 +261,13 @@ onUnmounted(() => clearInterval(timer))
               </td>
               <td class="px-4 py-3 text-fg">{{ m.name }}<div v-if="m.message" class="text-xs text-faint">{{ m.message }}</div></td>
               <td class="px-4 py-3 text-muted">{{ kindLabel(m.kind) }}</td>
-              <td class="px-4 py-3 font-mono text-xs text-muted">{{ m.target }}</td>
+              <td class="px-4 py-3 font-mono text-xs text-muted">
+                <span v-if="m.kind === 'push'" class="inline-flex items-center gap-1.5">
+                  <span class="truncate" :title="pushUrl(m)">{{ pushUrl(m) }}</span>
+                  <button @click="copyText(pushUrl(m), $event)" class="rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] not-italic text-muted hover:text-accent">Copy</button>
+                </span>
+                <span v-else>{{ m.target }}</span>
+              </td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ m.latency_ms != null ? m.latency_ms + ' ms' : '—' }}</td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ fmtAgo(m.last_check) }}</td>
               <td class="px-4 py-3">
