@@ -369,6 +369,112 @@ pub async fn delete_namespace(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ---- alert thresholds (per-namespace, for the "Needs attention" view) -------
+
+/// Warn/crit % thresholds per resource. Defaults: warn 80, crit 90.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct Thresholds {
+    pub cpu_warn: f64,
+    pub cpu_crit: f64,
+    pub mem_warn: f64,
+    pub mem_crit: f64,
+    pub disk_warn: f64,
+    pub disk_crit: f64,
+    /// Disk I/O utilization (busiest disk % busy).
+    #[serde(default = "default_dutil_warn")]
+    pub dutil_warn: f64,
+    #[serde(default = "default_dutil_crit")]
+    pub dutil_crit: f64,
+}
+fn default_dutil_warn() -> f64 {
+    80.0
+}
+fn default_dutil_crit() -> f64 {
+    95.0
+}
+impl Default for Thresholds {
+    fn default() -> Self {
+        Self {
+            cpu_warn: 80.0,
+            cpu_crit: 90.0,
+            mem_warn: 80.0,
+            mem_crit: 90.0,
+            disk_warn: 80.0,
+            disk_crit: 90.0,
+            dutil_warn: 80.0,
+            dutil_crit: 95.0,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct NsThresholds {
+    pub namespace: String,
+    #[serde(flatten)]
+    pub t: Thresholds,
+}
+
+/// GET /api/thresholds — effective thresholds for every namespace the caller can
+/// see (stored override merged onto the defaults). The fleet UI maps these by
+/// namespace name to flag abnormal hosts.
+pub async fn list_thresholds(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<Vec<NsThresholds>>, StatusCode> {
+    let rows: Vec<(String, Option<Value>)> = if user.can_read_all() {
+        sqlx::query_as("SELECT name, thresholds FROM namespaces ORDER BY name")
+            .fetch_all(&state.config)
+            .await
+    } else {
+        sqlx::query_as(
+            "SELECT n.name, n.thresholds FROM namespaces n \
+             JOIN memberships m ON m.namespace_id = n.id \
+             WHERE m.user_id = $1 ORDER BY n.name",
+        )
+        .bind(user.id)
+        .fetch_all(&state.config)
+        .await
+    }
+    .map_err(internal)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(namespace, v)| NsThresholds {
+                namespace,
+                t: v.and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_default(),
+            })
+            .collect(),
+    ))
+}
+
+/// PUT /api/namespaces/:id/thresholds — editors+ set the namespace's thresholds.
+pub async fn set_thresholds(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(ns): Path<Uuid>,
+    Json(t): Json<Thresholds>,
+) -> Result<StatusCode, StatusCode> {
+    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    for (w, c) in [
+        (t.cpu_warn, t.cpu_crit),
+        (t.mem_warn, t.mem_crit),
+        (t.disk_warn, t.disk_crit),
+        (t.dutil_warn, t.dutil_crit),
+    ] {
+        if !(0.0..=100.0).contains(&w) || !(0.0..=100.0).contains(&c) || w > c {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    let v = serde_json::to_value(t).map_err(internal)?;
+    sqlx::query("UPDATE namespaces SET thresholds = $1 WHERE id = $2")
+        .bind(v)
+        .bind(ns)
+        .execute(&state.config)
+        .await
+        .map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ---- members ----------------------------------------------------------------
 
 #[derive(Serialize)]

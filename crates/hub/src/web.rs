@@ -228,6 +228,7 @@ pub struct SystemRow {
     pub mem_total: Option<i64>,
     pub disk_used: Option<i64>,
     pub disk_total: Option<i64>,
+    pub disk_util: Option<f64>,
 }
 
 /// GET /api/systems — each server (in namespaces the caller can see) plus its
@@ -266,18 +267,21 @@ pub async fn list_systems(
     // Latest sample for ALL systems in ONE query (was N+1). DISTINCT ON + the
     // (system_id, time DESC) index makes this a fast per-system index scan.
     let ids: Vec<Uuid> = servers.iter().map(|s| s.0).collect();
-    let latest_rows: Vec<(Uuid, f64, i64, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
-        "SELECT DISTINCT ON (system_id) system_id, cpu_percent, mem_used, mem_total, disk_used, disk_total \
+    let latest_rows: Vec<(Uuid, f64, i64, i64, Option<i64>, Option<i64>, Option<f64>)> = sqlx::query_as(
+        "SELECT DISTINCT ON (system_id) system_id, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util \
          FROM system_metrics WHERE system_id = ANY($1) ORDER BY system_id, time DESC",
     )
     .bind(&ids)
     .fetch_all(&state.data)
     .await
     .map_err(internal)?;
-    let mut latest: std::collections::HashMap<Uuid, (f64, i64, i64, Option<i64>, Option<i64>)> =
-        std::collections::HashMap::with_capacity(latest_rows.len());
-    for (sid, c, mu, mt, du, dt) in latest_rows {
-        latest.insert(sid, (c, mu, mt, du, dt));
+    #[allow(clippy::type_complexity)]
+    let mut latest: std::collections::HashMap<
+        Uuid,
+        (f64, i64, i64, Option<i64>, Option<i64>, Option<f64>),
+    > = std::collections::HashMap::with_capacity(latest_rows.len());
+    for (sid, c, mu, mt, du, dt, dutil) in latest_rows {
+        latest.insert(sid, (c, mu, mt, du, dt, dutil));
     }
 
     let mut rows = Vec::with_capacity(servers.len());
@@ -295,10 +299,11 @@ pub async fn list_systems(
         last_seen,
     ) in servers
     {
-        let (cpu_percent, mem_used, mem_total, disk_used, disk_total) = match latest.get(&id) {
-            Some(&(c, u, t, du, dt)) => (Some(c), Some(u), Some(t), du, dt),
-            None => (None, None, None, None, None),
-        };
+        let (cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util) =
+            match latest.get(&id) {
+                Some(&(c, u, t, du, dt, dutil)) => (Some(c), Some(u), Some(t), du, dt, dutil),
+                None => (None, None, None, None, None, None),
+            };
         rows.push(SystemRow {
             id,
             name,
@@ -316,6 +321,7 @@ pub async fn list_systems(
             mem_total,
             disk_used,
             disk_total,
+            disk_util,
         });
     }
     Ok(Json(rows))

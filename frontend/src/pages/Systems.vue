@@ -118,6 +118,51 @@ const hero = computed(() => {
   return { online: on, total: all.length, cpu: avg(all, (x) => x.cpu_percent), mem: avg(all, (x) => pct(x.mem_used, x.mem_total)), disk: avg(all, (x) => pct(x.disk_used, x.disk_total)) }
 })
 
+// ---- thresholds + "needs attention" triage --------------------------------
+const DEFAULT_THR = { cpu_warn: 80, cpu_crit: 90, mem_warn: 80, mem_crit: 90, disk_warn: 80, disk_crit: 90, dutil_warn: 80, dutil_crit: 95 }
+const thresholds = ref({}) // namespace name -> thresholds object
+async function loadThresholds() {
+  try { const r = await api.get('/api/thresholds'); const m = {}; for (const x of r) m[x.namespace] = x; thresholds.value = m } catch {}
+}
+const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
+const metricsOf = (s) => ({ cpu: s.cpu_percent, mem: pct(s.mem_used, s.mem_total), disk: pct(s.disk_used, s.disk_total), dutil: s.disk_util })
+// severity: 0 ok · 1 warn · 2 crit · 3 down
+function sevOf(s) {
+  if (!online(s)) return 3
+  const t = thrOf(s), m = metricsOf(s)
+  let lvl = 0
+  const chk = (v, w, c) => { if (v == null) return; if (v >= c) lvl = Math.max(lvl, 2); else if (v >= w) lvl = Math.max(lvl, 1) }
+  chk(m.cpu, t.cpu_warn, t.cpu_crit); chk(m.mem, t.mem_warn, t.mem_crit); chk(m.disk, t.disk_warn, t.disk_crit); chk(m.dutil, t.dutil_warn, t.dutil_crit)
+  return lvl
+}
+const ATTN_GROUPS = [
+  { key: 'down', label: 'Down', metric: null, unit: '', filter: 'status:offline' },
+  { key: 'disk', label: 'Disk almost full', metric: 'disk', unit: '%', filter: `disk>${DEFAULT_THR.disk_warn}` },
+  { key: 'cpu', label: 'High CPU', metric: 'cpu', unit: '%', filter: `cpu>${DEFAULT_THR.cpu_warn}` },
+  { key: 'mem', label: 'High memory', metric: 'mem', unit: '%', filter: `mem>${DEFAULT_THR.mem_warn}` },
+  { key: 'dutil', label: 'High disk I/O', metric: 'dutil', unit: '%', filter: null },
+]
+const attnHostCount = computed(() => new Set(attention.value.flatMap((g) => g.hosts.map((h) => h.s.id))).size)
+const attention = computed(() => {
+  const groups = []
+  for (const g of ATTN_GROUPS) {
+    let hosts
+    if (g.key === 'down') {
+      hosts = visible.value.filter((s) => !online(s)).map((s) => ({ s, v: null, crit: true }))
+    } else {
+      hosts = []
+      for (const s of visible.value) {
+        if (!online(s)) continue
+        const t = thrOf(s), v = metricsOf(s)[g.metric], w = t[g.metric + '_warn'], c = t[g.metric + '_crit']
+        if (v == null || v < w) continue
+        hosts.push({ s, v, crit: v >= c })
+      }
+      hosts.sort((a, b) => b.v - a.v)
+    }
+    if (hosts.length) groups.push({ ...g, hosts })
+  }
+  return groups
+})
 function sortBy(col) { if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc'; else { sortState.col = col; sortState.dir = 'asc' } }
 const arrow = (col) => (sortState.col === col ? (sortState.dir === 'desc' ? ' ↓' : ' ↑') : '')
 // click a row attribute (type/cluster/ns) → set that filter dimension (replacing any existing)
@@ -200,7 +245,7 @@ async function load() {
     if (!loaded.value) error.value = 'Failed to load systems'
   }
 }
-onMounted(() => { load(); loadFleet(); timer = setInterval(() => { load(); loadFleet() }, 5000) })
+onMounted(() => { load(); loadFleet(); loadThresholds(); timer = setInterval(() => { load(); loadFleet() }, 5000) })
 onUnmounted(() => clearInterval(timer))
 watch(frange, loadFleet)
 
@@ -225,6 +270,31 @@ const detailLink = (s) => {
         <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-muted">Avg disk</div><div class="mt-1.5 text-2xl font-semibold text-fg">{{ hero.disk ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.disk || 0) + '%' }"></div></div></div>
         <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-muted">Avg CPU</div><div class="mt-1.5 text-2xl font-semibold text-fg">{{ hero.cpu ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.cpu || 0) + '%' }"></div></div></div>
         <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-muted">Avg memory</div><div class="mt-1.5 text-2xl font-semibold text-fg">{{ hero.mem ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.mem || 0) + '%' }"></div></div></div>
+      </section>
+
+      <!-- needs attention: only abnormal hosts, grouped by reason -->
+      <section v-if="attention.length" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+        <div class="mb-3 flex items-center gap-2">
+          <svg class="h-4 w-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+          <h2 class="text-sm font-semibold text-fg">Needs attention</h2>
+          <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ attnHostCount }} hosts</span>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div v-for="g in attention" :key="g.key" class="rounded-lg border border-line bg-surface p-3">
+            <button @click="g.filter && (q = g.filter)" :disabled="!g.filter" class="mb-2 flex w-full items-center justify-between gap-2 text-left" :class="g.filter ? 'hover:opacity-80' : 'cursor-default'">
+              <span class="text-sm font-medium" :class="g.key === 'down' ? 'text-red-400' : 'text-amber-400'">{{ g.label }}</span>
+              <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ g.hosts.length }}</span>
+            </button>
+            <ul class="space-y-1">
+              <li v-for="h in g.hosts.slice(0, 5)" :key="h.s.id" class="flex items-center justify-between gap-2 text-xs">
+                <RouterLink :to="{ name: 'system', params: { id: h.s.id } }" class="truncate text-fg hover:text-accent" :title="h.s.name">{{ shortName(h.s.name) }}</RouterLink>
+                <span v-if="h.v != null" class="shrink-0 tabular-nums" :class="h.crit ? 'text-red-400' : 'text-amber-400'">{{ Math.round(h.v) }}{{ g.unit }}</span>
+                <span v-else class="shrink-0 text-red-400">offline</span>
+              </li>
+              <li v-if="g.hosts.length > 5" class="text-xs text-faint">+{{ g.hosts.length - 5 }} more</li>
+            </ul>
+          </div>
+        </div>
       </section>
 
       <!-- toolbar -->
@@ -290,7 +360,7 @@ const detailLink = (s) => {
             </tr></thead>
             <tbody>
               <template v-for="s in rows" :key="s.id">
-                <tr class="lm-row border-b border-line" :class="selected.has(s.id) ? 'sel' : ''" @mouseenter="onLegendHover(s.name)" @mouseleave="onLegendHover(null)">
+                <tr class="lm-row border-b border-line border-l-2" :class="[selected.has(s.id) ? 'sel' : '', sevOf(s) === 3 || sevOf(s) === 2 ? 'border-l-red-500' : sevOf(s) === 1 ? 'border-l-amber-500' : 'border-l-transparent']" @mouseenter="onLegendHover(s.name)" @mouseleave="onLegendHover(null)">
                   <td class="px-3 py-3"><input type="checkbox" :checked="selected.has(s.id)" @change="toggleRow(s.id)" class="h-4 w-4 accent-accent" /></td>
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5">

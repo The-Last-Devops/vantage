@@ -19,7 +19,7 @@ async function load() {
   try { rows.value = await api.get('/api/namespaces') } catch { rows.value = [] }
   loading.value = false
 }
-onMounted(load)
+onMounted(() => { load(); loadThr() })
 
 // k8s-style DNS label, mirrors the server-side validator.
 function valid(name) {
@@ -62,6 +62,38 @@ const roleClass = (r) => ({
   viewer: 'text-muted',
   admin: 'text-accent',
 }[r] || 'text-muted')
+
+// ---- per-namespace alert thresholds (Needs attention) ----
+const DEFAULT_THR = { cpu_warn: 80, cpu_crit: 90, mem_warn: 80, mem_crit: 90, disk_warn: 80, disk_crit: 90, dutil_warn: 80, dutil_crit: 95 }
+const THR_ROWS = [
+  { key: 'cpu', label: 'CPU' }, { key: 'mem', label: 'Memory' },
+  { key: 'disk', label: 'Disk space' }, { key: 'dutil', label: 'Disk I/O' },
+]
+const thrMap = ref({}) // namespace name -> thresholds
+async function loadThr() { try { const r = await api.get('/api/thresholds'); const m = {}; for (const x of r) m[x.namespace] = x; thrMap.value = m } catch {} }
+const openThr = ref(null) // ns id whose editor is open
+const thrForm = ref({ ...DEFAULT_THR })
+const thrErr = ref('')
+function toggleThr(ns) {
+  thrErr.value = ''
+  if (openThr.value === ns.id) { openThr.value = null; return }
+  const cur = thrMap.value[ns.name] || DEFAULT_THR
+  thrForm.value = Object.fromEntries(Object.keys(DEFAULT_THR).map((k) => [k, cur[k] ?? DEFAULT_THR[k]]))
+  openThr.value = ns.id
+}
+async function saveThr(ns) {
+  thrErr.value = ''
+  const f = thrForm.value
+  for (const r of THR_ROWS) {
+    const w = Number(f[r.key + '_warn']), c = Number(f[r.key + '_crit'])
+    if (!(w >= 0 && c <= 100 && w <= c)) { thrErr.value = `${r.label}: warn must be ≤ crit, within 0–100.`; return }
+  }
+  try {
+    const body = {}; for (const k in DEFAULT_THR) body[k] = Number(f[k])
+    await api.put(`/api/namespaces/${ns.id}/thresholds`, body)
+    openThr.value = null; await loadThr()
+  } catch (e) { thrErr.value = e.status === 403 ? 'You need editor access to this namespace.' : `Failed (${e.status}).` }
+}
 </script>
 
 <template>
@@ -106,12 +138,38 @@ const roleClass = (r) => ({
               </td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ ns.member_count }}</td>
               <td class="px-4 py-3 text-right">
+                <button @click="toggleThr(ns)" title="Alert thresholds" class="mr-3 text-muted hover:text-accent" :class="openThr === ns.id ? 'text-accent' : ''">
+                  <svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+                </button>
                 <button v-if="ns.name !== 'default'" @click="remove(ns)"
                   :title="ns.system_count > 0 ? 'Has systems — cannot delete' : 'Delete namespace'"
                   class="text-muted hover:text-rose-400 disabled:opacity-30"
                   :disabled="ns.system_count > 0">
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
                 </button>
+              </td>
+            </tr>
+            <!-- threshold editor -->
+            <tr v-if="openThr === ns.id" :key="ns.id + '-thr'" class="border-b border-line/60 bg-surface2/40">
+              <td colspan="5" class="px-4 py-4">
+                <div class="mb-2 text-xs uppercase tracking-wider text-faint">Alert thresholds — when to flag a host in “Needs attention”</div>
+                <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div v-for="r in THR_ROWS" :key="r.key">
+                    <div class="mb-1 text-sm text-fg">{{ r.label }}</div>
+                    <div class="flex items-center gap-1.5 text-xs">
+                      <label class="text-amber-400">warn</label>
+                      <input v-model.number="thrForm[r.key + '_warn']" type="number" min="0" max="100" class="w-16 rounded-md border border-line bg-surface px-2 py-1 text-fg focus:border-accent/60 focus:outline-none" />
+                      <label class="text-red-400">crit</label>
+                      <input v-model.number="thrForm[r.key + '_crit']" type="number" min="0" max="100" class="w-16 rounded-md border border-line bg-surface px-2 py-1 text-fg focus:border-accent/60 focus:outline-none" />
+                      <span class="text-faint">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-3 flex items-center gap-3">
+                  <button @click="saveThr(ns)" class="rounded-lg bg-accent px-3.5 py-1.5 text-sm font-medium text-black hover:opacity-90">Save</button>
+                  <button @click="openThr = null" class="text-sm text-muted hover:text-fg">Cancel</button>
+                  <span v-if="thrErr" class="text-xs text-rose-400">{{ thrErr }}</span>
+                </div>
               </td>
             </tr>
           </tbody>

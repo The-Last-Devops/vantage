@@ -82,6 +82,11 @@ async fn main() -> Result<()> {
             get(api::list_namespaces).post(api::create_namespace),
         )
         .route("/api/namespaces/{id}", delete(api::delete_namespace))
+        .route("/api/thresholds", get(api::list_thresholds))
+        .route(
+            "/api/namespaces/{id}/thresholds",
+            axum::routing::put(api::set_thresholds),
+        )
         .route(
             "/api/namespaces/{id}/members",
             get(api::list_members).post(api::add_member),
