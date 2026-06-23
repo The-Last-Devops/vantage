@@ -737,7 +737,10 @@ pub async fn create_monitor(
     Json(req): Json<CreateMonitor>,
 ) -> Result<Json<Uuid>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    if !matches!(req.kind.as_str(), "http" | "tcp" | "ping" | "keyword") {
+    if !matches!(
+        req.kind.as_str(),
+        "http" | "tcp" | "ping" | "keyword" | "postgres" | "redis" | "dns" | "rabbitmq"
+    ) {
         return Err(StatusCode::BAD_REQUEST);
     }
 

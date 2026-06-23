@@ -21,6 +21,10 @@ const KINDS = [
   { v: 'keyword', label: 'HTTP keyword', ph: 'https://example.com' },
   { v: 'tcp', label: 'TCP port', ph: 'host:port' },
   { v: 'ping', label: 'Ping', ph: 'host or IP' },
+  { v: 'postgres', label: 'PostgreSQL', ph: 'postgres://user:pass@host:5432/db' },
+  { v: 'redis', label: 'Redis', ph: 'host:6379' },
+  { v: 'rabbitmq', label: 'RabbitMQ', ph: 'host:5672' },
+  { v: 'dns', label: 'DNS', ph: 'example.com' },
 ]
 const kindLabel = (k) => KINDS.find((x) => x.v === k)?.label || k
 const isHttp = (k) => k === 'http' || k === 'keyword'
@@ -35,7 +39,8 @@ async function load() {
 const blank = () => ({
   id: null, name: '', kind: 'http', target: '', nsId: '', interval_secs: 60, timeout_secs: 15, retries: 0, upside_down: false,
   method: 'GET', accepted_status: '', max_redirects: 10, ignore_tls: false, headersText: '', body: '',
-  authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false, tags: '', description: '',
+  authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false,
+  password: '', expected_ip: '', tags: '', description: '',
 })
 const f = ref(blank())
 const formOpen = ref(false)
@@ -57,7 +62,8 @@ function openEdit(m) {
     method: c.method || 'GET', accepted_status: c.accepted_status || '', max_redirects: c.max_redirects ?? 10, ignore_tls: !!c.ignore_tls,
     headersText: c.headers ? Object.entries(c.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '', body: c.body || '',
     authType: auth.type || 'none', authUser: auth.username || '', authPass: auth.password || '', authToken: auth.token || '',
-    keyword: c.keyword || '', keyword_invert: !!c.keyword_invert, tags: (c.tags || []).join(', '), description: c.description || '',
+    keyword: c.keyword || '', keyword_invert: !!c.keyword_invert,
+    password: c.password || '', expected_ip: c.expected_ip || '', tags: (c.tags || []).join(', '), description: c.description || '',
   }
   formErr.value = ''; formOpen.value = true
 }
@@ -81,6 +87,8 @@ function buildConfig() {
     else if (v.authType === 'bearer') cfg.auth = { type: 'bearer', token: v.authToken }
   }
   if (v.kind === 'keyword') { cfg.keyword = v.keyword; cfg.keyword_invert = v.keyword_invert }
+  if (v.kind === 'redis' && v.password) cfg.password = v.password
+  if (v.kind === 'dns' && v.expected_ip.trim()) cfg.expected_ip = v.expected_ip.trim()
   return cfg
 }
 
@@ -168,6 +176,10 @@ onUnmounted(() => clearInterval(timer))
           <label class="flex-1 text-xs text-faint">Keyword<input v-model="f.keyword" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
           <label class="flex items-center gap-2 pb-2 text-sm text-fg"><input v-model="f.keyword_invert" type="checkbox" class="h-4 w-4" />Invert (fail if present)</label>
         </div>
+        <!-- redis -->
+        <label v-if="f.kind === 'redis'" class="block w-72 text-xs text-faint">Password (optional)<input v-model="f.password" type="password" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
+        <!-- dns -->
+        <label v-if="f.kind === 'dns'" class="block w-72 text-xs text-faint">Expected IP (optional, substring)<input v-model="f.expected_ip" placeholder="1.2.3.4" class="mt-1 block w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" /></label>
 
         <!-- http options -->
         <details v-if="isHttp(f.kind)" class="rounded-lg border border-line bg-surface2/40 p-3">

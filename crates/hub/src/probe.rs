@@ -182,6 +182,10 @@ async fn probe(m: &Monitor) -> Beat {
         "http" | "keyword" => probe_http(m, start).await,
         "tcp" => probe_tcp(m, start).await,
         "ping" => probe_ping(m).await,
+        "postgres" => probe_postgres(m, start).await,
+        "redis" => probe_redis(m, start).await,
+        "rabbitmq" => probe_rabbitmq(m, start).await,
+        "dns" => probe_dns(m, start).await,
         other => down(&format!("unsupported monitor kind: {other}")),
     }
 }
@@ -372,6 +376,113 @@ async fn probe_tcp(m: &Monitor, start: Instant) -> Beat {
             b.debug = Some(dbg(Some("connect timeout".into())));
             b
         }
+    }
+}
+
+/// Build an "up" beat for the simple connect-style checks.
+fn ok_beat(start: Instant, target: &str, msg: Option<String>) -> Beat {
+    Beat {
+        up: true,
+        latency_ms: Some(start.elapsed().as_millis() as i32),
+        status_code: None,
+        message: msg,
+        debug: Some(json!({ "target": target })),
+    }
+}
+fn err_beat(start: Instant, target: &str, msg: String) -> Beat {
+    Beat {
+        up: false,
+        latency_ms: Some(start.elapsed().as_millis() as i32),
+        status_code: None,
+        message: Some(truncate(&msg, 200)),
+        debug: Some(json!({ "target": target, "error": msg })),
+    }
+}
+
+/// PostgreSQL: connect (target is a `postgres://…` URL) and run `SELECT 1`.
+async fn probe_postgres(m: &Monitor, start: Instant) -> Beat {
+    use sqlx::Connection;
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let fut = async {
+        let mut conn = sqlx::postgres::PgConnection::connect(&m.target).await?;
+        sqlx::query("SELECT 1").execute(&mut conn).await?;
+        let _ = conn.close().await;
+        Ok::<(), sqlx::Error>(())
+    };
+    match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(())) => ok_beat(start, &m.target, None),
+        Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
+        Err(_) => err_beat(start, &m.target, "connect timeout".into()),
+    }
+}
+
+/// Redis: TCP connect to host:port, optional AUTH, then PING → expect +PONG.
+async fn probe_redis(m: &Monitor, start: Instant) -> Beat {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let pass = cfg_str(&m.config, "password").map(str::to_owned);
+    let fut = async {
+        let mut s = tokio::net::TcpStream::connect(&m.target).await?;
+        if let Some(p) = pass {
+            s.write_all(format!("AUTH {p}\r\n").as_bytes()).await?;
+        }
+        s.write_all(b"PING\r\n").await?;
+        let mut buf = [0u8; 128];
+        let n = s.read(&mut buf).await?;
+        Ok::<String, std::io::Error>(String::from_utf8_lossy(&buf[..n]).into_owned())
+    };
+    match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(resp)) if resp.contains("PONG") => ok_beat(start, &m.target, None),
+        Ok(Ok(resp)) => err_beat(start, &m.target, format!("unexpected reply: {}", resp.trim())),
+        Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
+        Err(_) => err_beat(start, &m.target, "connect timeout".into()),
+    }
+}
+
+/// RabbitMQ: TCP connect + send the AMQP 0-9-1 protocol header; a live broker
+/// replies (Connection.Start or a version header). No AMQP client needed.
+async fn probe_rabbitmq(m: &Monitor, start: Instant) -> Beat {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let to = cfg_u64(&m.config, "timeout_secs", 10).clamp(1, 60);
+    let fut = async {
+        let mut s = tokio::net::TcpStream::connect(&m.target).await?;
+        s.write_all(b"AMQP\x00\x00\x09\x01").await?;
+        let mut buf = [0u8; 16];
+        let n = s.read(&mut buf).await?;
+        Ok::<usize, std::io::Error>(n)
+    };
+    match timeout(Duration::from_secs(to), fut).await {
+        Ok(Ok(n)) if n > 0 => ok_beat(start, &m.target, None),
+        Ok(Ok(_)) => err_beat(start, &m.target, "no AMQP response".into()),
+        Ok(Err(e)) => err_beat(start, &m.target, e.to_string()),
+        Err(_) => err_beat(start, &m.target, "connect timeout".into()),
+    }
+}
+
+/// DNS: resolve the target hostname; up if it resolves (optionally containing an
+/// expected IP substring from config `expected_ip`).
+async fn probe_dns(m: &Monitor, start: Instant) -> Beat {
+    let exp = cfg_str(&m.config, "expected_ip");
+    match tokio::net::lookup_host((m.target.as_str(), 0)).await {
+        Ok(it) => {
+            let ips: Vec<String> = it.map(|sa| sa.ip().to_string()).collect();
+            if ips.is_empty() {
+                return err_beat(start, &m.target, "no DNS records".into());
+            }
+            if let Some(e) = exp {
+                if !ips.iter().any(|ip| ip.contains(e)) {
+                    return err_beat(start, &m.target, format!("expected {e}, got {}", ips.join(", ")));
+                }
+            }
+            Beat {
+                up: true,
+                latency_ms: Some(start.elapsed().as_millis() as i32),
+                status_code: None,
+                message: Some(ips.join(", ")),
+                debug: Some(json!({ "target": m.target, "resolved": ips })),
+            }
+        }
+        Err(e) => err_beat(start, &m.target, e.to_string()),
     }
 }
 
