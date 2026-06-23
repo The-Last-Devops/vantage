@@ -280,10 +280,11 @@ async fn probe_http(m: &Monitor, start: Instant) -> Beat {
     }
     // Browser-ish defaults (overridable above): reflect them in the debug record.
     let has = |name: &str| req_headers.keys().any(|k| k.eq_ignore_ascii_case(name));
-    if !has("user-agent") {
+    let (has_ua, has_accept) = (has("user-agent"), has("accept"));
+    if !has_ua {
         req_headers.insert("User-Agent".into(), json!(DEFAULT_UA));
     }
-    if !has("accept") {
+    if !has_accept {
         req = req.header("Accept", DEFAULT_ACCEPT);
         req_headers.insert("Accept".into(), json!(DEFAULT_ACCEPT));
     }
