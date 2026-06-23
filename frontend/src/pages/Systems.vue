@@ -94,7 +94,13 @@ function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); q.value 
 function resetFilters() { q.value = ''; selected.clear(); router.replace({ query: { ...route.query, q: undefined, fzoom: undefined } }) }
 const shortName = (n) => (n && n.length > 12 ? n.slice(0, 12) + '…' : n)
 const preds = computed(() => parseQuery(q.value))
-const visible = computed(() => servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p))))
+// "Needs attention" sub-view (/attention) narrows everything to abnormal hosts.
+const attnMode = computed(() => route.name === 'attention')
+const visible = computed(() => {
+  let list = servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p)))
+  if (attnMode.value) list = list.filter((s) => sevOf(s) > 0)
+  return list
+})
 function sortList(list, st) {
   const f = {
     name: (a, b) => a.name.localeCompare(b.name),
@@ -258,7 +264,7 @@ const detailLink = (s) => {
 </script>
 
 <template>
-  <AppShell title="Systems">
+  <AppShell :title="attnMode ? 'Needs attention' : 'Systems'">
     <div class="space-y-5">
       <!-- hero -->
       <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -272,8 +278,15 @@ const detailLink = (s) => {
         <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-muted">Avg memory</div><div class="mt-1.5 text-2xl font-semibold text-fg">{{ hero.mem ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.mem || 0) + '%' }"></div></div></div>
       </section>
 
-      <!-- needs attention: only abnormal hosts, grouped by reason -->
-      <section v-if="attention.length" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+      <!-- needs attention: only shown on the /attention sub-view -->
+      <section v-if="attnMode && !attention.length && loaded" class="rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
+        <div class="flex items-center justify-center gap-2 text-sm font-medium text-accent">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
+          All systems healthy
+        </div>
+        <p class="mt-1 text-xs text-muted">No host is down or over its thresholds.</p>
+      </section>
+      <section v-if="attnMode && attention.length" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
         <div class="mb-3 flex items-center gap-2">
           <svg class="h-4 w-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
           <h2 class="text-sm font-semibold text-fg">Needs attention</h2>
