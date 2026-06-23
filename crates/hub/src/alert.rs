@@ -91,6 +91,18 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
             }
         }
 
+        // Record fired/recovered transitions for the history feed (not re-notifies).
+        if eval.firing != was_firing {
+            let _ = sqlx::query(
+                "INSERT INTO alert_events (alert_id, firing, message) VALUES ($1, $2, $3)",
+            )
+            .bind(rule.id)
+            .bind(eval.firing)
+            .bind(&eval.message)
+            .execute(&state.config)
+            .await;
+        }
+
         // Persist state. last_notified advances only when we actually notified.
         if eval.firing != was_firing || should_notify {
             sqlx::query(

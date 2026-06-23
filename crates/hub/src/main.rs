@@ -128,6 +128,7 @@ async fn main() -> Result<()> {
             "/api/namespaces/{id}/alerts",
             get(api::list_alerts).post(api::create_alert),
         )
+        .route("/api/namespaces/{id}/alert-events", get(api::alert_events))
         .route(
             "/api/namespaces/{id}/status-pages",
             post(api::create_status_page),
@@ -155,7 +156,11 @@ async fn main() -> Result<()> {
             patch(api::patch_channel).delete(api::delete_channel),
         )
         .route("/api/channels/{id}/test", post(api::test_channel))
-        .route("/api/alerts/{id}", delete(api::delete_alert))
+        .route(
+            "/api/alerts/{id}",
+            patch(api::patch_alert).delete(api::delete_alert),
+        )
+        .route("/api/alerts/{id}/test", post(api::test_alert))
         .route("/api/status-pages/{id}", delete(api::delete_status_page))
         .route(
             "/api/namespaces/{id}/members/{user_id}",

@@ -151,45 +151,223 @@ pub struct AlertRow {
     pub monitor_id: Option<Uuid>,
     pub system_id: Option<Uuid>,
     pub channel_id: Uuid,
+    pub channel_name: String,
+    pub channel_kind: String,
+    /// "monitor" | "host" + the target's display name.
+    pub target_kind: String,
+    pub target_name: String,
     pub cooldown_secs: i32,
     pub enabled: bool,
     pub condition: Value,
+    /// Current state from the engine (null = not evaluated yet).
+    pub firing: Option<bool>,
+    pub since: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// GET /api/namespaces/:id/alerts — rules whose target lives in this namespace.
+#[derive(sqlx::FromRow)]
+struct AlertJoin {
+    id: Uuid,
+    monitor_id: Option<Uuid>,
+    system_id: Option<Uuid>,
+    channel_id: Uuid,
+    cooldown_secs: i32,
+    enabled: bool,
+    condition: sqlx::types::Json<Value>,
+    channel_name: String,
+    channel_kind: String,
+    monitor_name: Option<String>,
+    system_name: Option<String>,
+    firing: Option<bool>,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// GET /api/namespaces/:id/alerts — rules whose target lives in this namespace,
+/// with their channel, target name and current firing state.
 pub async fn list_alerts(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(ns): Path<Uuid>,
 ) -> Result<Json<Vec<AlertRow>>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Viewer).await?;
-    let rows: Vec<(Uuid, Option<Uuid>, Option<Uuid>, Uuid, i32, bool, sqlx::types::Json<Value>)> =
-        sqlx::query_as(
-            "SELECT r.id, r.monitor_id, r.system_id, r.channel_id, r.cooldown_secs, r.enabled, r.condition \
-             FROM alerts r \
-             LEFT JOIN monitors m ON m.id = r.monitor_id \
-             LEFT JOIN systems s ON s.id = r.system_id \
-             WHERE COALESCE(m.namespace_id, s.namespace_id) = $1",
-        )
-        .bind(ns)
-        .fetch_all(&state.config)
-        .await
-        .map_err(internal)?;
+    let rows: Vec<AlertJoin> = sqlx::query_as(
+        "SELECT r.id, r.monitor_id, r.system_id, r.channel_id, r.cooldown_secs, r.enabled, \
+                r.condition, c.name AS channel_name, c.kind AS channel_kind, \
+                m.name AS monitor_name, s.name AS system_name, \
+                st.firing, st.last_changed AS since \
+         FROM alerts r JOIN channels c ON c.id = r.channel_id \
+         LEFT JOIN monitors m ON m.id = r.monitor_id \
+         LEFT JOIN systems s ON s.id = r.system_id \
+         LEFT JOIN alert_state st ON st.alert_id = r.id \
+         WHERE COALESCE(m.namespace_id, s.namespace_id) = $1 \
+         ORDER BY st.firing DESC NULLS LAST, r.enabled DESC",
+    )
+    .bind(ns)
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(
-                |(id, monitor_id, system_id, channel_id, cooldown_secs, enabled, condition)| {
-                    AlertRow {
-                        id,
-                        monitor_id,
-                        system_id,
-                        channel_id,
-                        cooldown_secs,
-                        enabled,
-                        condition: condition.0,
-                    }
-                },
-            )
+            .map(|a| {
+                let (target_kind, target_name) = if a.monitor_id.is_some() {
+                    ("monitor", a.monitor_name.unwrap_or_default())
+                } else {
+                    ("host", a.system_name.unwrap_or_default())
+                };
+                AlertRow {
+                    id: a.id,
+                    monitor_id: a.monitor_id,
+                    system_id: a.system_id,
+                    channel_id: a.channel_id,
+                    channel_name: a.channel_name,
+                    channel_kind: a.channel_kind,
+                    target_kind: target_kind.into(),
+                    target_name,
+                    cooldown_secs: a.cooldown_secs,
+                    enabled: a.enabled,
+                    condition: a.condition.0,
+                    firing: a.firing,
+                    since: a.since,
+                }
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Deserialize)]
+pub struct PatchAlert {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub cooldown_secs: Option<i32>,
+    #[serde(default)]
+    pub channel_id: Option<Uuid>,
+    #[serde(default)]
+    pub condition: Option<Value>,
+}
+
+/// PATCH /api/alerts/:id — toggle enabled, change cooldown/channel/condition.
+pub async fn patch_alert(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<PatchAlert>,
+) -> Result<StatusCode, StatusCode> {
+    let ns = ns_of(
+        &state,
+        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
+         LEFT JOIN monitors m ON m.id = r.monitor_id \
+         LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
+        id,
+    )
+    .await?;
+    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    sqlx::query(
+        "UPDATE alerts SET enabled = COALESCE($2, enabled), \
+            cooldown_secs = COALESCE($3, cooldown_secs), \
+            channel_id = COALESCE($4, channel_id), \
+            condition = COALESCE($5, condition) WHERE id = $1",
+    )
+    .bind(id)
+    .bind(req.enabled)
+    .bind(req.cooldown_secs)
+    .bind(req.channel_id)
+    .bind(req.condition.map(sqlx::types::Json))
+    .execute(&state.config)
+    .await
+    .map_err(internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/alerts/:id/test — send a test notification through the rule's channel.
+pub async fn test_alert(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let ns = ns_of(
+        &state,
+        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
+         LEFT JOIN monitors m ON m.id = r.monitor_id \
+         LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
+        id,
+    )
+    .await
+    .map_err(|s| (s, "not found".into()))?;
+    rbac::require_role(&state, &user, ns, Role::Editor)
+        .await
+        .map_err(|s| (s, "forbidden".into()))?;
+    let row: Option<(String, sqlx::types::Json<Value>)> = sqlx::query_as(
+        "SELECT c.kind, c.config FROM alerts r JOIN channels c ON c.id = r.channel_id WHERE r.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&state.config)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let (kind, config) = row.ok_or((StatusCode::NOT_FOUND, "not found".into()))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    crate::alert::dispatch(
+        &client,
+        &kind,
+        &config.0,
+        "🔔 Test alert from Last Monitor — this rule's channel works.",
+    )
+    .await
+    .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Serialize)]
+pub struct AlertEvent {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub firing: bool,
+    pub message: Option<String>,
+    pub target_name: String,
+    pub target_kind: String,
+}
+
+/// GET /api/namespaces/:id/alert-events — recent fired/recovered transitions.
+pub async fn alert_events(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(ns): Path<Uuid>,
+) -> Result<Json<Vec<AlertEvent>>, StatusCode> {
+    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let rows: Vec<(
+        chrono::DateTime<chrono::Utc>,
+        bool,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT e.at, e.firing, e.message, m.name, s.name \
+         FROM alert_events e JOIN alerts r ON r.id = e.alert_id \
+         LEFT JOIN monitors m ON m.id = r.monitor_id \
+         LEFT JOIN systems s ON s.id = r.system_id \
+         WHERE COALESCE(m.namespace_id, s.namespace_id) = $1 \
+         ORDER BY e.at DESC LIMIT 100",
+    )
+    .bind(ns)
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(at, firing, message, mname, sname)| {
+                let (target_kind, target_name) = match mname {
+                    Some(n) => ("monitor", n),
+                    None => ("host", sname.unwrap_or_default()),
+                };
+                AlertEvent {
+                    at,
+                    firing,
+                    message,
+                    target_name,
+                    target_kind: target_kind.into(),
+                }
+            })
             .collect(),
     ))
 }
