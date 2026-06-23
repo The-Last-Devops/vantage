@@ -141,33 +141,34 @@ function sevOf(s) {
   chk(m.cpu, t.cpu_warn, t.cpu_crit); chk(m.mem, t.mem_warn, t.mem_crit); chk(m.disk, t.disk_warn, t.disk_crit); chk(m.dutil, t.dutil_warn, t.dutil_crit)
   return lvl
 }
-const ATTN_GROUPS = [
-  { key: 'down', label: 'Down', metric: null, unit: '', filter: 'status:offline' },
-  { key: 'disk', label: 'Disk almost full', metric: 'disk', unit: '%', filter: `disk>${DEFAULT_THR.disk_warn}` },
-  { key: 'cpu', label: 'High CPU', metric: 'cpu', unit: '%', filter: `cpu>${DEFAULT_THR.cpu_warn}` },
-  { key: 'mem', label: 'High memory', metric: 'mem', unit: '%', filter: `mem>${DEFAULT_THR.mem_warn}` },
-  { key: 'dutil', label: 'High disk I/O', metric: 'dutil', unit: '%', filter: null },
-]
-const attnHostCount = computed(() => new Set(attention.value.flatMap((g) => g.hosts.map((h) => h.s.id))).size)
-const attention = computed(() => {
-  const groups = []
-  for (const g of ATTN_GROUPS) {
-    let hosts
-    if (g.key === 'down') {
-      hosts = visible.value.filter((s) => !online(s)).map((s) => ({ s, v: null, crit: true }))
+// One flat list of abnormal hosts; each carries badges for what's wrong.
+const ISSUE = {
+  down: { label: 'Offline', icon: 'M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10' },
+  disk: { label: 'Disk space', icon: 'M22 12H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11ZM6 16h.01M10 16h.01' },
+  cpu: { label: 'CPU', icon: 'M6 6h12v12H6zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3' },
+  mem: { label: 'Memory', icon: 'M3 8h18v8H3zM7 8v8M12 8v8M17 8v8' },
+  dutil: { label: 'Disk I/O', icon: 'M22 12h-4l-3 9L9 3l-3 9H2' },
+}
+const ISSUE_ORDER = ['down', 'disk', 'cpu', 'mem', 'dutil']
+const attnHosts = computed(() => {
+  const out = []
+  for (const s of visible.value) {
+    const issues = []
+    if (!online(s)) {
+      issues.push({ key: 'down', crit: true, val: null })
     } else {
-      hosts = []
-      for (const s of visible.value) {
-        if (!online(s)) continue
-        const t = thrOf(s), v = metricsOf(s)[g.metric], w = t[g.metric + '_warn'], c = t[g.metric + '_crit']
+      const t = thrOf(s), m = metricsOf(s)
+      for (const k of ['disk', 'cpu', 'mem', 'dutil']) {
+        const v = m[k], w = t[k + '_warn'], c = t[k + '_crit']
         if (v == null || v < w) continue
-        hosts.push({ s, v, crit: v >= c })
+        issues.push({ key: k, crit: v >= c, val: Math.round(v) })
       }
-      hosts.sort((a, b) => b.v - a.v)
     }
-    if (hosts.length) groups.push({ ...g, hosts })
+    if (!issues.length) continue
+    issues.sort((a, b) => ISSUE_ORDER.indexOf(a.key) - ISSUE_ORDER.indexOf(b.key))
+    out.push({ s, issues, crit: issues.some((i) => i.crit), top: Math.max(...issues.map((i) => i.val ?? 101)) })
   }
-  return groups
+  return out.sort((a, b) => Number(b.crit) - Number(a.crit) || b.top - a.top)
 })
 function sortBy(col) { if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc'; else { sortState.col = col; sortState.dir = 'asc' } }
 const arrow = (col) => (sortState.col === col ? (sortState.dir === 'desc' ? ' ↓' : ' ↑') : '')
@@ -278,36 +279,36 @@ const detailLink = (s) => {
         <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-muted">Avg memory</div><div class="mt-1.5 text-2xl font-semibold text-fg">{{ hero.mem ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.mem || 0) + '%' }"></div></div></div>
       </section>
 
-      <!-- needs attention: only shown on the /attention sub-view -->
-      <section v-if="attnMode && !attention.length && loaded" class="rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
+      <!-- needs attention: a single compact list, icons show what's wrong -->
+      <section v-if="attnMode && !attnHosts.length && loaded" class="rounded-xl border border-accent/30 bg-accent/5 p-6 text-center">
         <div class="flex items-center justify-center gap-2 text-sm font-medium text-accent">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>
           All systems healthy
         </div>
         <p class="mt-1 text-xs text-muted">No host is down or over its thresholds.</p>
       </section>
-      <section v-if="attnMode && attention.length" class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-        <div class="mb-3 flex items-center gap-2">
+      <section v-if="attnMode && attnHosts.length" class="overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/5">
+        <div class="flex items-center gap-2 px-4 py-3">
           <svg class="h-4 w-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
           <h2 class="text-sm font-semibold text-fg">Needs attention</h2>
-          <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ attnHostCount }} hosts</span>
+          <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ attnHosts.length }} hosts</span>
         </div>
-        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div v-for="g in attention" :key="g.key" class="rounded-lg border border-line bg-surface p-3">
-            <button @click="g.filter && (q = g.filter)" :disabled="!g.filter" class="mb-2 flex w-full items-center justify-between gap-2 text-left" :class="g.filter ? 'hover:opacity-80' : 'cursor-default'">
-              <span class="text-sm font-medium" :class="g.key === 'down' ? 'text-red-400' : 'text-amber-400'">{{ g.label }}</span>
-              <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ g.hosts.length }}</span>
-            </button>
-            <ul class="space-y-1">
-              <li v-for="h in g.hosts.slice(0, 5)" :key="h.s.id" class="flex items-center justify-between gap-2 text-xs">
-                <RouterLink :to="{ name: 'system', params: { id: h.s.id } }" class="truncate text-fg hover:text-accent" :title="h.s.name">{{ h.s.name }}</RouterLink>
-                <span v-if="h.v != null" class="shrink-0 tabular-nums" :class="h.crit ? 'text-red-400' : 'text-amber-400'">{{ Math.round(h.v) }}{{ g.unit }}</span>
-                <span v-else class="shrink-0 text-red-400">offline</span>
-              </li>
-              <li v-if="g.hosts.length > 5" class="text-xs text-faint">+{{ g.hosts.length - 5 }} more</li>
-            </ul>
-          </div>
-        </div>
+        <ul class="divide-y divide-line/60 border-t border-line/60">
+          <li v-for="h in attnHosts" :key="h.s.id" class="flex items-center justify-between gap-3 px-4 py-2 hover:bg-surface2/40">
+            <RouterLink :to="{ name: 'system', params: { id: h.s.id } }" class="flex min-w-0 items-baseline gap-2 hover:text-accent">
+              <span class="truncate text-sm text-fg">{{ h.s.name }}</span>
+              <span class="shrink-0 text-xs text-faint">{{ h.s.namespace }}</span>
+            </RouterLink>
+            <div class="flex shrink-0 items-center gap-1.5">
+              <span v-for="i in h.issues" :key="i.key" :title="ISSUE[i.key].label + (i.val != null ? ' ' + i.val + '%' : '')"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs" :class="i.crit ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ISSUE[i.key].icon"/></svg>
+                <span v-if="i.val != null" class="tabular-nums">{{ i.val }}%</span>
+                <span v-else>offline</span>
+              </span>
+            </div>
+          </li>
+        </ul>
       </section>
 
       <!-- toolbar -->
