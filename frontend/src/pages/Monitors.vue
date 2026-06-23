@@ -53,6 +53,25 @@ async function removeMonitor(m) {
   try { await api.del(`/api/monitors/${m.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 
+// ---- edit ----
+const editing = ref(null)
+const ef = ref({ name: '', target: '', interval_secs: 60, enabled: true })
+const editErr = ref('')
+function openEdit(m) {
+  if (editing.value === m.id) { editing.value = null; return }
+  editErr.value = ''
+  ef.value = { name: m.name, target: m.target, interval_secs: m.interval_secs, enabled: m.enabled }
+  editing.value = m.id
+}
+async function saveEdit(m) {
+  editErr.value = ''
+  if (!ef.value.name.trim() || !ef.value.target.trim()) { editErr.value = 'Name and target are required.'; return }
+  try {
+    await api.patch(`/api/monitors/${m.id}`, { name: ef.value.name.trim(), target: ef.value.target.trim(), interval_secs: Number(ef.value.interval_secs) || 60, enabled: ef.value.enabled })
+    editing.value = null; await load()
+  } catch (e) { editErr.value = e.status === 403 ? 'You need editor access.' : `Failed (${e.status}).` }
+}
+
 const statusOf = (m) => (m.up == null ? 'pending' : m.up ? 'up' : 'down')
 const fmtAgo = (t) => {
   if (!t) return 'never'
@@ -117,9 +136,11 @@ onUnmounted(() => clearInterval(timer))
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-for="m in monitors" :key="m.id" class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
+            <template v-for="m in monitors" :key="m.id">
+            <tr class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
               <td class="px-4 py-3">
-                <span class="inline-flex items-center gap-1.5 text-xs font-medium"
+                <span v-if="!m.enabled" class="inline-flex items-center gap-1.5 text-xs font-medium text-faint"><span class="h-2 w-2 rounded-full bg-faint"></span>Paused</span>
+                <span v-else class="inline-flex items-center gap-1.5 text-xs font-medium"
                   :class="statusOf(m) === 'up' ? 'text-accent' : statusOf(m) === 'down' ? 'text-red-500' : 'text-muted'">
                   <span class="h-2 w-2 rounded-full" :class="statusOf(m) === 'up' ? 'bg-accent' : statusOf(m) === 'down' ? 'bg-red-500' : 'bg-faint'"></span>
                   {{ statusOf(m) === 'up' ? 'Up' : statusOf(m) === 'down' ? 'Down' : 'Pending' }}
@@ -130,12 +151,31 @@ onUnmounted(() => clearInterval(timer))
               <td class="px-4 py-3 font-mono text-xs text-muted">{{ m.target }}</td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ m.latency_ms != null ? m.latency_ms + ' ms' : '—' }}</td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ fmtAgo(m.last_check) }}</td>
-              <td class="px-4 py-3 text-right">
-                <button @click="removeMonitor(m)" title="Delete monitor" class="text-muted hover:text-rose-400">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-                </button>
+              <td class="px-4 py-3">
+                <div class="flex items-center justify-end gap-3">
+                  <button @click="openEdit(m)" :class="editing === m.id ? 'text-accent' : 'text-muted hover:text-accent'" title="Edit monitor">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+                  </button>
+                  <button @click="removeMonitor(m)" title="Delete monitor" class="text-muted hover:text-rose-400">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                  </button>
+                </div>
               </td>
             </tr>
+            <tr v-if="editing === m.id" class="border-b border-line/60 bg-surface2/40">
+              <td colspan="7" class="px-4 py-4">
+                <div class="flex flex-wrap items-end gap-3">
+                  <label class="text-xs text-faint">Name<input v-model="ef.name" class="mt-1 block w-44 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
+                  <label class="text-xs text-faint">Target<input v-model="ef.target" class="mt-1 block w-72 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
+                  <label class="text-xs text-faint">Interval (s)<input v-model.number="ef.interval_secs" type="number" min="5" class="mt-1 block w-24 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg focus:border-accent/60 focus:outline-none" /></label>
+                  <label class="flex items-center gap-2 text-sm text-fg"><input v-model="ef.enabled" type="checkbox" class="h-4 w-4 rounded border-line" />Enabled</label>
+                  <button @click="saveEdit(m)" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accentfg hover:opacity-90">Save</button>
+                  <button @click="editing = null" class="text-sm text-muted hover:text-fg">Cancel</button>
+                  <span v-if="editErr" class="text-xs text-rose-400">{{ editErr }}</span>
+                </div>
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </div>
