@@ -42,10 +42,13 @@ struct Beat {
 
 const TICK: Duration = Duration::from_secs(2);
 const BODY_CAP: usize = 4096;
-// Browser-ish defaults so WAFs don't reject a "bot" with no UA/Accept (e.g. 406).
-// Both are overridable per monitor via the headers config.
-const DEFAULT_UA: &str =
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+// Honest, identifying defaults so WAFs don't reject a request with no UA/Accept
+// (e.g. a bare 406). Both are overridable per monitor via the headers config.
+const DEFAULT_UA: &str = concat!(
+    "last-monitor/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/the-last-devops/last-monitor)"
+);
 const DEFAULT_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
 fn cfg_u64(c: &Value, key: &str, default: u64) -> u64 {
