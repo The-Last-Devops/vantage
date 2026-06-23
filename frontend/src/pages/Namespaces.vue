@@ -138,16 +138,19 @@ async function saveThr(ns) {
                 <button @click="viewSystems(ns)" class="text-fg hover:text-accent">{{ ns.system_count }}</button>
               </td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ ns.member_count }}</td>
-              <td class="px-4 py-3 text-right">
-                <button @click="toggleThr(ns)" title="Alert thresholds" class="mr-3 text-muted hover:text-accent" :class="openThr === ns.id ? 'text-accent' : ''">
-                  <svg class="inline h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
-                </button>
-                <button v-if="ns.name !== 'default'" @click="remove(ns)"
-                  :title="ns.system_count > 0 ? 'Has systems — cannot delete' : 'Delete namespace'"
-                  class="text-muted hover:text-rose-400 disabled:opacity-30"
-                  :disabled="ns.system_count > 0">
-                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-                </button>
+              <td class="px-4 py-3">
+                <div class="flex items-center justify-end gap-3">
+                  <button @click="toggleThr(ns)" title="Alert thresholds" class="text-muted hover:text-accent" :class="openThr === ns.id ? 'text-accent' : ''">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+                  </button>
+                  <button v-if="ns.name !== 'default'" @click="remove(ns)"
+                    :title="ns.system_count > 0 ? 'Has systems — cannot delete' : 'Delete namespace'"
+                    class="text-muted hover:text-rose-400 disabled:opacity-30"
+                    :disabled="ns.system_count > 0">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+                  </button>
+                  <span v-else class="h-4 w-4"></span>
+                </div>
               </td>
             </tr>
             <!-- threshold editor -->
