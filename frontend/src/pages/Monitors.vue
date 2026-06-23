@@ -243,7 +243,7 @@ onUnmounted(() => clearInterval(timer))
       <p v-else-if="err" class="text-sm text-rose-400">{{ err }}</p>
       <p v-else-if="!shown.length" class="rounded-xl border border-line bg-surface p-6 text-center text-sm text-muted">{{ downOnly ? 'No services are currently down. 🎉' : 'No monitors yet. Add a service check above.' }}</p>
 
-      <div v-else class="overflow-hidden rounded-xl border border-line bg-surface">
+      <div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
         <table class="w-full text-sm">
           <thead><tr class="border-b border-line text-left text-[11px] uppercase tracking-wider text-faint">
             <th class="px-4 py-3 font-medium">Status</th>
@@ -272,11 +272,11 @@ onUnmounted(() => clearInterval(timer))
               <td class="px-4 py-3 text-muted">{{ kindLabel(m.kind) }}</td>
               <td class="px-4 py-3 text-muted">{{ m.namespace }}</td>
               <td class="px-4 py-3 font-mono text-xs text-muted">
-                <span v-if="m.kind === 'push'" class="inline-flex items-center gap-1.5">
-                  <span class="truncate" :title="pushUrl(m)">{{ pushUrl(m) }}</span>
-                  <button @click="copyText(pushUrl(m), $event)" class="rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] not-italic text-muted hover:text-accent">Copy</button>
+                <span v-if="m.kind === 'push'" class="flex items-center gap-1.5">
+                  <span class="block max-w-[20rem] truncate" :title="pushUrl(m)">{{ pushUrl(m) }}</span>
+                  <button @click="copyText(pushUrl(m), $event)" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] not-italic text-muted hover:text-accent">Copy</button>
                 </span>
-                <span v-else>{{ m.target }}</span>
+                <span v-else class="block max-w-[24rem] truncate" :title="m.target">{{ m.target }}</span>
               </td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ m.latency_ms != null ? m.latency_ms + ' ms' : '—' }}</td>
               <td class="px-4 py-3 text-right tabular-nums text-muted">{{ fmtAgo(m.last_check) }}</td>
