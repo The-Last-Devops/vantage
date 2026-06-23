@@ -170,6 +170,9 @@ const attnHosts = computed(() => {
   }
   return out.sort((a, b) => Number(b.crit) - Number(a.crit) || b.top - a.top)
 })
+// human-readable problem text for tooltips
+const issueText = (i) => (i.key === 'down' ? 'Offline — not reporting in' : `High ${ISSUE[i.key].label.toLowerCase()}: ${i.val}% (${i.crit ? 'critical' : 'warning'})`)
+const chipTitle = (h) => `${h.s.name} · ${h.s.namespace}\n` + h.issues.map(issueText).join('\n')
 function sortBy(col) { if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc'; else { sortState.col = col; sortState.dir = 'asc' } }
 const arrow = (col) => (sortState.col === col ? (sortState.dir === 'desc' ? ' ↓' : ' ↑') : '')
 // click a row attribute (type/cluster/ns) → set that filter dimension (replacing any existing)
@@ -295,9 +298,9 @@ const detailLink = (s) => {
         </div>
         <div class="flex flex-wrap gap-2 border-t border-line/60 p-3">
           <RouterLink v-for="h in attnHosts" :key="h.s.id" :to="{ name: 'system', params: { id: h.s.id } }"
-            :title="h.s.namespace" class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs hover:border-accent/50">
+            :title="chipTitle(h)" class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs hover:border-accent/50">
             <span class="text-fg">{{ h.s.name }}</span>
-            <span v-for="i in h.issues" :key="i.key" :title="ISSUE[i.key].label + (i.val != null ? ' ' + i.val + '%' : '')"
+            <span v-for="i in h.issues" :key="i.key" :title="issueText(i)"
               class="inline-flex items-center gap-0.5 tabular-nums" :class="i.crit ? 'text-red-400' : 'text-amber-400'">
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ISSUE[i.key].icon"/></svg>
               <span v-if="i.val != null">{{ i.val }}%</span>
