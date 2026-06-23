@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Test-agent simulator: enrolls many fake hosts (node / docker / k8s) and pushes
-// realistic MetricsReport to the hub's /api/ingest on an interval — so the
+// realistic MetricsReport to the hub's /pub/ingest on an interval — so the
 // dashboard + metrics pipeline have live, sizable data to test against.
 //
 // Backend reality (see crates/hub): servers are flat, auto-registered by
@@ -157,7 +157,7 @@ function report(h) {
 
 async function push(h) {
   try {
-    await fetch(HUB + '/api/ingest', {
+    await fetch(HUB + '/pub/ingest', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': h.token },
       body: JSON.stringify(report(h)),
@@ -203,7 +203,7 @@ async function main() {
   }
 
   console.log(`fleet: ${fleet.length} hosts (${N_NODES} node, ${N_DOCKER} docker×${N_CONTAINERS} containers, ${N_K8S_CLUSTERS} k8s×${N_K8S_NODES} nodes)`);
-  console.log(`pushing every ${INTERVAL / 1000}s to ${HUB}/api/ingest`);
+  console.log(`pushing every ${INTERVAL / 1000}s to ${HUB}/pub/ingest`);
 
   let ticks = 0;
   const tick = async () => {

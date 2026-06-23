@@ -239,7 +239,8 @@ pub async fn data_stats(
 #[derive(Deserialize)]
 pub struct SetRetention {
     pub table: String,
-    pub days: i64,
+    /// Interpreted in the tier's unit (hours for raw, days for rollups).
+    pub value: i64,
 }
 
 /// POST /api/admin/retention — change a tier's retention window.
@@ -251,7 +252,7 @@ pub async fn set_retention(
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    crate::data_admin::set_retention(&state.data, &req.table, req.days)
+    crate::data_admin::set_retention(&state.data, &req.table, req.value)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     Ok(StatusCode::NO_CONTENT)

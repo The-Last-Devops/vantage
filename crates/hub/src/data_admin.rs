@@ -12,8 +12,10 @@ use sqlx::PgPool;
 /// and ignored so startup never fails on re-run.
 pub async fn setup(data: &PgPool) {
     let stmts = [
-        // Daily chunks so compression/retention act at day granularity (default 7d).
-        "SELECT set_chunk_time_interval('system_metrics', INTERVAL '1 day')",
+        // Raw system_metrics is the short, hour-granularity hot tier: small chunks so
+        // an hours-based retention policy can actually drop data (default kept 24h).
+        "SELECT set_chunk_time_interval('system_metrics', INTERVAL '1 hour')",
+        // Container raw + heartbeats keep day chunks (longer retention).
         "SELECT set_chunk_time_interval('container_metrics', INTERVAL '1 day')",
         "SELECT set_chunk_time_interval('heartbeats', INTERVAL '1 day')",
         // 1-minute rollup from raw system_metrics.
@@ -37,11 +39,32 @@ pub async fn setup(data: &PgPool) {
             end_offset => INTERVAL '1 minute', schedule_interval => INTERVAL '1 minute')",
         "SELECT add_continuous_aggregate_policy('system_metrics_1h', start_offset => INTERVAL '3 days', \
             end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '1 hour')",
-        // Retention tiers.
-        "SELECT add_retention_policy('system_metrics', INTERVAL '1 day')",
+        // Container rollups (parity with system_metrics): 1-minute from raw, then a
+        // 1-hour rollup built hierarchically from the 1-minute one so it survives a
+        // short raw retention. Grouped per (system_id, name).
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS container_metrics_1m \
+         WITH (timescaledb.continuous) AS \
+         SELECT system_id, name, time_bucket('1 minute', time) AS bucket, \
+                avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_used, \
+                max(net_rx) AS net_rx, max(net_tx) AS net_tx \
+         FROM container_metrics GROUP BY system_id, name, bucket WITH NO DATA",
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS container_metrics_1h \
+         WITH (timescaledb.continuous) AS \
+         SELECT system_id, name, time_bucket('1 hour', bucket) AS bucket, \
+                avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_used, \
+                max(net_rx) AS net_rx, max(net_tx) AS net_tx \
+         FROM container_metrics_1m GROUP BY system_id, name, time_bucket('1 hour', bucket) WITH NO DATA",
+        "SELECT add_continuous_aggregate_policy('container_metrics_1m', start_offset => INTERVAL '6 hours', \
+            end_offset => INTERVAL '1 minute', schedule_interval => INTERVAL '1 minute')",
+        "SELECT add_continuous_aggregate_policy('container_metrics_1h', start_offset => INTERVAL '3 days', \
+            end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '1 hour')",
+        // Retention tiers (raw system_metrics defaults to 24h, editable in hours).
+        "SELECT add_retention_policy('system_metrics', INTERVAL '24 hours')",
         "SELECT add_retention_policy('system_metrics_1m', INTERVAL '7 days')",
         "SELECT add_retention_policy('system_metrics_1h', INTERVAL '30 days')",
         "SELECT add_retention_policy('container_metrics', INTERVAL '7 days')",
+        "SELECT add_retention_policy('container_metrics_1m', INTERVAL '7 days')",
+        "SELECT add_retention_policy('container_metrics_1h', INTERVAL '30 days')",
         "SELECT add_retention_policy('heartbeats', INTERVAL '30 days')",
         // Compression (append-only data → ~pure win). Raw system_metrics is the
         // short hot tier (1-day retention) so it stays uncompressed; compress the
@@ -56,6 +79,10 @@ pub async fn setup(data: &PgPool) {
         "SELECT add_compression_policy('system_metrics_1m', INTERVAL '1 day')",
         "ALTER MATERIALIZED VIEW system_metrics_1h SET (timescaledb.compress = true)",
         "SELECT add_compression_policy('system_metrics_1h', INTERVAL '7 days')",
+        "ALTER MATERIALIZED VIEW container_metrics_1m SET (timescaledb.compress = true)",
+        "SELECT add_compression_policy('container_metrics_1m', INTERVAL '1 day')",
+        "ALTER MATERIALIZED VIEW container_metrics_1h SET (timescaledb.compress = true)",
+        "SELECT add_compression_policy('container_metrics_1h', INTERVAL '7 days')",
     ];
     for s in stmts {
         if let Err(e) = sqlx::query(s).execute(data).await {
@@ -76,7 +103,18 @@ pub struct TableStat {
 pub struct RetentionTier {
     pub table: String,
     pub label: String,
-    pub days: Option<i64>,
+    /// "hours" for the raw realtime tier, "days" for the downsampled tiers.
+    pub unit: String,
+    pub value: Option<i64>,
+}
+
+/// The raw realtime tier is managed in hours; everything else in days.
+fn unit_for(table: &str) -> &'static str {
+    if table == "system_metrics" {
+        "hours"
+    } else {
+        "days"
+    }
 }
 
 #[derive(Serialize)]
@@ -105,13 +143,19 @@ async fn hypertable_stat(data: &PgPool, name: &str, label: &str) -> TableStat {
     }
 }
 
-/// Parses a retention policy's `drop_after` interval (in days) for a hypertable.
-async fn retention_days(data: &PgPool, table: &str) -> Option<i64> {
-    let row: Option<(Option<i64>,)> = sqlx::query_as(
-        "SELECT (EXTRACT(EPOCH FROM (config->>'drop_after')::interval) / 86400)::bigint \
+/// Reads a retention policy's `drop_after` interval for a hypertable, expressed
+/// in the tier's unit (hours for the raw tier, days otherwise).
+async fn retention_value(data: &PgPool, table: &str) -> Option<i64> {
+    let divisor = if unit_for(table) == "hours" {
+        3600
+    } else {
+        86400
+    };
+    let row: Option<(Option<i64>,)> = sqlx::query_as(&format!(
+        "SELECT (EXTRACT(EPOCH FROM (config->>'drop_after')::interval) / {divisor})::bigint \
          FROM timescaledb_information.jobs \
-         WHERE proc_name = 'policy_retention' AND hypertable_name = $1",
-    )
+         WHERE proc_name = 'policy_retention' AND hypertable_name = $1"
+    ))
     .bind(table)
     .fetch_optional(data)
     .await
@@ -134,36 +178,30 @@ pub async fn stats(data: &PgPool) -> DataStats {
         hypertable_stat(data, "system_metrics_1m", "1-minute rollup").await,
         hypertable_stat(data, "system_metrics_1h", "1-hour rollup").await,
         hypertable_stat(data, "container_metrics", "Container metrics").await,
+        hypertable_stat(data, "container_metrics_1m", "Container 1-minute rollup").await,
+        hypertable_stat(data, "container_metrics_1h", "Container 1-hour rollup").await,
         hypertable_stat(data, "heartbeats", "Heartbeats").await,
     ];
 
-    let retention = vec![
-        RetentionTier {
-            table: "system_metrics".into(),
-            label: "Raw (realtime)".into(),
-            days: retention_days(data, "system_metrics").await,
-        },
-        RetentionTier {
-            table: "system_metrics_1m".into(),
-            label: "1-minute rollup".into(),
-            days: retention_days(data, "system_metrics_1m").await,
-        },
-        RetentionTier {
-            table: "system_metrics_1h".into(),
-            label: "1-hour rollup".into(),
-            days: retention_days(data, "system_metrics_1h").await,
-        },
-        RetentionTier {
-            table: "container_metrics".into(),
-            label: "Container metrics".into(),
-            days: retention_days(data, "container_metrics").await,
-        },
-        RetentionTier {
-            table: "heartbeats".into(),
-            label: "Heartbeats".into(),
-            days: retention_days(data, "heartbeats").await,
-        },
+    // (table, label) for each tier; unit + value are filled in below.
+    let tiers = [
+        ("system_metrics", "Raw (realtime)"),
+        ("system_metrics_1m", "1-minute rollup"),
+        ("system_metrics_1h", "1-hour rollup"),
+        ("container_metrics", "Container (raw)"),
+        ("container_metrics_1m", "Container 1-minute rollup"),
+        ("container_metrics_1h", "Container 1-hour rollup"),
+        ("heartbeats", "Heartbeats"),
     ];
+    let mut retention = Vec::with_capacity(tiers.len());
+    for (table, label) in tiers {
+        retention.push(RetentionTier {
+            table: table.into(),
+            label: label.into(),
+            unit: unit_for(table).into(),
+            value: retention_value(data, table).await,
+        });
+    }
 
     DataStats {
         db_size,
@@ -178,12 +216,20 @@ const RETENTION_TABLES: &[&str] = &[
     "system_metrics_1m",
     "system_metrics_1h",
     "container_metrics",
+    "container_metrics_1m",
+    "container_metrics_1h",
     "heartbeats",
 ];
 
-pub async fn set_retention(data: &PgPool, table: &str, days: i64) -> Result<(), String> {
-    if !RETENTION_TABLES.contains(&table) || !(1..=3650).contains(&days) {
-        return Err("invalid table or days".into());
+/// `value` is interpreted in the tier's unit (hours for the raw tier, days else).
+pub async fn set_retention(data: &PgPool, table: &str, value: i64) -> Result<(), String> {
+    if !RETENTION_TABLES.contains(&table) {
+        return Err("invalid table".into());
+    }
+    let unit = unit_for(table);
+    let max = if unit == "hours" { 8760 } else { 3650 }; // 1y in hours / 10y in days
+    if !(1..=max).contains(&value) {
+        return Err("value out of range".into());
     }
     let _ = sqlx::query(&format!(
         "SELECT remove_retention_policy('{table}', if_exists => true)"
@@ -191,7 +237,7 @@ pub async fn set_retention(data: &PgPool, table: &str, days: i64) -> Result<(), 
     .execute(data)
     .await;
     sqlx::query(&format!(
-        "SELECT add_retention_policy('{table}', INTERVAL '{days} days')"
+        "SELECT add_retention_policy('{table}', INTERVAL '{value} {unit}')"
     ))
     .execute(data)
     .await

@@ -9,14 +9,14 @@ const isAdmin = computed(() => !!auth.user?.is_admin)
 
 const stats = ref(null)
 const loading = ref(true)
-const draft = ref({})   // table -> days being edited
+const draft = ref({})   // table -> value being edited (in the tier's unit)
 const msg = ref('')
 
 async function load() {
   loading.value = true
   try {
     stats.value = await api.get('/api/admin/data')
-    draft.value = Object.fromEntries(stats.value.retention.map((t) => [t.table, t.days ?? '']))
+    draft.value = Object.fromEntries(stats.value.retention.map((t) => [t.table, t.value ?? '']))
   } catch { stats.value = null }
   loading.value = false
 }
@@ -24,9 +24,9 @@ onMounted(() => { if (isAdmin.value) load() })
 
 async function save(tier) {
   msg.value = ''
-  const days = Number(draft.value[tier.table])
-  if (!Number.isFinite(days) || days < 1) { msg.value = `${tier.label}: enter a positive number of days.`; return }
-  try { await api.post('/api/admin/retention', { table: tier.table, days }); msg.value = `✓ ${tier.label} retention set to ${days} days.`; await load() }
+  const value = Number(draft.value[tier.table])
+  if (!Number.isFinite(value) || value < 1) { msg.value = `${tier.label}: enter a positive number of ${tier.unit}.`; return }
+  try { await api.post('/api/admin/retention', { table: tier.table, value }); msg.value = `✓ ${tier.label} retention set to ${value} ${tier.unit}.`; await load() }
   catch (e) { msg.value = `Failed (${e.status}).` }
 }
 </script>
@@ -67,7 +67,7 @@ async function save(tier) {
         <!-- retention tiers -->
         <section class="space-y-3">
           <h2 class="text-sm font-semibold text-fg">Retention</h2>
-          <p class="text-xs text-faint">How long each downsampling tier is kept before TimescaleDB drops it. Lower = less disk.</p>
+          <p class="text-xs text-faint">How long each tier is kept before TimescaleDB drops it. Lower = less disk. The <b>raw</b> tier is the high-resolution realtime data (kept in <b>hours</b>, 24h by default) — it bounds how far back the detailed per-second charts reach; older ranges read from the rollups.</p>
           <div class="overflow-hidden rounded-xl border border-line bg-surface">
             <table class="w-full text-sm">
               <thead><tr class="border-b border-line text-left text-[11px] uppercase tracking-wider text-faint">
@@ -81,7 +81,7 @@ async function save(tier) {
                   <td class="px-4 py-3">
                     <div class="flex items-center gap-1.5">
                       <input v-model.number="draft[t.table]" type="number" min="1" class="w-20 rounded-md border border-line bg-surface2 px-2 py-1 text-sm text-fg focus:border-accent/60 focus:outline-none" />
-                      <span class="text-xs text-muted">days</span>
+                      <span class="text-xs text-muted">{{ t.unit }}</span>
                     </div>
                   </td>
                   <td class="px-4 py-3 text-right">
