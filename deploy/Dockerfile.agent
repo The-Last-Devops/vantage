@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
-# Tiny agent image. cargo-chef caches the dependency layer so code-only pushes
-# don't recompile the whole dependency tree (the slow part, esp. under arm64).
+# Tiny agent image: a static musl binary on `scratch` (no OS, no libc, no certs —
+# rustls' webpki roots are compiled in). cargo-chef caches the dependency layer so
+# code-only pushes don't recompile the whole tree (slow, esp. under arm64).
+# Built natively per-arch (no QEMU); the musl triple is derived from the build host.
 FROM rust:1-bookworm AS chef
 RUN cargo install cargo-chef --locked
 WORKDIR /app
@@ -11,14 +13,16 @@ COPY crates ./crates
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS build
+RUN apt-get update && apt-get install -y --no-install-recommends musl-tools \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup target add "$(uname -m)-unknown-linux-musl"
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release -p agent --recipe-path recipe.json
+RUN cargo chef cook --release --target "$(uname -m)-unknown-linux-musl" -p agent --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release -p agent && cp target/release/last-agent /usr/local/bin/last-agent
+RUN cargo build --release --target "$(uname -m)-unknown-linux-musl" -p agent \
+    && cp "target/$(uname -m)-unknown-linux-musl/release/last-agent" /last-agent
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/bin/last-agent /usr/local/bin/last-agent
-ENTRYPOINT ["last-agent"]
+FROM scratch
+COPY --from=build /last-agent /last-agent
+ENTRYPOINT ["/last-agent"]

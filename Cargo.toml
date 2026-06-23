@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/shared", "crates/agent", "crates/hub"]
 
 [workspace.package]
-version = "1.3.0"
+version = "1.3.1"
 edition = "2021"
 license = "MIT"
 
@@ -18,3 +18,12 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 shared = { path = "crates/shared" }
+
+# Size-optimized release builds (smaller binaries → smaller images). No
+# panic="abort": the hub relies on tokio catching per-task panics, which needs
+# unwinding. strip removes symbols; LTO + 1 codegen unit shrink + speed up.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

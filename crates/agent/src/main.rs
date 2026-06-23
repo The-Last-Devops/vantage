@@ -433,7 +433,9 @@ mod tests {
     }
 }
 
-#[tokio::main]
+// Single-threaded runtime: the agent's work is light + periodic, so one thread
+// keeps the memory/thread footprint minimal (vs. a worker per CPU core).
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
