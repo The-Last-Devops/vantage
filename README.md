@@ -46,16 +46,38 @@ delete, and an **Add system** wizard (binary / Docker / Compose / k8s DaemonSet)
 and live updates (sub-hour ranges refresh every second). Charts always span the selected
 window, leaving blank space when data is sparse.
 
-**Multi-tenant** — namespaces (k8s-style names), RBAC (`owner` / `editor` / `viewer`) plus a
-system `admin`, opaque revocable cookie sessions (argon2), and a first-run wizard to create
+**Services (uptime monitors)** — Uptime-Kuma-style checks: HTTP/HTTPS (status ranges,
+keyword match, headers/body/auth, redirects), TCP, Ping, DNS, TLS-cert expiry, **Push**
+(passive), and database probes — **PostgreSQL, MySQL, MongoDB, Redis, RabbitMQ**. Full
+edit form, retries/flap guard, upside-down mode, and a **last request/response debug**
+panel (with copy) for the most recent success and failure. A `Down` view lists only what's
+currently failing.
+
+**Alerting** — rules fire a **notification channel** (webhook / Telegram / email) when a
+monitor goes down or a host breaches a condition (offline, or CPU/memory/load threshold),
+with per-rule cooldown.
+
+**Needs attention** — triage view that surfaces only abnormal hosts (down / high
+CPU / memory / disk / disk-I/O), with per-namespace thresholds.
+
+**Admin & data** — an **audit log** of user actions (who/what/when/result), an **About**
+page (version, build, update check), and **data retention** tiers you can tune per
+downsampling level (TimescaleDB continuous aggregates + retention policies).
+
+**Multi-tenant** — namespaces (k8s-style names), namespace-scoped RBAC plus a system
+`admin`, opaque revocable cookie sessions (argon2), and a first-run wizard to create
 the admin account. Reusable API keys enroll agents; deleting a key de-registers its hosts.
+
+The sidebar groups everything into **Infrastructure**, **Services**, **Alert** and
+**Settings** — click a parent to jump to its first page, hover the arrow to reveal its
+sub-pages.
 
 ## Architecture
 
 ```
                  push (x-api-key)
   ┌─────────┐  ───────────────────────►  ┌──────────────────────────────┐
-  │ agent   │     POST /api/ingest        │  hub (Axum, single binary)   │
+  │ agent   │     POST /pub/ingest        │  hub (Axum, single binary)   │
   │ (Rust)  │                             │  ingest · auth/RBAC          │
   └─────────┘                             │  JSON API · embedded Vue SPA │
    one per host                           └───────────────┬──────────────┘
