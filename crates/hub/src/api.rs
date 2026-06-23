@@ -1087,18 +1087,14 @@ pub async fn patch_monitor(
             cfg = serde_json::json!({});
         }
         let obj = cfg.as_object_mut().expect("ensured object above");
-        let token = obj
+        // The token is server-owned: always take the stored one (mint if absent)
+        // and ignore whatever the client sent — clients can't set or change it.
+        let token = existing
+            .0
             .get("push_token")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
-            .or_else(|| {
-                existing
-                    .0
-                    .get("push_token")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
-            })
             .unwrap_or_else(|| Uuid::new_v4().simple().to_string());
         obj.insert("push_token".into(), serde_json::json!(token));
         Some(cfg)
