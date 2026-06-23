@@ -114,6 +114,10 @@ async function toggleDebug(m) {
   try { debugData.value = await api.get(`/api/monitors/${m.id}/debug`) } catch { debugData.value = { ok: null, err: null } }
 }
 const fmtDebug = (d) => JSON.stringify(d?.detail ?? {}, null, 2)
+function copyDebug(d, ev) {
+  navigator.clipboard?.writeText(fmtDebug(d))
+  const b = ev.target; const o = b.textContent; b.textContent = 'Copied'; setTimeout(() => (b.textContent = o), 1200)
+}
 
 const statusOf = (m) => (m.up == null ? 'pending' : m.up ? 'up' : 'down')
 const fmtAgo = (t) => {
@@ -250,12 +254,18 @@ onUnmounted(() => clearInterval(timer))
                 <div v-if="!debugData" class="text-sm text-muted">Loading…</div>
                 <div v-else class="grid gap-4 lg:grid-cols-2">
                   <div>
-                    <div class="mb-1 text-xs font-medium text-accent">Last success</div>
+                    <div class="mb-1 flex items-center justify-between">
+                      <span class="text-xs font-medium text-accent">Last success</span>
+                      <button v-if="debugData.ok" @click="copyDebug(debugData.ok, $event)" class="rounded-md border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:text-accent">Copy</button>
+                    </div>
                     <pre v-if="debugData.ok" class="max-h-72 overflow-auto rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">{{ fmtDebug(debugData.ok) }}</pre>
                     <p v-else class="text-xs text-faint">No successful check recorded yet.</p>
                   </div>
                   <div>
-                    <div class="mb-1 text-xs font-medium text-red-400">Last failure</div>
+                    <div class="mb-1 flex items-center justify-between">
+                      <span class="text-xs font-medium text-red-400">Last failure</span>
+                      <button v-if="debugData.err" @click="copyDebug(debugData.err, $event)" class="rounded-md border border-line bg-surface px-2 py-0.5 text-xs text-muted hover:text-accent">Copy</button>
+                    </div>
                     <pre v-if="debugData.err" class="max-h-72 overflow-auto rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">{{ fmtDebug(debugData.err) }}</pre>
                     <p v-else class="text-xs text-faint">No failure recorded.</p>
                   </div>

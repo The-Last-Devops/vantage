@@ -42,6 +42,11 @@ struct Beat {
 
 const TICK: Duration = Duration::from_secs(2);
 const BODY_CAP: usize = 4096;
+// Browser-ish defaults so WAFs don't reject a "bot" with no UA/Accept (e.g. 406).
+// Both are overridable per monitor via the headers config.
+const DEFAULT_UA: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const DEFAULT_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
 fn cfg_u64(c: &Value, key: &str, default: u64) -> u64 {
     c.get(key).and_then(|v| v.as_u64()).unwrap_or(default)
@@ -235,6 +240,7 @@ async fn probe_http(m: &Monitor, start: Instant) -> Beat {
         .timeout(Duration::from_secs(to))
         .danger_accept_invalid_certs(cfg_bool(c, "ignore_tls"))
         .redirect(redirect)
+        .user_agent(DEFAULT_UA)
         .build()
     {
         Ok(c) => c,
@@ -271,6 +277,15 @@ async fn probe_http(m: &Monitor, start: Instant) -> Beat {
     }
     if let Some(body) = cfg_str(c, "body") {
         req = req.body(body.to_owned());
+    }
+    // Browser-ish defaults (overridable above): reflect them in the debug record.
+    let has = |name: &str| req_headers.keys().any(|k| k.eq_ignore_ascii_case(name));
+    if !has("user-agent") {
+        req_headers.insert("User-Agent".into(), json!(DEFAULT_UA));
+    }
+    if !has("accept") {
+        req = req.header("Accept", DEFAULT_ACCEPT);
+        req_headers.insert("Accept".into(), json!(DEFAULT_ACCEPT));
     }
     let req_dbg = json!({ "method": method_s, "url": m.target, "headers": req_headers });
 
