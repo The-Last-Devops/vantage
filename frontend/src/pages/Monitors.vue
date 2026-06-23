@@ -163,7 +163,7 @@ onUnmounted(() => clearInterval(timer))
   <AppShell :title="downOnly ? 'Services — Down' : 'Services'">
     <div class="space-y-4">
       <div class="flex items-center justify-between gap-3">
-        <p class="text-sm text-muted">Service checks — HTTP / TCP / ping / keyword. Status comes from the latest heartbeat.</p>
+        <p class="text-sm text-muted">Service checks — HTTP, TCP, ping, DNS, TLS, databases (Postgres/MySQL/Mongo/Redis), push &amp; more. Click a name for its uptime history.</p>
         <button @click="formOpen ? (formOpen = false) : openCreate()" class="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add monitor
         </button>

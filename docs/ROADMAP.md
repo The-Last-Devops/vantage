@@ -2,6 +2,25 @@
 
 Planned features not yet built. See CLAUDE.md for the architecture they must fit.
 
+## Backup / restore (download/upload + S3-compatible)
+
+Goal: export the **config DB** (users, namespaces, RBAC, API keys, servers, monitors,
+alerts, channels, thresholds, status pages) as a portable snapshot and restore it
+elsewhere. The **data DB** (metrics/heartbeats) is large, regenerable telemetry and is
+out of scope for backup.
+
+**Design:**
+- **Logical JSON snapshot** (not `pg_dump`) so it stays single-binary and version-tolerant:
+  serialize all config tables → one JSON document; restore upserts in FK order.
+- **Download / upload** from the Settings UI (admin only).
+- **S3 / S3-compatible**: store endpoint + bucket + region + access/secret key (config DB);
+  "Back up to S3 now", list snapshots, restore from one. Later: scheduled backups.
+
+**Must ship with:** admin-only; restore is destructive → require explicit confirm; never
+log S3 secrets; redact password hashes are kept (so users still work) but treated as secret.
+
+**Scope:** medium — export/import endpoints, an S3 client, a settings store, a Settings page.
+
 ## Web SSH / terminal into hosts
 
 Goal: open a shell on a monitored host from the dashboard.

@@ -143,10 +143,11 @@ rebuilds. The hub serves the built SPA at **:8080**.
 
 ## Roadmap
 
-Service monitors (HTTP / TCP / ping), alerting (thresholds + webhook/Telegram) and public
-status pages are scaffolded in the backend and will return to the UI after the metrics
-experience is finalized. TimescaleDB continuous-aggregate rollups + retention are being
-wired in (see [docs/](docs/)).
+Service monitors (12 types), alerting (down / thresholds → webhook / Telegram / email),
+the audit log, and TimescaleDB rollups + tunable retention are **shipped**. Planned next:
+**backup / restore** (download/upload + S3-compatible), **web SSH/terminal** into hosts, and
+an **adaptive report interval** (realtime only while a host is being viewed). See
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 
