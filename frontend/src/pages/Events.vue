@@ -8,15 +8,15 @@ import { minLoad } from '../lib/minLoad'
 
 const route = useRoute()
 const nsQuery = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
-// A single namespace drives this page. Use the one global selection if exactly
-// one is picked; otherwise fall back to the first namespace ("All" → first).
-const selectedNsName = () => {
-  const sel = (route.query.ns || '').split(',').filter(Boolean)
-  return sel.length === 1 ? sel[0] : null
-}
 
 const namespaces = ref([])
-const nsId = ref('')
+// Namespaces in scope: the sidebar selection (?ns), or all when none chosen.
+const selectedNsNames = computed(() => (route.query.ns || '').split(',').filter(Boolean))
+const activeNs = computed(() =>
+  selectedNsNames.value.length
+    ? namespaces.value.filter((n) => selectedNsNames.value.includes(n.name))
+    : namespaces.value,
+)
 const alerts = ref([])
 const events = ref([])
 const loading = ref(true)
@@ -24,27 +24,25 @@ const filterStatus = ref('all') // all | active | resolved
 const filterSource = ref('all') // all | monitor | host
 let timer = null
 
-function resolveNs() {
-  const match = namespaces.value.find((n) => n.name === selectedNsName())
-  nsId.value = (match || namespaces.value[0])?.id || ''
-}
-
 async function load() {
-  if (!nsId.value) { alerts.value = []; events.value = []; loading.value = false; return }
+  const nss = activeNs.value
+  if (!nss.length) { alerts.value = []; events.value = []; loading.value = false; return }
   const first = loading.value
   try {
-    const work = Promise.all([
-      api.get(`/api/namespaces/${nsId.value}/alerts`),
-      api.get(`/api/namespaces/${nsId.value}/alert-events`),
-    ])
-    const [a, e] = await (first ? minLoad(work) : work)
-    alerts.value = a
-    events.value = e
+    const work = (async () => {
+      const [aLists, eLists] = await Promise.all([
+        Promise.all(nss.map((n) => api.get(`/api/namespaces/${n.id}/alerts`).catch(() => []))),
+        Promise.all(nss.map((n) => api.get(`/api/namespaces/${n.id}/alert-events`).catch(() => []))),
+      ])
+      alerts.value = aLists.flat()
+      // one global feed, newest first across all selected namespaces
+      events.value = eLists.flat().sort((x, y) => new Date(y.at) - new Date(x.at))
+    })()
+    await (first ? minLoad(work) : work)
   } catch { alerts.value = []; events.value = [] }
   loading.value = false
 }
-watch(nsId, load)
-watch(() => route.query.ns, () => resolveNs())
+watch(() => route.query.ns, load)
 
 // active = enabled rules currently firing
 const active = computed(() =>
@@ -101,7 +99,6 @@ const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 
 
 onMounted(async () => {
   try { namespaces.value = await api.get('/api/namespaces') } catch {}
-  resolveNs()
   await load()
   timer = setInterval(load, 15000)
 })

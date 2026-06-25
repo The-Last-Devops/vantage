@@ -297,7 +297,21 @@ async fn probe_http(m: &Monitor, start: Instant) -> Beat {
         for (k, v) in headers {
             if let Some(vs) = v.as_str() {
                 req = req.header(k, vs);
-                req_headers.insert(k.clone(), json!(vs));
+                // Send the real value, but never persist credential-bearing headers
+                // to monitor_debug (viewers can read that).
+                let sensitive = matches!(
+                    k.to_ascii_lowercase().as_str(),
+                    "authorization"
+                        | "proxy-authorization"
+                        | "cookie"
+                        | "set-cookie"
+                        | "x-api-key"
+                        | "api-key"
+                        | "x-auth-token"
+                        | "x-token"
+                        | "token"
+                );
+                req_headers.insert(k.clone(), json!(if sensitive { "****" } else { vs }));
             }
         }
     }

@@ -35,7 +35,6 @@ const KINDS = [
 ]
 const kindLabel = (k) => KINDS.find((x) => x.v === k)?.label || k
 const isHttp = (k) => k === 'http' || k === 'keyword'
-const pushUrl = (m) => `${location.origin}/pub/push/${m.config?.push_token || ''}`
 
 // "Down" sub-view (/monitors?status=down) shows only enabled monitors that are down.
 const downOnly = computed(() => route.query.status === 'down')

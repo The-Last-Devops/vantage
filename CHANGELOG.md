@@ -9,6 +9,30 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [1.5.4] — 2026-06-25
+
+### Security
+- Channel secrets (tokens, passwords, webhook URLs) are masked for anyone who
+  can't edit the channel; only editors of the channel's namespace see them.
+- Push-monitor tokens are no longer returned to viewers — shown only to editors
+  on the monitor detail page (the token is a write credential).
+- Credential-bearing request headers (Authorization / Cookie / API-key) are
+  redacted in the monitor debug view.
+
+### Added
+- **Notify channels are a shared resource**: every namespace can see and use any
+  channel in its alert rules; only an editor of a channel's own namespace can
+  edit or delete it. New `GET /api/channels`.
+- Click a rule or channel card to view it (read-only when you lack edit rights).
+
+### Changed
+- Alert **Rules** and **Events** now span all selected namespaces — previously the
+  list silently collapsed to a single namespace when "all" or several were picked.
+
+### Fixed
+- Mobile: the namespace selector and logout were pushed below the browser toolbar
+  in the sidebar (now uses dynamic viewport height).
+
 ## [1.5.3] — 2026-06-25
 
 ### Added
@@ -138,7 +162,8 @@ Each released version's section is used verbatim as the GitHub Release notes
   agent, Uptime-Kuma-style service checks, and alerting, with multi-user namespace-scoped
   RBAC and public status pages.
 
-[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.4...HEAD
+[1.5.4]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.0...v1.5.1

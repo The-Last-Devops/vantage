@@ -93,6 +93,13 @@ pub async fn list_monitors(
             Some((t, up, lat, msg)) => (Some(t), Some(up), lat, msg),
             None => (None, None, None, None),
         };
+        // A push monitor's token is a write credential (anyone with it can post
+        // beats). The list/cards never need it — only the detail page shows the
+        // URL, gated to editors — so strip it here for everyone.
+        let mut config = config.0;
+        if let Some(o) = config.as_object_mut() {
+            o.remove("push_token");
+        }
         rows.push(MonitorRow {
             id,
             name,
@@ -101,7 +108,7 @@ pub async fn list_monitors(
             namespace,
             interval_secs,
             enabled,
-            config: config.0,
+            config,
             up,
             latency_ms,
             last_check,
@@ -194,8 +201,32 @@ pub async fn monitor_detail(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<MonitorDetail>, StatusCode> {
-    let (namespace, name, kind, target, interval_secs, enabled, config) =
+    let (namespace, name, kind, target, interval_secs, enabled, mut config) =
         load_monitor(&state, &user, id).await?;
+
+    // The push token is a write credential — show it only to those who can edit
+    // this monitor (so they can configure the cron); strip it for plain viewers.
+    if config.get("push_token").is_some() {
+        let can_edit: (bool,) = if user.is_admin {
+            (true,)
+        } else {
+            sqlx::query_as(
+                "SELECT EXISTS(SELECT 1 FROM memberships me \
+                 JOIN monitors mo ON mo.namespace_id = me.namespace_id \
+                 WHERE mo.id = $1 AND me.user_id = $2 AND me.role IN ('editor', 'owner'))",
+            )
+            .bind(id)
+            .bind(user.id)
+            .fetch_one(&state.config)
+            .await
+            .map_err(internal)?
+        };
+        if !can_edit.0 {
+            if let Some(o) = config.as_object_mut() {
+                o.remove("push_token");
+            }
+        }
+    }
 
     let latest: Option<(
         chrono::DateTime<chrono::Utc>,

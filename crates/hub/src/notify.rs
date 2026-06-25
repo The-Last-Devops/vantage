@@ -281,6 +281,27 @@ pub fn is_valid_kind(kind: &str) -> bool {
     manifest().iter().any(|m| m.kind == kind)
 }
 
+/// A copy of `config` with every `secret`-typed field masked. Shown to users who
+/// can view a channel but not edit it, so credentials (tokens, passwords, webhook
+/// URLs) never reach a viewer. Editors get the real config to populate the form.
+pub fn redact_secrets(kind: &str, config: &Value) -> Value {
+    let mut out = config.clone();
+    let (Some(meta), Some(obj)) = (
+        manifest().into_iter().find(|m| m.kind == kind),
+        out.as_object_mut(),
+    ) else {
+        return out;
+    };
+    for f in meta.fields.iter().filter(|f| f.ty == "secret") {
+        if let Some(v) = obj.get_mut(f.key) {
+            if v.as_str().is_some_and(|s| !s.is_empty()) {
+                *v = json!("••••••");
+            }
+        }
+    }
+    out
+}
+
 // ---- dispatch ---------------------------------------------------------------
 
 fn s<'a>(cfg: &'a Value, k: &str) -> Option<&'a str> {

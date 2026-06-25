@@ -14,7 +14,10 @@ pub async fn list_channels(
     user: CurrentUser,
     Path(ns): Path<Uuid>,
 ) -> Result<Json<Vec<ChannelRow>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let role = rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    // Secrets (tokens/passwords/webhook URLs) go only to those who can edit the
+    // channel; viewers get them masked. Editors need the real config to edit.
+    let can_see_secrets = role >= Role::Editor;
     let rows: Vec<(Uuid, String, String, sqlx::types::Json<Value>)> = sqlx::query_as(
         "SELECT id, name, kind, config FROM channels WHERE namespace_id = $1 ORDER BY name",
     )
@@ -24,11 +27,84 @@ pub async fn list_channels(
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, kind, config)| ChannelRow {
-                id,
-                name,
-                kind,
-                config: config.0,
+            .map(|(id, name, kind, config)| {
+                let config = if can_see_secrets {
+                    config.0
+                } else {
+                    crate::notify::redact_secrets(&kind, &config.0)
+                };
+                ChannelRow {
+                    id,
+                    name,
+                    kind,
+                    config,
+                }
+            })
+            .collect(),
+    ))
+}
+
+#[derive(Serialize)]
+pub struct GlobalChannelRow {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: String,
+    pub namespace: String,
+    pub namespace_id: Uuid,
+    /// Whether the caller may edit/delete this channel (editor+ of its namespace).
+    pub can_edit: bool,
+    pub config: Value,
+}
+
+/// GET /api/channels — every channel across all namespaces. Channels are a shared
+/// resource: anyone signed in may view them and attach them to alerts. Only an
+/// editor of the channel's OWN namespace may edit/delete it, so secrets are shown
+/// only to those editors; everyone else gets them masked.
+pub async fn list_all_channels(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<Vec<GlobalChannelRow>>, StatusCode> {
+    // Namespaces the caller can edit (system admins edit everywhere).
+    let editable: std::collections::HashSet<Uuid> = if user.is_admin {
+        std::collections::HashSet::new()
+    } else {
+        sqlx::query_as::<_, (Uuid,)>(
+            "SELECT namespace_id FROM memberships \
+             WHERE user_id = $1 AND role IN ('editor', 'owner')",
+        )
+        .bind(user.id)
+        .fetch_all(&state.config)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .map(|(n,)| n)
+        .collect()
+    };
+    let rows: Vec<(Uuid, String, String, sqlx::types::Json<Value>, Uuid, String)> = sqlx::query_as(
+        "SELECT c.id, c.name, c.kind, c.config, c.namespace_id, n.name \
+         FROM channels c JOIN namespaces n ON n.id = c.namespace_id ORDER BY n.name, c.name",
+    )
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(id, name, kind, config, namespace_id, namespace)| {
+                let can_edit = user.is_admin || editable.contains(&namespace_id);
+                let config = if can_edit {
+                    config.0
+                } else {
+                    crate::notify::redact_secrets(&kind, &config.0)
+                };
+                GlobalChannelRow {
+                    id,
+                    name,
+                    kind,
+                    namespace,
+                    namespace_id,
+                    can_edit,
+                    config,
+                }
             })
             .collect(),
     ))
@@ -311,15 +387,14 @@ pub async fn patch_alert(
 
     // Channel set + renotify are replaced together (editor save only).
     if let Some(ids) = req.channel_ids {
-        // Every channel must belong to this namespace.
-        let valid: Option<(i64,)> = sqlx::query_as(
-            "SELECT count(*) FROM channels WHERE id = ANY($1) AND namespace_id = $2",
-        )
-        .bind(&ids)
-        .bind(ns)
-        .fetch_optional(&state.config)
-        .await
-        .map_err(internal)?;
+        // Channels are a shared resource — a rule may use any existing channel,
+        // regardless of namespace; just require that every id exists.
+        let valid: Option<(i64,)> =
+            sqlx::query_as("SELECT count(DISTINCT id) FROM channels WHERE id = ANY($1)")
+                .bind(&ids)
+                .fetch_optional(&state.config)
+                .await
+                .map_err(internal)?;
         if valid.map(|(n,)| n as usize) != Some(ids.len()) {
             return Err(StatusCode::BAD_REQUEST);
         }
@@ -485,11 +560,11 @@ pub async fn create_alert(
     if req.channel_ids.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    // Every channel must belong to this namespace.
+    // Channels are a shared resource — a rule may use any existing channel,
+    // regardless of namespace; just require that every id exists.
     let valid: Option<(i64,)> =
-        sqlx::query_as("SELECT count(*) FROM channels WHERE id = ANY($1) AND namespace_id = $2")
+        sqlx::query_as("SELECT count(DISTINCT id) FROM channels WHERE id = ANY($1)")
             .bind(&req.channel_ids)
-            .bind(ns)
             .fetch_optional(&state.config)
             .await
             .map_err(internal)?;

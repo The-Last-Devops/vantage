@@ -7,15 +7,16 @@ import { minLoad } from '../lib/minLoad'
 import { api } from '../lib/api'
 
 const route = useRoute()
-const selectedNsName = () => {
-  const sel = (route.query.ns || '').split(',').filter(Boolean)
-  return sel.length === 1 ? sel[0] : null
-}
 const highlightId = computed(() => route.query.rule || null)
 
 const namespaces = ref([])
-const nsId = ref('')
-const nsName = computed(() => namespaces.value.find((n) => n.id === nsId.value)?.name || '')
+// Namespaces in scope: the sidebar selection (?ns=a,b), or all when none chosen.
+const selectedNsNames = computed(() => (route.query.ns || '').split(',').filter(Boolean))
+const activeNs = computed(() =>
+  selectedNsNames.value.length
+    ? namespaces.value.filter((n) => selectedNsNames.value.includes(n.name))
+    : namespaces.value,
+)
 const alerts = ref([])
 const channels = ref([])
 const monitors = ref([])
@@ -89,23 +90,25 @@ function ago(iso) {
 }
 
 async function load() {
-  if (!nsId.value) { alerts.value = []; loaded.value = true; return }
+  const nss = activeNs.value
+  if (!nss.length) { alerts.value = []; channels.value = []; loaded.value = true; return }
   const first = !loaded.value
   try {
     const work = (async () => {
-      alerts.value = await api.get(`/api/namespaces/${nsId.value}/alerts`)
-      channels.value = await api.get(`/api/namespaces/${nsId.value}/channels`)
+      // Rules are merged across the namespaces in scope; channels are a shared
+      // global resource (any rule may use any channel), fetched once.
+      const [aLists, allChannels] = await Promise.all([
+        Promise.all(nss.map((n) => api.get(`/api/namespaces/${n.id}/alerts`).catch(() => []))),
+        api.get('/api/channels').catch(() => []),
+      ])
+      alerts.value = aLists.flat()
+      channels.value = allChannels
     })()
     await (first ? minLoad(work) : work)
   } catch { alerts.value = [] }
   finally { loaded.value = true }
 }
-watch(nsId, load)
-function resolveNs() {
-  const match = namespaces.value.find((n) => n.name === selectedNsName())
-  nsId.value = (match || namespaces.value[0])?.id || ''
-}
-watch(() => route.query.ns, resolveNs)
+watch(() => route.query.ns, load)
 watch([alerts, highlightId], async () => {
   if (!highlightId.value) return
   await nextTick()
@@ -133,8 +136,18 @@ const modalOpen = ref(false)
 const editId = ref(null)
 const err = ref('')
 const ed = ref({ srcType: 'monitor', targetId: '', condType: 'metric', metric: 'cpu_percent', op: '>', value: 90, offlineSecs: 120, channels: new Set(), renotify: '' })
-const monsInNs = computed(() => monitors.value) // monitors are global in API; namespace filtering server-side on save
-const sysInNs = computed(() => systems.value.filter((s) => s.namespace === nsName.value))
+// Candidate sources = those in the active namespace(s).
+const activeNsNames = computed(() => new Set(activeNs.value.map((n) => n.name)))
+const monsInNs = computed(() => monitors.value.filter((m) => activeNsNames.value.has(m.namespace)))
+const sysInNs = computed(() => systems.value.filter((s) => activeNsNames.value.has(s.namespace)))
+// Namespace of the picked target → where the rule is created (auth = editor there).
+const targetNs = computed(() => {
+  const list = ed.value.srcType === 'monitor' ? monitors.value : systems.value
+  const name = list.find((x) => x.id === ed.value.targetId)?.namespace
+  return namespaces.value.find((n) => n.name === name) || null
+})
+// Channels are global — any rule may notify any channel.
+const editChannels = computed(() => channels.value)
 const RENOTIFY = [['', 'Off — notify once'], ['900', 'every 15 min'], ['1800', 'every 30 min'], ['3600', 'every hour']]
 
 function openNew() {
@@ -198,10 +211,11 @@ async function save() {
     if (editId.value) {
       await api.patch(`/api/alerts/${editId.value}`, { channel_ids, renotify_secs, condition: buildCondition() })
     } else {
+      if (!targetNs.value) { err.value = 'Pick a source first.'; return }
       const body = { channel_ids, renotify_secs, condition: buildCondition() }
       if (ed.value.srcType === 'monitor') body.monitor_id = ed.value.targetId
       else body.system_id = ed.value.targetId
-      await api.post(`/api/namespaces/${nsId.value}/alerts`, body)
+      await api.post(`/api/namespaces/${targetNs.value.id}/alerts`, body)
     }
     modalOpen.value = false
     await load()
@@ -217,9 +231,7 @@ onMounted(async () => {
   try { namespaces.value = await api.get('/api/namespaces') } catch {}
   try { monitors.value = await api.get('/api/monitors') } catch {}
   try { systems.value = await api.get('/api/systems') } catch {}
-  resolveNs()
-  // No namespace → nsId never changes, the watch won't fire; clear the loader here.
-  if (!nsId.value) loaded.value = true
+  await load()
   timer = setInterval(load, 15000)
 })
 onUnmounted(() => clearInterval(timer))
@@ -236,7 +248,7 @@ onUnmounted(() => clearInterval(timer))
       </div>
 
       <PageLoader v-if="!loaded" />
-      <p v-else-if="!alerts.length" class="rounded-2xl border border-line bg-surface/50 p-10 text-center text-sm text-muted">No alert rules in this namespace yet. Click <b class="text-fg">New rule</b> to wire one up.</p>
+      <p v-else-if="!alerts.length" class="rounded-2xl border border-line bg-surface/50 p-10 text-center text-sm text-muted">No alert rules yet. Click <b class="text-fg">New rule</b> to wire one up.</p>
 
       <section v-for="g in sections" :key="g.key" class="space-y-2.5">
         <div class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-faint">
@@ -245,14 +257,14 @@ onUnmounted(() => clearInterval(timer))
           <span class="rounded-full bg-surface2 px-2 py-0.5 text-[10px]">{{ g.items.length }}</span>
         </div>
 
-        <div v-for="a in g.items" :key="a.id" :id="`rule-${a.id}`"
-          class="rounded-2xl border bg-surface p-4 transition-colors"
+        <div v-for="a in g.items" :key="a.id" :id="`rule-${a.id}`" @click="openEdit(a)"
+          class="cursor-pointer rounded-2xl border bg-surface p-4 transition-colors hover:border-accent/40"
           :class="[stateOf(a) === 'firing' ? 'border-red-500/45' : 'border-line', String(a.id) === String(highlightId) ? 'ring-2 ring-accent/60' : '', !a.enabled ? 'opacity-60' : '']">
           <div class="mb-3 flex items-center gap-2.5">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="STATE[stateOf(a)].cls"><span class="h-1.5 w-1.5 rounded-full" :class="STATE[stateOf(a)].dot"></span>{{ STATE[stateOf(a)].label }}</span>
             <span v-if="a.since && stateOf(a) !== 'disabled'" class="text-xs text-faint">{{ stateOf(a) === 'firing' ? 'firing' : 'ok' }} for {{ ago(a.since) }}</span>
             <span class="ml-auto"></span>
-            <button @click="toggle(a)" :title="a.enabled ? 'Disable' : 'Enable'" class="relative h-[22px] w-10 shrink-0 rounded-full transition-colors" :class="a.enabled ? 'bg-accent' : 'bg-line'">
+            <button @click.stop="toggle(a)" :title="a.enabled ? 'Disable' : 'Enable'" class="relative h-[22px] w-10 shrink-0 rounded-full transition-colors" :class="a.enabled ? 'bg-accent' : 'bg-line'">
               <span class="absolute top-0.5 h-[18px] w-[18px] rounded-full transition-all" :class="a.enabled ? 'left-[20px] bg-accentfg' : 'left-0.5 bg-fg'"></span>
             </button>
           </div>
@@ -274,9 +286,9 @@ onUnmounted(() => clearInterval(timer))
             <span class="mr-auto text-xs text-faint">{{ renotifyText(a) }}</span>
             <span v-if="testState[a.id] === 'ok'" class="text-xs text-accent">✓ sent</span>
             <span v-else-if="testState[a.id] === 'fail'" class="text-xs text-rose-400">✗ failed</span>
-            <button @click="testAlert(a)" :disabled="testState[a.id] === 'testing'" class="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-fg hover:border-accent/50 disabled:opacity-50">{{ testState[a.id] === 'testing' ? 'Testing…' : 'Test' }}</button>
-            <button @click="openEdit(a)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" title="Edit"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-            <button @click="removeAlert(a)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-rose-400" title="Delete"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
+            <button @click.stop="testAlert(a)" :disabled="testState[a.id] === 'testing'" class="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-fg hover:border-accent/50 disabled:opacity-50">{{ testState[a.id] === 'testing' ? 'Testing…' : 'Test' }}</button>
+            <button @click.stop="openEdit(a)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" title="Edit"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+            <button @click.stop="removeAlert(a)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-rose-400" title="Delete"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg></button>
           </div>
         </div>
       </section>
@@ -337,9 +349,9 @@ onUnmounted(() => clearInterval(timer))
           <!-- 3. channels -->
           <div>
             <div class="mb-2.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint"><span class="grid h-[18px] w-[18px] place-items-center rounded bg-surface2 text-accent">3</span>Notify these channels</div>
-            <p v-if="!channels.length" class="text-xs text-faint">No channels in this namespace yet — create one under <b>Alert › Notify channel</b>.</p>
+            <p v-if="!editChannels.length" class="text-xs text-faint">No channels yet — create one under <b>Alert › Notify channel</b>.</p>
             <div v-else class="flex flex-wrap gap-2">
-              <button v-for="c in channels" :key="c.id" @click="toggleChan(c.id)"
+              <button v-for="c in editChannels" :key="c.id" @click="toggleChan(c.id)"
                 class="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
                 :class="ed.channels.has(c.id) ? 'border-accent/60 bg-accent/8 text-fg' : 'border-line bg-surface2 text-muted hover:text-fg'">
                 <span class="grid h-[22px] w-[22px] place-items-center rounded-md" :style="{ background: chanColor(c.kind), color: chanFg(c.kind) }" v-html="iconSvg(chanIcon(c.kind), 13)"></span>

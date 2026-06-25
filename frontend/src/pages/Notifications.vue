@@ -1,19 +1,14 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { minLoad } from '../lib/minLoad'
 
-const route = useRoute()
-const selectedNsName = () => {
-  const sel = (route.query.ns || '').split(',').filter(Boolean)
-  return sel.length === 1 ? sel[0] : null
-}
-
-const namespaces = ref([])
-const nsId = ref('')
+// Channels are a shared resource: everyone sees every channel (global list); only
+// an editor of a channel's own namespace may edit/delete it (the API marks each
+// row with `can_edit` and masks secrets for everyone else).
+const namespaces = ref([]) // for the "create in namespace" picker
 const channels = ref([])
 // Start true so the first paint shows the loader, never an empty-state flash.
 const loading = ref(true)
@@ -45,17 +40,10 @@ function iconSvg(name, size = 20) {
 }
 
 async function loadChannels() {
-  if (!nsId.value) { channels.value = []; loading.value = false; return }
   loading.value = true
-  try { channels.value = await minLoad(api.get(`/api/namespaces/${nsId.value}/channels`)) } catch { channels.value = [] }
+  try { channels.value = await minLoad(api.get('/api/channels')) } catch { channels.value = [] }
   finally { loading.value = false }
 }
-watch(nsId, loadChannels)
-function resolveNs() {
-  const match = namespaces.value.find((n) => n.name === selectedNsName())
-  nsId.value = (match || namespaces.value[0])?.id || ''
-}
-watch(() => route.query.ns, resolveNs)
 
 // ---- modal ----
 const modalOpen = ref(false)
@@ -63,11 +51,12 @@ const step = ref('pick') // 'pick' | 'form'
 const cur = ref(null) // current provider meta
 const editId = ref(null)
 const search = ref('')
-const form = ref({ name: '', config: {} })
+const form = ref({ name: '', config: {}, nsId: '' })
 const showAdv = ref(false)
 const revealed = ref({}) // field key -> bool
 const err = ref('')
 const modalTest = ref('') // '' | 'run' | 'ok' | 'fail'
+const readOnly = ref(false) // viewing a channel you can't edit (other namespace)
 
 const filtered = computed(() => {
   const q = search.value.toLowerCase().trim()
@@ -84,22 +73,27 @@ const basicFields = computed(() => cur.value?.fields.filter((f) => !f.advanced) 
 const advFields = computed(() => cur.value?.fields.filter((f) => f.advanced) || [])
 
 function openNew() {
-  editId.value = null; cur.value = null; step.value = 'pick'
-  search.value = ''; form.value = { name: '', config: {} }
+  editId.value = null; cur.value = null; step.value = 'pick'; readOnly.value = false
+  search.value = ''; form.value = { name: '', config: {}, nsId: namespaces.value[0]?.id || '' }
   err.value = ''; modalTest.value = ''; modalOpen.value = true
 }
 function openEdit(c) {
   const p = byKind(c.kind)
   if (!p) return
-  editId.value = c.id; cur.value = p; step.value = 'form'
-  form.value = { name: c.name, config: { ...(c.config || {}) } }
+  editId.value = c.id; cur.value = p; step.value = 'form'; readOnly.value = false
+  form.value = { name: c.name, config: { ...(c.config || {}) }, nsId: c.namespace_id }
   showAdv.value = false; revealed.value = {}; err.value = ''; modalTest.value = ''; modalOpen.value = true
+}
+// Click a card to view it; opens the editor read-only when you can't edit it.
+function openView(c) {
+  openEdit(c)
+  readOnly.value = !c.can_edit
 }
 function pickType(p) {
   cur.value = p
   const cfg = {}
   for (const f of p.fields) if (f.default != null) cfg[f.key] = f.default
-  form.value = { name: form.value.name, config: cfg }
+  form.value = { name: form.value.name, config: cfg, nsId: form.value.nsId }
   showAdv.value = false; revealed.value = {}; err.value = ''; modalTest.value = ''
   step.value = 'form'
 }
@@ -117,10 +111,11 @@ function validate() {
 }
 async function save() {
   if (!validate()) return
+  if (!editId.value && !form.value.nsId) { err.value = 'Pick a namespace to create the channel in.'; return }
   const payload = { name: form.value.name.trim(), config: form.value.config }
   try {
     if (editId.value) await api.patch(`/api/channels/${editId.value}`, payload)
-    else await api.post(`/api/namespaces/${nsId.value}/channels`, { ...payload, kind: cur.value.kind })
+    else await api.post(`/api/namespaces/${form.value.nsId}/channels`, { ...payload, kind: cur.value.kind })
     modalOpen.value = false
     await loadChannels()
   } catch (e) {
@@ -151,9 +146,7 @@ async function removeChannel(c) {
 onMounted(async () => {
   try { types.value = await api.get('/api/channel-types') } catch { types.value = [] }
   try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
-  resolveNs()
-  // If there's no namespace, nsId never changes so the watch won't fire — clear the loader here.
-  if (!nsId.value) loading.value = false
+  await loadChannels()
 })
 </script>
 
@@ -185,28 +178,31 @@ onMounted(async () => {
       </div>
       <div v-else class="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
         <div v-for="c in channels" :key="c.id" class="rounded-xl border border-line bg-surface p-3.5 transition-colors hover:border-accent/40">
-          <div class="flex items-center gap-3">
+          <!-- click anywhere on the card to view; actions below require edit rights -->
+          <button type="button" @click="openView(c)" class="flex w-full items-center gap-3 text-left">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
               :style="{ background: byKind(c.kind)?.color || 'rgb(var(--surface2))', color: byKind(c.kind)?.fg || 'rgb(var(--fg))' }"
               v-html="iconSvg(byKind(c.kind)?.icon || 'chat', 22)"></span>
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-sm font-medium text-fg">{{ c.name }}</div>
-              <div class="text-xs text-faint">
-                <span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 align-middle"></span>{{ byKind(c.kind)?.name || c.kind }}
-              </div>
-            </div>
-          </div>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-sm font-medium text-fg">{{ c.name }}</span>
+              <span class="block text-xs text-faint">
+                <span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 align-middle"></span>{{ byKind(c.kind)?.name || c.kind }} <span class="text-faint/70">· {{ c.namespace }}</span>
+              </span>
+            </span>
+          </button>
           <div class="mt-3 flex items-center gap-2 border-t border-line/70 pt-3">
             <span v-if="testState[c.id] === 'ok'" class="mr-auto text-xs text-accent">✓ sent</span>
             <span v-else-if="testState[c.id] === 'fail'" class="mr-auto text-xs text-rose-400">✗ failed</span>
-            <span v-else class="mr-auto"></span>
-            <button @click="testChannel(c)" :disabled="testState[c.id] === 'testing'" class="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-fg hover:border-accent/50 disabled:opacity-50">{{ testState[c.id] === 'testing' ? 'Testing…' : 'Test' }}</button>
-            <button @click="openEdit(c)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" title="Edit">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
-            </button>
-            <button @click="removeChannel(c)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-rose-400" title="Delete">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
-            </button>
+            <span v-else class="mr-auto text-[11px] text-faint">{{ c.can_edit ? '' : 'view only' }}</span>
+            <template v-if="c.can_edit">
+              <button @click="testChannel(c)" :disabled="testState[c.id] === 'testing'" class="rounded-lg border border-line bg-surface2 px-2.5 py-1 text-xs text-fg hover:border-accent/50 disabled:opacity-50">{{ testState[c.id] === 'testing' ? 'Testing…' : 'Test' }}</button>
+              <button @click="openEdit(c)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" title="Edit">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+              </button>
+              <button @click="removeChannel(c)" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-rose-400" title="Delete">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -219,7 +215,7 @@ onMounted(async () => {
           <span v-if="step === 'form' && cur" class="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
             :style="{ background: cur.color, color: cur.fg }" v-html="iconSvg(cur.icon, 19)"></span>
           <h3 class="text-base font-semibold text-fg">
-            {{ step === 'pick' ? 'New notify channel' : (editId ? 'Edit ' + form.name : 'New ' + cur?.name + ' channel') }}
+            {{ step === 'pick' ? 'New notify channel' : (readOnly ? form.name : (editId ? 'Edit ' + form.name : 'New ' + cur?.name + ' channel')) }}
           </h3>
           <button v-if="step === 'form' && !editId" @click="backToPick" class="ml-auto rounded-md px-2.5 py-1.5 text-xs font-semibold text-accent hover:bg-accent/10">Change</button>
           <button @click="closeModal" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" :class="{ 'ml-auto': !(step === 'form' && !editId) }" aria-label="Close">
@@ -249,7 +245,15 @@ onMounted(async () => {
 
         <!-- STEP 2: configure -->
         <template v-else>
-          <div class="max-h-[60vh] space-y-4 overflow-auto p-5">
+          <fieldset :disabled="readOnly" class="max-h-[60vh] space-y-4 overflow-auto p-5">
+            <p v-if="readOnly" class="rounded-lg border border-line bg-surface2/50 px-3 py-2 text-xs text-muted">View only — this channel belongs to another namespace. Editors of that namespace can change it.</p>
+            <label v-if="!editId" class="block">
+              <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Namespace</span>
+              <select v-model="form.nsId" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none">
+                <option v-for="n in namespaces" :key="n.id" :value="n.id">{{ n.name }}</option>
+              </select>
+              <span class="mt-1.5 block text-xs text-faint">The channel lives here; only editors of this namespace can change it later. Any alert can still use it.</span>
+            </label>
             <label class="block">
               <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Name</span>
               <input v-model="form.name" placeholder="e.g. ops-alerts" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
@@ -317,10 +321,10 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
-          </div>
+          </fieldset>
 
           <div class="flex items-center gap-2.5 border-t border-line bg-surface/60 px-5 py-3.5">
-            <button @click="modalSendTest" :disabled="modalTest === 'run'" class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface2 px-3 py-2 text-xs font-medium text-fg hover:border-accent/50 disabled:opacity-50">
+            <button v-if="!readOnly" @click="modalSendTest" :disabled="modalTest === 'run'" class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface2 px-3 py-2 text-xs font-medium text-fg hover:border-accent/50 disabled:opacity-50">
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
               Send test
             </button>
@@ -329,8 +333,8 @@ onMounted(async () => {
             <span v-else-if="modalTest === 'fail'" class="text-xs text-rose-400">✗ Failed to send</span>
             <span v-if="err" class="text-xs text-rose-400">{{ err }}</span>
             <span class="ml-auto"></span>
-            <button @click="closeModal" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button>
-            <button @click="save" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accentfg hover:opacity-90">Save channel</button>
+            <button @click="closeModal" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">{{ readOnly ? 'Close' : 'Cancel' }}</button>
+            <button v-if="!readOnly" @click="save" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accentfg hover:opacity-90">Save channel</button>
           </div>
         </template>
       </div>
