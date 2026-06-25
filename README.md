@@ -53,16 +53,25 @@ edit form, retries/flap guard, upside-down mode, and a **last request/response d
 panel (with copy) for the most recent success and failure. A `Down` view lists only what's
 currently failing.
 
-**Alerting** — rules fire a **notification channel** (webhook / Telegram / email) when a
-monitor goes down or a host breaches a condition (offline, or CPU/memory/load threshold),
-with per-rule cooldown.
+**Alerting** — wire a source (host or service) → a condition → one or more **notify
+channels**. 17 channel types (Telegram, Slack, Discord, Mattermost, Teams, Google Chat,
+Matrix, ntfy, Pushover, Gotify, Bark, PagerDuty, Opsgenie, Twilio SMS, SMTP email, generic
+webhook, Apprise) with a one-click test; fire on monitor-down or a host condition (offline,
+CPU/memory/load), with an optional **re-notify cadence** while still firing. Channels are a
+shared resource any namespace can attach. An **Events** feed records every fire/recover with
+durations.
 
 **Needs attention** — triage view that surfaces only abnormal hosts (down / high
 CPU / memory / disk / disk-I/O), with per-namespace thresholds.
 
-**Admin & data** — an **audit log** of user actions (who/what/when/result), an **About**
-page (version, build, update check), and **data retention** tiers you can tune per
-downsampling level (TimescaleDB continuous aggregates + retention policies).
+**API & automation** — a token-authed JSON API (**personal access tokens** under Settings)
+and an **embedded MCP server** (`POST /mcp`) so AI assistants (Claude, etc.) can read and
+operate the monitor with your RBAC. See [docs/API.md](docs/API.md).
+
+**Admin & data** — a human-readable **audit log** (action + affected object), an **About**
+page (version + update check), **data retention** tiers (TimescaleDB continuous aggregates +
+retention policies), and **backup / restore** — download/upload or scheduled to
+S3-compatible storage.
 
 **Multi-tenant** — namespaces (k8s-style names), namespace-scoped RBAC plus a system
 `admin`, opaque revocable cookie sessions (argon2), and a first-run wizard to create
@@ -106,6 +115,9 @@ Open **http://localhost:8080**. On first run you create the admin account (or se
 > Want sizeable test data? `bash scripts/sim-agents.sh` spins up many simulated
 > node / docker / k8s hosts pushing realistic metrics.
 
+For **production** — Docker with published images, or **Kubernetes** via the Helm chart —
+see the [deploy guide](deploy/README.md).
+
 ## Adding servers
 
 In the UI: **Add system** → pick Node / Docker / Kubernetes → copy the install snippet. The
@@ -141,13 +153,21 @@ rebuilds. The hub serves the built SPA at **:8080**.
 **PostgreSQL + TimescaleDB**, **Vue 3 + Vite + uPlot + Tailwind** SPA embedded via
 `rust-embed`.
 
+## Documentation
+
+- [docs/](docs/README.md) — documentation index.
+- [docs/API.md](docs/API.md) — HTTP API + MCP server reference (auth, endpoints, tools).
+- [deploy/README.md](deploy/README.md) — install & deploy (Docker, Kubernetes/Helm, agents).
+- [CLAUDE.md](CLAUDE.md) — architecture & engineering conventions.
+- [CHANGELOG.md](CHANGELOG.md) — per-release changes.
+
 ## Roadmap
 
-Service monitors (12 types), alerting (down / thresholds → webhook / Telegram / email),
-the audit log, and TimescaleDB rollups + tunable retention are **shipped**. Planned next:
-**backup / restore** (download/upload + S3-compatible), **web SSH/terminal** into hosts, and
-an **adaptive report interval** (realtime only while a host is being viewed). See
-[docs/ROADMAP.md](docs/ROADMAP.md).
+Service monitors (12 types), **multi-channel alerting** + events feed, the audit log,
+TimescaleDB rollups + tunable retention, **backup/restore (S3, scheduled)**, and a
+**token-authed API + embedded MCP server** are all **shipped**. Planned next: **web
+SSH/terminal** into hosts and an **adaptive report interval** (realtime only while a host
+is being viewed). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

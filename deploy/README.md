@@ -8,6 +8,53 @@ the hub. You enroll each agent with a token created in the UI under **Add System
 `docker compose up -d` (hub + databases + a bundled agent for convenience). UI at
 http://localhost:8080.
 
+## Docker (single host, published images)
+
+Run the hub + databases with the released images — no clone, no build. The hub needs
+**two databases** on one TimescaleDB instance: `lastmon_config` and `lastmon_data`
+(the hub enables the TimescaleDB extension in `lastmon_data` on first start).
+
+```yaml
+# compose.yaml
+services:
+  db:
+    image: timescale/timescaledb:latest-pg18
+    environment:
+      POSTGRES_USER: lastmon
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set a strong password}
+      POSTGRES_DB: lastmon_config
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ./init-data-db.sh:/docker-entrypoint-initdb.d/10-data-db.sh:ro  # creates the 2nd DB
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U lastmon"], interval: 5s, retries: 10 }
+
+  hub:
+    image: ghcr.io/the-last-devops/last-monitor-hub:latest   # or :<version>
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      CONFIG_DATABASE_URL: postgres://lastmon:${DB_PASSWORD}@db:5432/lastmon_config
+      DATA_DATABASE_URL:   postgres://lastmon:${DB_PASSWORD}@db:5432/lastmon_data
+      BIND_ADDR: 0.0.0.0:8080
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@local}      # first admin (or use the setup screen)
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set a strong password}
+    ports: ["8080:8080"]
+    cap_add: [NET_RAW]            # for ICMP "ping" monitors
+    restart: unless-stopped
+volumes: { db: {} }
+```
+
+```bash
+# init-data-db.sh — creates the data DB next to the config DB
+printf '#!/bin/bash\nset -e\npsql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE DATABASE lastmon_data;"\n' > init-data-db.sh
+DB_PASSWORD=$(openssl rand -hex 16) ADMIN_PASSWORD=changeme docker compose up -d
+```
+
+The hub runs migrations automatically on start; UI/API at `http://localhost:8080` (put it
+behind a TLS reverse proxy in production). Then **Add System** to install agents (below).
+Upgrade with `docker compose pull && docker compose up -d`. The hub image is **amd64-only**;
+the agent image is multi-arch.
+
 ## 1. Install the hub (Helm)
 `deploy/chart` installs the hub plus its two databases (config on plain Postgres,
 data on TimescaleDB), each with its own PVC.

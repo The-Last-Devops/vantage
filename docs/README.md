@@ -17,7 +17,7 @@ Index of the project's docs. Start here.
 | [../README.md](../README.md) | Project overview & quick start. |
 | [../CLAUDE.md](../CLAUDE.md) | **Architecture & conventions** — the load-bearing design decisions (two DBs, push model, namespace RBAC, auth paths, MCP) and the engineering rules to follow. Read before changing anything. |
 | [../CHANGELOG.md](../CHANGELOG.md) | Per-release changes (the source for GitHub Release notes). |
-| [../deploy/README.md](../deploy/README.md) | Deploying the hub and agents (binaries, Docker, Helm). |
+| [../deploy/README.md](../deploy/README.md) | **Install & deploy** — Docker (compose / published images), Kubernetes (Helm), and agents. |
 | [../frontend/PLAN.md](../frontend/PLAN.md) | The Vue SPA migration plan (historical). |
 
 ## Conventions for adding docs
