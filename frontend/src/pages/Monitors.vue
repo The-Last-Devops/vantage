@@ -148,7 +148,7 @@ async function submit() {
   } catch (e) { formErr.value = e.status === 403 ? 'You need editor access to that namespace.' : `Failed (${e.status}).` }
 }
 async function removeMonitor(m) {
-  if (!confirm(`Delete monitor "${m.name}"?`)) return
+  if (!confirm(`Delete service "${m.name}"?`)) return
   try { await api.del(`/api/monitors/${m.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 
@@ -192,11 +192,11 @@ onUnmounted(() => clearInterval(timer))
       <!-- LEFT: monitor list (Uptime-Kuma style) -->
       <aside class="flex w-[330px] shrink-0 flex-col gap-3">
         <button @click="formOpen ? (formOpen = false) : openCreate()" class="flex items-center justify-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add monitor
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add service
         </button>
         <input v-model="q" placeholder="Search…" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
         <p v-if="err" class="text-sm text-rose-400">{{ err }}</p>
-        <p v-else-if="!filtered.length" class="rounded-xl border border-line bg-surface p-4 text-center text-sm text-muted">{{ downOnly ? 'Nothing down. 🎉' : (q ? 'No matches.' : 'No monitors yet.') }}</p>
+        <p v-else-if="!filtered.length" class="rounded-xl border border-line bg-surface p-4 text-center text-sm text-muted">{{ downOnly ? 'Nothing down. 🎉' : (q ? 'No matches.' : 'No services yet.') }}</p>
         <div v-else class="space-y-1 overflow-y-auto">
           <div v-for="m in filtered" :key="m.id" class="group relative rounded-lg border border-line bg-surface px-2.5 py-2 hover:border-accent/40">
             <RouterLink :to="{ name: 'monitor', params: { id: m.id } }" class="block">
@@ -228,7 +228,7 @@ onUnmounted(() => clearInterval(timer))
       <div class="min-w-0 flex-1 space-y-4">
       <!-- create / edit form -->
       <form v-if="formOpen" @submit.prevent="submit" class="space-y-4 rounded-xl border border-line bg-surface p-4">
-        <div class="text-sm font-semibold text-fg">{{ isEdit ? 'Edit monitor' : 'New monitor' }}</div>
+        <div class="text-sm font-semibold text-fg">{{ isEdit ? 'Edit service' : 'New service' }}</div>
 
         <!-- general — pick the type first, then a (short) name -->
         <div class="flex flex-wrap items-end gap-3">
@@ -326,7 +326,7 @@ onUnmounted(() => clearInterval(timer))
           <table class="w-full text-sm">
             <thead><tr class="border-b border-line text-left text-[11px] uppercase tracking-wider text-faint">
               <th class="px-4 py-2.5 font-medium">Status</th>
-              <th class="px-4 py-2.5 font-medium">Monitor</th>
+              <th class="px-4 py-2.5 font-medium">Service</th>
               <th class="px-4 py-2.5 font-medium">When</th>
               <th class="px-4 py-2.5 font-medium">Message</th>
             </tr></thead>

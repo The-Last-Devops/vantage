@@ -43,9 +43,11 @@ async fn object_name(state: &AppState, path: &str) -> Option<String> {
         "namespaces" => "SELECT name FROM namespaces WHERE id = $1",
         "users" => "SELECT email FROM users WHERE id = $1",
         // an alert rule has no name of its own — identify it by its target
-        "alerts" => "SELECT COALESCE(m.name, s.name) FROM alerts a \
+        "alerts" => {
+            "SELECT COALESCE(m.name, s.name) FROM alerts a \
                      LEFT JOIN monitors m ON m.id = a.monitor_id \
-                     LEFT JOIN systems s ON s.id = a.system_id WHERE a.id = $1",
+                     LEFT JOIN systems s ON s.id = a.system_id WHERE a.id = $1"
+        }
         _ => return None,
     };
     sqlx::query_as::<_, (Option<String>,)>(sql)
@@ -134,18 +136,17 @@ pub async fn list(
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    let rows: Vec<(String, Option<String>, String, String, i32, Option<String>)> =
-        sqlx::query_as(
-            "SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+    let rows: Vec<(String, Option<String>, String, String, i32, Option<String>)> = sqlx::query_as(
+        "SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
                     user_email, method, path, status, object_name FROM audit_log \
              ORDER BY at DESC LIMIT 500",
-        )
-        .fetch_all(&state.config)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "audit list");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    )
+    .fetch_all(&state.config)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "audit list");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Json(
         rows.into_iter()
             .map(

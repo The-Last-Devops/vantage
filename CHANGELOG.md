@@ -1,0 +1,122 @@
+# Changelog
+
+All notable changes to **Last Monitor** are documented here.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Each released version's section is used verbatim as the GitHub Release notes
+(extracted by `.github/workflows/release.yml`), so keep entries user-facing.
+
+## [Unreleased]
+
+## [1.5.1] — 2026-06-25
+
+### Changed
+- **Services**: the "Add monitor" button and related labels now read **"service"**
+  (Add service / New service / Edit service / "No services yet"), matching the nav.
+- Releases now ship with curated notes from this `CHANGELOG.md`.
+
+### Added
+- The sidebar logo and **"Last Monitor"** name now link to the home page.
+
+## [1.5.0] — 2026-06-25
+
+### Added
+- **Multi-channel alerts** — one rule can fan out to several notify channels.
+  17 providers: Telegram, Slack, Discord, Mattermost, Teams, Google Chat, Matrix,
+  ntfy, Pushover, Gotify, Bark, PagerDuty, Opsgenie, Twilio SMS, SMTP email,
+  generic webhook, and Apprise — each with a data-driven config form and a one-click test.
+- **Re-notify cadence** for a still-firing alert (configurable; replaces the old fixed cooldown).
+- **Alert › Events** — an incident history feed.
+- **Scheduled (cron) backups to S3.**
+- **Version badge** in the top bar (green = up to date, amber = a newer release is out),
+  linking to the About page.
+
+### Changed
+- **Alerts UI overhaul** — live firing state, history, and inline toggle/test/edit.
+- **Notify channels** reworked — test button and inline edit; email folded into the SMTP provider.
+- **Loading UX** — pages are eager-loaded so navigation never flashes a blank/black screen,
+  and a centered spinner with a minimum display time replaces the old top-left "Loading…".
+- **Audit log is human-readable** — shows the action and the affected object's name
+  (e.g. *Delete System* · *Kien's discord*) instead of a raw API path. The object name is
+  resolved server-side and never includes config or secrets.
+
+### Fixed
+- The Systems bulk-delete now asks for confirmation before removing hosts.
+
+## [1.4.0] — 2026-06-24
+
+### Added
+- 1m / 5m / 15m / 1h downsampling ladder with AWS-style long time ranges.
+- Uptime-Kuma-style uptime views — gap-filled charts, down history, mini status bars, events feed.
+
+### Changed
+- Services split into a two-pane (list + detail) layout.
+- Default monitor retries lowered to 1.
+
+### Fixed
+- Services table edit/delete buttons no longer clipped behind a long push URL.
+- Service-detail breadcrumb order; parent menu stays active on detail pages.
+
+## [1.3.1] — 2026-06-23
+
+### Changed
+- Much slimmer agent — static musl on `scratch` (~3 MB).
+
+## [1.3.0] — 2026-06-23
+
+### Added
+- Backup / restore (download & upload, S3-compatible).
+- Service detail page with uptime history (click a name to open); namespace column.
+- Hour-based raw retention plus container rollup tiers.
+
+## [1.2.1] — 2026-06-23
+
+### Added
+- Push monitor endpoint returns a JSON ack (optional status / msg / ping).
+- Audit log (middleware records mutating API calls) and `/api/about` build metadata.
+- Collapsible sidebar (Infrastructure / Services / Alert / Settings) with Audit, About, and a Down filter.
+
+### Fixed
+- Push token is server-owned (never sent from the client) and preserved across edits.
+
+## [1.2.0] — 2026-06-23
+
+### Added
+- Many monitor kinds: PostgreSQL, MySQL, MongoDB, Redis, RabbitMQ, DNS, TLS-cert-expiry, and Push (passive).
+- "Needs attention" triage view with per-namespace alert thresholds.
+- System-level RBAC roles and a Members management UI.
+- Namespaces management page.
+
+### Changed
+- Nav renamed Systems → Infrastructure and Monitors → Services.
+- Machine endpoints moved under `/pub` (one Cloudflare Access bypass covers ingest/install/manifest).
+- Full-width content on all pages; darker secondary text for WCAG-AA contrast.
+
+## [1.1.0] — 2026-06-22
+
+### Added
+- Embedded **Vue SPA** (replaces the original SSR + HTMX UI).
+- Interactive uPlot charts — drag-to-zoom, synced cursor, live polling, gap-aware lines.
+- Fleet overview, per-core CPU + load average, container and k8s fleet views.
+- Teal design identity with an animated logo / favicon.
+
+### Changed
+- Filter mini-language with URL state; namespace-aware fleet view.
+
+## [1.0.0] — 2026-06-20
+
+- Initial release: self-hosted server & service monitoring — a push-based host-metrics
+  agent, Uptime-Kuma-style service checks, and alerting, with multi-user namespace-scoped
+  RBAC and public status pages.
+
+[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.0...v1.5.1
+[1.5.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.2.1...v1.3.0
+[1.2.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/The-Last-Devops/last-monitor/releases/tag/v1.0.0

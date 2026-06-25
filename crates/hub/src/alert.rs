@@ -330,7 +330,9 @@ async fn notify(client: &reqwest::Client, rule: &Rule, body: &str) {
     for ch in &rule.channels {
         match crate::notify::dispatch(client, &ch.kind, &ch.config, body).await {
             Ok(()) => tracing::info!(rule = %rule.id, channel = %ch.name, "notified"),
-            Err(e) => tracing::warn!(error = %e, rule = %rule.id, channel = %ch.name, "notify failed"),
+            Err(e) => {
+                tracing::warn!(error = %e, rule = %rule.id, channel = %ch.name, "notify failed")
+            }
         }
     }
 }

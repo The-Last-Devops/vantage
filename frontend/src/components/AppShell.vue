@@ -138,10 +138,10 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
 
     <!-- sidebar -->
     <aside :class="['fixed inset-y-0 left-0 z-40 flex h-screen w-60 shrink-0 flex-col border-r border-line bg-surface transition-transform md:sticky md:top-0 md:translate-x-0', drawer ? '' : '-translate-x-full']">
-      <div class="flex items-center gap-2.5 px-5 py-4">
+      <RouterLink :to="{ name: 'systems', query: nsq }" class="flex items-center gap-2.5 px-5 py-4 transition-opacity hover:opacity-80" title="Home">
         <span class="lm-logo inline-block h-6 w-6 rounded-md"></span>
         <span class="text-base font-semibold tracking-tight text-fg">Last Monitor</span>
-      </div>
+      </RouterLink>
 
       <!-- nav -->
       <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">

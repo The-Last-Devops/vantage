@@ -246,7 +246,10 @@ pub async fn list_alerts(
             });
         }
         if let (Some(id), Some(name), Some(kind)) = (a.channel_id, a.channel_name, a.channel_kind) {
-            out.last_mut().unwrap().channels.push(ChannelRef { id, name, kind });
+            out.last_mut()
+                .unwrap()
+                .channels
+                .push(ChannelRef { id, name, kind });
         }
     }
     Ok(Json(out))
@@ -476,14 +479,13 @@ pub async fn create_alert(
         return Err(StatusCode::BAD_REQUEST);
     }
     // Every channel must belong to this namespace.
-    let valid: Option<(i64,)> = sqlx::query_as(
-        "SELECT count(*) FROM channels WHERE id = ANY($1) AND namespace_id = $2",
-    )
-    .bind(&req.channel_ids)
-    .bind(ns)
-    .fetch_optional(&state.config)
-    .await
-    .map_err(internal)?;
+    let valid: Option<(i64,)> =
+        sqlx::query_as("SELECT count(*) FROM channels WHERE id = ANY($1) AND namespace_id = $2")
+            .bind(&req.channel_ids)
+            .bind(ns)
+            .fetch_optional(&state.config)
+            .await
+            .map_err(internal)?;
     if valid.map(|(n,)| n as usize) != Some(req.channel_ids.len()) {
         return Err(StatusCode::BAD_REQUEST);
     }

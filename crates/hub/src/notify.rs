@@ -292,7 +292,12 @@ fn flag(cfg: &Value, k: &str) -> bool {
 }
 
 async fn post_json(client: &reqwest::Client, url: &str, body: Value) -> anyhow::Result<()> {
-    client.post(url).json(&body).send().await?.error_for_status()?;
+    client
+        .post(url)
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?;
     Ok(())
 }
 
@@ -315,8 +320,7 @@ pub async fn dispatch(
                 }
                 None => json!({ "text": body }),
             };
-            let m = reqwest::Method::from_bytes(method.as_bytes())
-                .unwrap_or(reqwest::Method::POST);
+            let m = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::POST);
             let mut req = client.request(m, url).json(&payload);
             if let Some(hdrs) = s(cfg, "headers") {
                 for line in hdrs.lines() {
@@ -368,7 +372,9 @@ pub async fn dispatch(
                 .error_for_status()?;
         }
         "ntfy" => {
-            let server = s(cfg, "server").unwrap_or("https://ntfy.sh").trim_end_matches('/');
+            let server = s(cfg, "server")
+                .unwrap_or("https://ntfy.sh")
+                .trim_end_matches('/');
             let topic = sreq(cfg, kind, "topic")?;
             let url = format!("{server}/{topic}");
             let mut req = client.post(url).body(body.to_string());
@@ -402,7 +408,9 @@ pub async fn dispatch(
             post_json(client, &url, json!({ "message": body, "priority": prio })).await?;
         }
         "bark" => {
-            let server = s(cfg, "server").unwrap_or("https://api.day.app").trim_end_matches('/');
+            let server = s(cfg, "server")
+                .unwrap_or("https://api.day.app")
+                .trim_end_matches('/');
             let key = sreq(cfg, kind, "device_key")?;
             post_json(
                 client,
@@ -489,8 +497,7 @@ async fn send_email(cfg: &Value, body: &str) -> anyhow::Result<()> {
         .subject("Last Monitor alert")
         .body(body.to_string())?;
 
-    let mut builder =
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)?.port(port);
+    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)?.port(port);
     if let (Some(u), Some(pw)) = (s(cfg, "username"), s(cfg, "password")) {
         builder = builder.credentials(Credentials::new(u.to_string(), pw.to_string()));
     }

@@ -26,10 +26,25 @@ jobs:
           cp target/release/last-agent dist/
           cp -r migrations dist/
           tar -C dist -czf last-monitor-${{ github.ref_name }}-linux-x86_64.tar.gz .
+      - name: Extract changelog section for this tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {f=1; next}
+            f && /^## \[/ {exit}
+            f {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ -s RELEASE_NOTES.md ]; then
+            echo "Using CHANGELOG.md section for $VERSION"
+          else
+            echo "No CHANGELOG entry for $VERSION — falling back to auto-generated notes" >&2
+          fi
       - name: Create / update release
         uses: softprops/action-gh-release@v2
         with:
           files: last-monitor-*.tar.gz
+          body_path: RELEASE_NOTES.md
+          # also append GitHub's commit/PR list under the curated notes
           generate_release_notes: true
 
   # Per-arch image build on NATIVE runners (no QEMU = fast & reliable), pushed by
