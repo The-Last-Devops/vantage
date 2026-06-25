@@ -167,24 +167,24 @@ onUnmounted(() => clearInterval(timer))
 
       <!-- recent events feed -->
       <section v-if="!downOnly" class="space-y-2">
-        <h2 class="text-sm font-semibold text-fg">Recent events</h2>
-        <p v-if="!shownEvents.length" class="rounded-xl border border-line bg-surface p-6 text-center text-sm text-muted">No status changes recorded recently.</p>
+        <h2 class="text-[11px] font-semibold uppercase tracking-wider text-faint">Recent events</h2>
+        <p v-if="!shownEvents.length" class="rounded-xl border border-line bg-surface p-5 text-center text-xs text-muted">No status changes recorded recently.</p>
         <div v-else class="overflow-x-auto rounded-xl border border-line bg-surface">
-          <table class="w-full text-sm">
-            <thead><tr class="border-b border-line-strong bg-headbg text-left text-[11px] uppercase tracking-wider text-muted">
-              <th class="px-4 py-2.5 font-semibold">Status</th>
-              <th class="px-4 py-2.5 font-semibold">Service</th>
-              <th class="px-4 py-2.5 font-semibold">When</th>
-              <th class="px-4 py-2.5 font-semibold">Duration</th>
-              <th class="px-4 py-2.5 font-semibold">Message</th>
+          <table class="w-full text-xs">
+            <thead><tr class="border-b border-line-strong bg-headbg text-left text-[10px] uppercase tracking-wider text-muted">
+              <th class="px-3 py-1.5 font-semibold">Status</th>
+              <th class="px-3 py-1.5 font-semibold">Service</th>
+              <th class="px-3 py-1.5 font-semibold">When</th>
+              <th class="px-3 py-1.5 font-semibold">Duration</th>
+              <th class="px-3 py-1.5 font-semibold">Message</th>
             </tr></thead>
             <tbody>
               <tr v-for="(e, i) in shownEvents" :key="i" class="border-b border-line last:border-0 hover:bg-hover">
-                <td class="px-4 py-2.5"><StatePill :tone="e.up ? 'ok' : 'down'" :label="e.up ? 'Up' : 'Down'" /></td>
-                <td class="px-4 py-2.5"><RouterLink :to="{ name: 'monitor', params: { id: e.monitor_id } }" class="text-accent hover:underline">{{ e.name }}</RouterLink></td>
-                <td class="px-4 py-2.5 tabular-nums text-muted">{{ evTime(e.at) }}</td>
-                <td class="whitespace-nowrap px-4 py-2.5 tabular-nums text-muted">{{ fmtDur(stateDur(i).secs) }}<span v-if="stateDur(i).ongoing" class="text-faint"> · ongoing</span></td>
-                <td class="px-4 py-2.5 text-muted">{{ evMessage(e) }}</td>
+                <td class="px-3 py-1.5"><StatePill :tone="e.up ? 'ok' : 'down'" :label="e.up ? 'Up' : 'Down'" /></td>
+                <td class="px-3 py-1.5"><RouterLink :to="{ name: 'monitor', params: { id: e.monitor_id } }" class="text-accent hover:underline">{{ e.name }}</RouterLink></td>
+                <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted">{{ evTime(e.at) }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted">{{ fmtDur(stateDur(i).secs) }}<span v-if="stateDur(i).ongoing" class="text-faint"> · ongoing</span></td>
+                <td class="px-3 py-1.5 text-muted">{{ evMessage(e) }}</td>
               </tr>
             </tbody>
           </table>
