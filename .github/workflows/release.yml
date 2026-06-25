@@ -47,11 +47,47 @@ jobs:
           # also append GitHub's commit/PR list under the curated notes
           generate_release_notes: true
 
+  # Which component changed since the PREVIOUS tag. An unchanged component isn't
+  # rebuilt — the manifest job re-tags the previous release's image to this version
+  # (a pure registry copy). A version-only bump touches Cargo.toml/lock, which the
+  # `shared` filter treats as "both changed", so the embedded version stays correct.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      hub: ${{ steps.d.outputs.hub }}
+      agent: ${{ steps.d.outputs.agent }}
+      prev: ${{ steps.d.outputs.prev }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: d
+        shell: bash
+        run: |
+          NEW="${GITHUB_REF_NAME}"
+          PREV="$(git tag --sort=-creatordate | grep -vFx "$NEW" | head -1)"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          if [ -z "$PREV" ]; then
+            echo "no previous tag — building everything"
+            echo "hub=true" >> "$GITHUB_OUTPUT"; echo "agent=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          CH="$(git diff --name-only "$PREV" "$NEW")"
+          echo "changed files vs $PREV:"; echo "$CH"
+          shared='^(crates/shared/|Cargo\.(toml|lock)$)'
+          hub=false; agent=false
+          echo "$CH" | grep -Eq "$shared|^crates/hub/|^frontend/|^deploy/Dockerfile\.hub$" && hub=true
+          echo "$CH" | grep -Eq "$shared|^crates/agent/|^deploy/Dockerfile\.agent$" && agent=true
+          echo "hub=$hub" >> "$GITHUB_OUTPUT"; echo "agent=$agent" >> "$GITHUB_OUTPUT"
+          echo "→ hub=$hub agent=$agent"
+
   # Per-arch image build on NATIVE runners (no QEMU = fast & reliable), pushed by
   # digest; the manifest job below stitches them into the semver + latest tags.
   # Mirrors ci.yml. hub runs centrally (amd64 only); only the agent needs arm64.
+  # Only a CHANGED component builds; unchanged ones are re-tagged in `manifest`.
   image:
     name: Image ${{ matrix.component }} (${{ matrix.arch }})
+    needs: [changes]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -67,22 +103,27 @@ jobs:
     env:
       IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
     steps:
       - uses: actions/checkout@v4
+        if: env.CHANGED == 'true'
       - name: Docker Hub login (reliable buildkit image pull)
-        if: env.DOCKERHUB_USERNAME != ''
+        if: env.DOCKERHUB_USERNAME != '' && env.CHANGED == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v3
+        if: env.CHANGED == 'true'
       - uses: docker/login-action@v3
+        if: env.CHANGED == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         id: build
+        if: env.CHANGED == 'true'
         with:
           context: .
           file: deploy/Dockerfile.${{ matrix.component }}
@@ -91,12 +132,14 @@ jobs:
           cache-from: type=gha,scope=rel-${{ matrix.component }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=rel-${{ matrix.component }}-${{ matrix.arch }}
       - name: Export digest
+        if: env.CHANGED == 'true'
         shell: bash
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"   # filename can't contain ':'
       - uses: actions/upload-artifact@v4
+        if: env.CHANGED == 'true'
         with:
           name: digest-${{ matrix.component }}-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -105,7 +148,7 @@ jobs:
   # Stitch the per-arch digests into the semver + latest tags (pure registry op).
   manifest:
     name: Manifest (${{ matrix.component }})
-    needs: [image]
+    needs: [changes, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -115,8 +158,11 @@ jobs:
         component: [hub, agent]
     env:
       IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
+      PREV: ${{ needs.changes.outputs.prev }}
     steps:
       - uses: actions/download-artifact@v4
+        if: env.CHANGED == 'true'
         with:
           path: /tmp/digests
           pattern: digest-${{ matrix.component }}-*
@@ -133,12 +179,22 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
-      - name: Create manifest list
+      - name: Create manifest list (rebuilt component)
+        if: env.CHANGED == 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(for f in *; do printf '%s@sha256:%s ' "$IMAGE" "$f"; done)
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
+      - name: Re-tag previous release (unchanged component)
+        if: env.CHANGED != 'true'
+        run: |
+          echo "Component unchanged since ${PREV} — re-tagging its image to this release."
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            "$IMAGE:${PREV#v}"
         env:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
       - name: Inspect

@@ -60,10 +60,39 @@ jobs:
   # reliably instead of hitting anonymous rate-limits/blips. Add repo secrets
   # DOCKERHUB_USERNAME + DOCKERHUB_TOKEN to enable it (skipped if unset).
   # hub runs centrally (amd64 only); only the agent needs arm64.
+  # Which component's code changed → only that image rebuilds. On `main` the tags
+  # are moving (:main / :sha), so an unchanged component needs no action at all —
+  # its existing tag already points at the last build.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      hub: ${{ steps.f.outputs.hub }}
+      agent: ${{ steps.f.outputs.agent }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: f
+        with:
+          filters: |
+            shared: &shared
+              - 'crates/shared/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            hub:
+              - *shared
+              - 'crates/hub/**'
+              - 'frontend/**'
+              - 'deploy/Dockerfile.hub'
+            agent:
+              - *shared
+              - 'crates/agent/**'
+              - 'deploy/Dockerfile.agent'
+
   image:
     name: Image ${{ matrix.component }} (${{ matrix.arch }})
     if: github.event_name == 'push'
-    needs: [fmt, clippy, test]
+    needs: [changes, fmt, clippy, test]
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -79,10 +108,11 @@ jobs:
     env:
       IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
     steps:
       - uses: actions/checkout@v4
       - name: Docker Hub login (reliable buildkit image pull)
-        if: env.DOCKERHUB_USERNAME != ''
+        if: env.DOCKERHUB_USERNAME != '' && env.CHANGED == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -95,6 +125,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         id: build
+        if: env.CHANGED == 'true'
         with:
           context: .
           file: deploy/Dockerfile.${{ matrix.component }}
@@ -103,12 +134,14 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.component }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}-${{ matrix.arch }}
       - name: Export digest
+        if: env.CHANGED == 'true'
         shell: bash
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"   # filename can't contain ':'
       - uses: actions/upload-artifact@v4
+        if: env.CHANGED == 'true'
         with:
           name: digest-${{ matrix.component }}-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -119,7 +152,7 @@ jobs:
   manifest:
     name: Manifest (${{ matrix.component }})
     if: github.event_name == 'push'
-    needs: [image]
+    needs: [changes, image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -129,18 +162,22 @@ jobs:
         component: [hub, agent]
     env:
       IMAGE: ghcr.io/the-last-devops/last-monitor-${{ matrix.component }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
     steps:
       - uses: actions/download-artifact@v4
+        if: env.CHANGED == 'true'
         with:
           path: /tmp/digests
           pattern: digest-${{ matrix.component }}-*
           merge-multiple: true
       - uses: docker/login-action@v3
+        if: env.CHANGED == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/metadata-action@v5
+        if: env.CHANGED == 'true'
         id: meta
         with:
           images: ${{ env.IMAGE }}
@@ -148,6 +185,7 @@ jobs:
             type=raw,value=main
             type=sha
       - name: Create manifest list
+        if: env.CHANGED == 'true'
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
@@ -156,4 +194,5 @@ jobs:
         env:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
       - name: Inspect
+        if: env.CHANGED == 'true'
         run: docker buildx imagetools inspect "$IMAGE:main"
