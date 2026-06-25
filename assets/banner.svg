@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="Last Monitor — self-hosted server & service monitoring">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B0E14"/><stop offset="1" stop-color="#0E1A1E"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3BE9CC"/><stop offset="1" stop-color="#0E9C8C"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <path d="M0 210 H360 L405 150 L455 252 L500 120 L540 210 H760 L805 168 L850 232 L892 210 H1200"
+        fill="none" stroke="#34E1C4" stroke-width="2.5" opacity="0.14" stroke-linecap="round" stroke-linejoin="round"/>
+  <g transform="translate(84 98)">
+    <rect width="104" height="104" rx="24" fill="url(#tile)"/>
+    <path d="M15 55 H37 L46 34 L57 76 L65 47 L72 55 H89" fill="none" stroke="#08231F" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+    <circle cx="89" cy="55" r="5.5" fill="#08231F"/>
+  </g>
+  <text x="220" y="150" fill="#E7ECF3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="52" font-weight="700">Last Monitor</text>
+  <text x="222" y="190" fill="#94A3B8" font-family="ui-sans-serif,system-ui,Segoe UI,Roboto" font-size="22">Self-hosted server &amp; service monitoring — metrics, uptime checks &amp; alerts</text>
+  <g font-family="ui-monospace,Menlo,monospace" font-size="15">
+    <text x="222" y="233" fill="#64748B">● Rust + Axum</text>
+    <text x="372" y="233" fill="#34E1C4">● self-hosted</text>
+    <text x="520" y="233" fill="#64748B">● multi-tenant RBAC</text>
+  </g>
+</svg>

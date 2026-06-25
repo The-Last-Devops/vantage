@@ -147,7 +147,12 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Last Monitor` :
     <!-- sidebar -->
     <aside :class="['fixed inset-y-0 left-0 z-40 flex h-[100dvh] w-60 shrink-0 flex-col border-r border-line bg-surface transition-transform md:sticky md:top-0 md:translate-x-0', drawer ? '' : '-translate-x-full']">
       <RouterLink :to="{ name: 'systems', query: nsq }" class="flex items-center gap-2.5 px-5 py-4 transition-opacity hover:opacity-80" v-tip="`Home`">
-        <span class="lm-logo inline-block h-6 w-6 rounded-md"></span>
+        <span class="lm-logo grid h-6 w-6 place-items-center rounded-md">
+          <svg viewBox="0 0 64 64" class="h-[15px] w-[15px]" fill="none" stroke="#08231F" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 34 H23 L28.5 21 L35 47 L40 29 L44.5 34 H55"/>
+            <circle cx="55" cy="34" r="4" fill="#08231F" stroke="none"/>
+          </svg>
+        </span>
         <span class="text-base font-semibold tracking-tight text-fg">Last Monitor</span>
       </RouterLink>
 

@@ -15,13 +15,25 @@ onMounted(() => {
   const ctx = c.getContext('2d')
   let hue = 170 // start near the teal brand color
 
+  // The brand mark: a rounded tile (hue) with a dark uptime-pulse glyph on it.
   const drawFavicon = () => {
     if (document.hidden || !ctx) return
     try {
       ctx.clearRect(0, 0, 32, 32)
       ctx.fillStyle = `hsl(${hue} 70% 55%)`
-      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(4, 4, 24, 24, 7); ctx.fill() }
-      else ctx.fillRect(4, 4, 24, 24)
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(2, 2, 28, 28, 7); ctx.fill() }
+      else ctx.fillRect(2, 2, 28, 28)
+      // pulse (64-viewBox path scaled ×0.5 into the 32px canvas)
+      ctx.strokeStyle = '#08231F'
+      ctx.lineWidth = 2.6
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      ctx.moveTo(4.5, 17); ctx.lineTo(11.5, 17); ctx.lineTo(14.25, 10.5)
+      ctx.lineTo(17.5, 23.5); ctx.lineTo(20, 14.5); ctx.lineTo(22.25, 17); ctx.lineTo(27.5, 17)
+      ctx.stroke()
+      ctx.fillStyle = '#08231F'
+      ctx.beginPath(); ctx.arc(27.5, 17, 1.9, 0, Math.PI * 2); ctx.fill()
       link.href = c.toDataURL('image/png')
     } catch { /* ignore */ }
   }

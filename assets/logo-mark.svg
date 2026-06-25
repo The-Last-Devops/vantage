@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Last Monitor mark">
+  <defs>
+    <linearGradient id="lmm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34E1C4"/>
+      <stop offset="1" stop-color="#0D9488"/>
+    </linearGradient>
+  </defs>
+  <path d="M6 34 H22 L28.5 19 L36 49 L41.5 28 L46 34 H58" fill="none" stroke="url(#lmm)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="58" cy="34" r="4" fill="#34E1C4"/>
+</svg>

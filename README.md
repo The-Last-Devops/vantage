@@ -3,6 +3,8 @@
      names. Do not show "last-monitor" as a user-facing label. -->
 <div align="center">
 
+<img src="assets/banner.svg" alt="Last Monitor" width="820">
+
 # Last Monitor
 
 **Lightweight, self-hosted server & fleet monitoring — written in Rust.**
