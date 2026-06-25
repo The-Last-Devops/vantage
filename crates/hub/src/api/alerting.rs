@@ -156,6 +156,77 @@ pub async fn channel_alerts(
     ))
 }
 
+#[derive(Serialize)]
+pub struct AttachedRule {
+    pub id: Uuid,
+    /// null = this rule targets the object specifically; else "all_services"/"all_hosts".
+    pub scope_kind: Option<String>,
+    pub enabled: bool,
+    pub firing: Option<bool>,
+}
+
+async fn attached_rules(
+    state: &AppState,
+    ns: Uuid,
+    target_col: &str, // "monitor_id" | "system_id"
+    target_id: Uuid,
+    scope: &str, // "all_services" | "all_hosts"
+) -> Result<Vec<AttachedRule>, StatusCode> {
+    let sql = format!(
+        "SELECT r.id, r.scope_kind, r.enabled, st.firing FROM alerts r \
+         LEFT JOIN alert_state st ON st.alert_id = r.id \
+         WHERE r.{target_col} = $1 OR (r.scope_kind = $2 AND r.scope_namespace_id = $3) \
+         ORDER BY r.scope_kind NULLS FIRST, r.id"
+    );
+    let rows: Vec<(Uuid, Option<String>, bool, Option<bool>)> = sqlx::query_as(&sql)
+        .bind(target_id)
+        .bind(scope)
+        .bind(ns)
+        .fetch_all(&state.config)
+        .await
+        .map_err(internal)?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, scope_kind, enabled, firing)| AttachedRule {
+            id,
+            scope_kind,
+            enabled,
+            firing,
+        })
+        .collect())
+}
+
+/// GET /api/monitors/:id/alerts — rules covering this service (its own + ns-wide).
+pub async fn monitor_alerts(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<AttachedRule>>, StatusCode> {
+    let ns = ns_of(
+        &state,
+        "SELECT namespace_id FROM monitors WHERE id = $1",
+        id,
+    )
+    .await?;
+    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    Ok(Json(
+        attached_rules(&state, ns, "monitor_id", id, "all_services").await?,
+    ))
+}
+
+/// GET /api/systems/:id/alerts — rules covering this host (its own + ns-wide).
+pub async fn system_alerts(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<AttachedRule>>, StatusCode> {
+    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
+    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    Ok(Json(
+        attached_rules(&state, ns, "system_id", id, "all_hosts").await?,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct CreateChannel {
     pub name: String,

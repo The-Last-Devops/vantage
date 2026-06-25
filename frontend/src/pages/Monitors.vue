@@ -231,7 +231,7 @@ onUnmounted(() => clearInterval(timer))
         <p v-else-if="!filtered.length" class="rounded-xl border border-line bg-surface p-4 text-center text-sm text-muted">{{ downOnly ? 'Nothing down. 🎉' : (q ? 'No matches.' : 'No services yet.') }}</p>
         <div v-else class="space-y-1 overflow-y-auto">
           <div v-for="m in filtered" :key="m.id" class="group relative rounded-lg border border-line bg-surface px-2.5 py-2 hover:border-accent/40">
-            <RouterLink :to="{ name: 'monitor', params: { id: m.id } }" class="block">
+            <RouterLink :to="{ name: 'monitor', params: { id: m.id } }" class="block" :title="`${m.name}${m.target ? ' · ' + m.target : ''}`">
               <div class="flex items-center gap-2">
                 <span class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
                   :class="!m.enabled ? 'bg-surface2 text-faint' : upPct(m) == null ? 'bg-surface2 text-muted' : upPct(m) >= 99 ? 'bg-accent/15 text-accent' : upPct(m) >= 90 ? 'bg-amber-500/15 text-amber-400' : 'bg-red-500/15 text-red-400'">

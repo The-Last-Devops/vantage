@@ -216,11 +216,14 @@ function restartTimer() { clearInterval(timer); timer = setInterval(reload, live
 // node metadata (namespace, kernel, cpu model…) — fetched once per target, not polled
 const meta = ref(null)
 async function loadMeta() { try { const all = await minLoad(api.get('/api/systems')); meta.value = all.find((s) => s.id === id.value) || null } catch { meta.value = null } }
-onMounted(() => { reload(); restartTimer(); loadMeta() })
+const rules = ref([]) // alert rules covering this host (own + namespace-wide)
+const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+async function loadRules() { try { rules.value = await api.get(`/api/systems/${id.value}/alerts`) } catch { rules.value = [] } }
+onMounted(() => { reload(); restartTimer(); loadMeta(); loadRules() })
 onBeforeUnmount(() => clearInterval(timer))
 // reload only when the target or range changes — NOT when ?sel (metric selection)
 // changes, which would otherwise blank the charts and cause a flash
-watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer(); loadMeta() })
+watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer(); loadMeta(); loadRules() })
 </script>
 
 <template>
@@ -260,6 +263,22 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
       <span v-if="meta.cpu_model"><span class="text-faint">Host CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
       <span v-if="meta.kernel"><span class="text-faint">Host kernel</span> <span class="text-fg">{{ meta.kernel }}</span></span>
       <RouterLink :to="`/system/${id}?type=containers&name=${encodeURIComponent(meta.name)}`" class="ml-auto text-accent hover:underline">All containers ›</RouterLink>
+    </div>
+
+    <!-- alert rules covering this host -->
+    <div v-if="meta && type !== 'container'" class="mb-4 rounded-xl border border-line bg-surface p-4">
+      <div class="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+        Alert rules <span class="rounded-full bg-surface2 px-2 py-0.5 text-[10px]">{{ rules.length }}</span>
+      </div>
+      <p v-if="!rules.length" class="text-xs text-faint">No alert rules cover this host. <RouterLink :to="{ name: 'alerts', query: nsq }" class="text-accent hover:underline">Add one</RouterLink>.</p>
+      <div v-else class="flex flex-wrap gap-2">
+        <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ...nsq, rule: r.id } }"
+          class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs hover:border-accent/50">
+          <span class="h-1.5 w-1.5 rounded-full" :class="r.firing === true ? 'bg-red-500' : r.firing === false ? 'bg-accent' : 'bg-faint'"></span>
+          <span class="text-fg">{{ r.scope_kind === 'all_hosts' ? 'All hosts in namespace' : 'This host' }}</span>
+          <span v-if="!r.enabled" class="text-faint">· off</span>
+        </RouterLink>
+      </div>
     </div>
 
     <!-- range (charts views) -->

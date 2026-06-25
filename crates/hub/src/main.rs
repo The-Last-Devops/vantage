@@ -133,6 +133,8 @@ async fn main() -> Result<()> {
         .route("/api/channel-types", get(api::channel_types))
         .route("/api/channels", get(api::list_all_channels))
         .route("/api/channels/{id}/alerts", get(api::channel_alerts))
+        .route("/api/monitors/{id}/alerts", get(api::monitor_alerts))
+        .route("/api/systems/{id}/alerts", get(api::system_alerts))
         .route(
             "/api/namespaces/{id}/channels",
             get(api::list_channels).post(api::create_channel),
