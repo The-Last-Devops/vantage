@@ -451,7 +451,7 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let ingest_url = format!("{}/pub/ingest", cfg.hub_url);
+    let mut ingest_url = format!("{}/pub/ingest", cfg.hub_url);
 
     let mut sys = System::new_all();
     let mut nets = Networks::new_with_refreshed_list();
@@ -523,27 +523,31 @@ async fn main() -> Result<()> {
             report.containers = collect_containers(d).await;
         }
         report.gpus = collect_gpus().await;
-        match client
-            .post(&ingest_url)
-            .header(API_KEY_HEADER, &cfg.api_key)
-            .json(&report)
-            .send()
-            .await
-        {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(ack) = resp.json::<IngestAck>().await {
-                    if ack.next_interval_secs > 0 {
-                        interval = Duration::from_secs(ack.next_interval_secs);
-                    }
+        let mut outcome = send_report(&client, &ingest_url, &cfg.api_key, &report).await;
+        // Self-heal the common "HUB_URL is http but the hub sits behind TLS" case:
+        // on a redirect, upgrade http→https IF it stays on the SAME host (a relative
+        // Location, or one pointing at our own https origin). We never follow a
+        // redirect to a different host — that could leak the agent token.
+        if let Sent::Redirect(ref loc) = outcome {
+            if let Some(https_url) = upgrade_target(&ingest_url, loc) {
+                tracing::warn!("hub redirected http→https — upgrading to https and retrying");
+                ingest_url = https_url;
+                outcome = send_report(&client, &ingest_url, &cfg.api_key, &report).await;
+            }
+        }
+        match outcome {
+            Sent::Ok(next) => {
+                if let Some(secs) = next {
+                    interval = Duration::from_secs(secs);
                 }
                 tracing::debug!(cpu = report.cpu_percent, "report sent");
             }
-            Ok(resp) if resp.status().is_redirection() => tracing::warn!(
-                status = %resp.status(),
+            Sent::Redirect(loc) => tracing::warn!(
+                location = %loc,
                 "hub redirected the request — set HUB_URL to the final URL (likely https://)"
             ),
-            Ok(resp) => tracing::warn!(status = %resp.status(), "hub rejected report"),
-            Err(e) => tracing::warn!(error = %e, "failed to reach hub"),
+            Sent::Rejected(status) => tracing::warn!(%status, "hub rejected report"),
+            Sent::Failed => tracing::warn!("failed to reach hub"),
         }
         // Wait out the interval, but wake immediately on a stop signal so the
         // agent exits cleanly (no half-cycle left hanging) instead of being killed.
@@ -577,5 +581,144 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {}
         _ = term => {}
+    }
+}
+
+/// Outcome of a single report POST.
+enum Sent {
+    /// Accepted; optional next interval (secs) from the IngestAck.
+    Ok(Option<u64>),
+    /// Hub returned a 3xx; carries the Location header (may be empty / relative).
+    Redirect(String),
+    /// Hub returned a non-success, non-redirect status.
+    Rejected(u16),
+    /// Transport error (couldn't reach the hub).
+    Failed,
+}
+
+async fn send_report(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    report: &MetricsReport,
+) -> Sent {
+    match client
+        .post(url)
+        .header(API_KEY_HEADER, api_key)
+        .json(report)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            let next = resp
+                .json::<IngestAck>()
+                .await
+                .ok()
+                .map(|a| a.next_interval_secs)
+                .filter(|n| *n > 0);
+            Sent::Ok(next)
+        }
+        Ok(resp) if resp.status().is_redirection() => Sent::Redirect(
+            resp.headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string(),
+        ),
+        Ok(resp) => Sent::Rejected(resp.status().as_u16()),
+        Err(_) => Sent::Failed,
+    }
+}
+
+/// scheme://authority of a URL (everything before the path).
+fn origin(url: &str) -> &str {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let end = rest
+                .find('/')
+                .map(|i| scheme.len() + 3 + i)
+                .unwrap_or(url.len());
+            &url[..end]
+        }
+        None => url,
+    }
+}
+
+/// Decide whether to auto-upgrade to https after a redirect. Returns the https URL
+/// to retry on ONLY when `current` is http AND the redirect stays on the SAME host
+/// (a relative Location, or one pointing at our own https origin). Returns None
+/// otherwise — we must never follow a redirect to a different host, which could
+/// leak the agent's enrollment token.
+fn upgrade_target(current: &str, location: &str) -> Option<String> {
+    let rest = current.strip_prefix("http://")?;
+    let https_url = format!("https://{rest}");
+    let same_host = location.is_empty()
+        || location.starts_with('/')
+        || location.starts_with(origin(&https_url));
+    same_host.then_some(https_url)
+}
+
+#[cfg(test)]
+mod redirect_tests {
+    use super::{is_whole_disk, origin, upgrade_target};
+
+    #[test]
+    fn whole_disk_vs_partition() {
+        assert!(is_whole_disk("sda"));
+        assert!(!is_whole_disk("sda1"));
+        assert!(is_whole_disk("vda"));
+        assert!(!is_whole_disk("vda2"));
+        assert!(is_whole_disk("xvda"));
+        assert!(!is_whole_disk("xvda1"));
+        assert!(is_whole_disk("nvme0n1"));
+        assert!(!is_whole_disk("nvme0n1p1"));
+        assert!(is_whole_disk("mmcblk0"));
+        assert!(!is_whole_disk("mmcblk0p1"));
+        assert!(!is_whole_disk("loop0"));
+        assert!(!is_whole_disk("dm-0"));
+    }
+
+    #[test]
+    fn origin_strips_path() {
+        assert_eq!(
+            origin("https://h.example.net/pub/ingest"),
+            "https://h.example.net"
+        );
+        assert_eq!(origin("http://localhost:8080/x"), "http://localhost:8080");
+        assert_eq!(origin("https://h.example.net"), "https://h.example.net");
+    }
+
+    #[test]
+    fn upgrades_same_host_http_to_https() {
+        let cur = "http://mon.example.net/pub/ingest";
+        // Absolute Location to our own https origin → upgrade.
+        assert_eq!(
+            upgrade_target(cur, "https://mon.example.net/pub/ingest").as_deref(),
+            Some("https://mon.example.net/pub/ingest"),
+        );
+        // Relative Location → same host → upgrade.
+        assert_eq!(
+            upgrade_target(cur, "/pub/ingest").as_deref(),
+            Some("https://mon.example.net/pub/ingest"),
+        );
+        // Empty Location (some proxies omit it) → assume same host → upgrade.
+        assert!(upgrade_target(cur, "").is_some());
+    }
+
+    #[test]
+    fn never_follows_to_a_different_host() {
+        // A redirect to ANOTHER host must NOT be followed (token-leak guard).
+        assert_eq!(
+            upgrade_target(
+                "http://mon.example.net/pub/ingest",
+                "https://evil.example.com/x"
+            ),
+            None
+        );
+        // Already https → nothing to upgrade.
+        assert_eq!(
+            upgrade_target("https://mon.example.net/pub/ingest", "/pub/ingest"),
+            None
+        );
     }
 }

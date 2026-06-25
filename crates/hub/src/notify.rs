@@ -535,3 +535,53 @@ async fn send_email(cfg: &Value, body: &str) -> anyhow::Result<()> {
     builder.build().send(email).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod redact_tests {
+    use super::{is_valid_kind, redact_secrets};
+    use serde_json::json;
+
+    #[test]
+    fn masks_secret_fields() {
+        let out = redact_secrets(
+            "discord",
+            &json!({ "url": "https://discord.com/api/webhooks/xyz" }),
+        );
+        assert_eq!(out["url"], json!("••••••"));
+    }
+
+    #[test]
+    fn leaves_non_secret_fields_intact() {
+        let out = redact_secrets(
+            "telegram",
+            &json!({ "bot_token": "123:abc", "chat_id": "-100999" }),
+        );
+        assert_eq!(out["bot_token"], json!("••••••")); // secret → masked
+        assert_eq!(out["chat_id"], json!("-100999")); // text → untouched
+    }
+
+    #[test]
+    fn empty_secret_is_not_masked() {
+        let out = redact_secrets("discord", &json!({ "url": "" }));
+        assert_eq!(out["url"], json!(""));
+    }
+
+    #[test]
+    fn unknown_kind_is_passthrough() {
+        let cfg = json!({ "url": "secret-ish" });
+        assert_eq!(redact_secrets("not-a-kind", &cfg), cfg);
+    }
+
+    #[test]
+    fn valid_kinds_recognized() {
+        assert!(is_valid_kind("telegram"));
+        assert!(is_valid_kind("discord"));
+        assert!(is_valid_kind("webhook"));
+    }
+
+    #[test]
+    fn invalid_kinds_rejected() {
+        assert!(!is_valid_kind("nope"));
+        assert!(!is_valid_kind(""));
+    }
+}

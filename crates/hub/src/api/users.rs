@@ -212,3 +212,50 @@ pub async fn delete_user(
 }
 
 // ---- data management (admin) ------------------------------------------------
+
+#[cfg(test)]
+mod email_tests {
+    use super::valid_email;
+
+    #[test]
+    fn accepts_normal_emails() {
+        assert!(valid_email("kien@senprints.com"));
+        assert!(valid_email("a.b+tag_1%x@sub.example.co"));
+        assert!(valid_email("ci-pipeline@svc.internal.net"));
+    }
+
+    #[test]
+    fn rejects_missing_or_extra_at() {
+        assert!(!valid_email("noatsign.com"));
+        assert!(!valid_email("two@@example.com"));
+        assert!(!valid_email("a@b@example.com"));
+    }
+
+    #[test]
+    fn rejects_empty_parts() {
+        assert!(!valid_email(""));
+        assert!(!valid_email("@example.com"));
+        assert!(!valid_email("user@"));
+    }
+
+    #[test]
+    fn rejects_bad_domain() {
+        assert!(!valid_email("user@localhost")); // no dot
+        assert!(!valid_email("user@.com")); // leading dot
+        assert!(!valid_email("user@example.")); // trailing dot
+        assert!(!valid_email("user@ab")); // domain < 3 chars
+    }
+
+    #[test]
+    fn rejects_spaces_and_nonascii() {
+        // The exact junk that once slipped in before validation existed.
+        assert!(!valid_email("kiên béo ngu dốt @gmail.com"));
+        assert!(!valid_email("has space@example.com"));
+    }
+
+    #[test]
+    fn rejects_overlong() {
+        let huge = format!("{}@example.com", "x".repeat(260));
+        assert!(!valid_email(&huge));
+    }
+}

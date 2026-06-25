@@ -95,4 +95,27 @@ mod tests {
         }
         assert_eq!(Role::from_db_str("nope"), None);
     }
+
+    #[test]
+    fn require_min_semantics() {
+        // `require_role(.., need)` passes when the user's role >= need.
+        assert!(Role::Owner >= Role::Editor); // owner can do editor work
+        assert!(Role::Owner >= Role::Owner);
+        assert!(Role::Viewer < Role::Editor); // viewer can't do editor work
+        assert!(Role::Editor < Role::Owner); // editor can't manage members
+    }
+
+    #[test]
+    fn from_db_str_is_case_sensitive() {
+        assert_eq!(Role::from_db_str("Owner"), None);
+        assert_eq!(Role::from_db_str("EDITOR"), None);
+        assert_eq!(Role::from_db_str(""), None);
+    }
+
+    #[test]
+    fn as_db_strings_are_stable() {
+        assert_eq!(Role::Viewer.as_db(), "viewer");
+        assert_eq!(Role::Editor.as_db(), "editor");
+        assert_eq!(Role::Owner.as_db(), "owner");
+    }
 }
