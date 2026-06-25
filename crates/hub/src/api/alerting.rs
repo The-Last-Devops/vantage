@@ -56,7 +56,7 @@ pub async fn create_channel(
     Json(req): Json<CreateChannel>,
 ) -> Result<Json<Uuid>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    if !crate::notify::is_valid_kind(&req.kind) {
+    if !crate::notify::is_valid_kind(&req.kind) || !super::valid_name(&req.name, 64) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let (id,): (Uuid,) = sqlx::query_as(
@@ -64,7 +64,7 @@ pub async fn create_channel(
          VALUES ($1, $2, $3, $4) RETURNING id",
     )
     .bind(ns)
-    .bind(&req.name)
+    .bind(req.name.trim())
     .bind(&req.kind)
     .bind(sqlx::types::Json(
         req.config.unwrap_or_else(|| serde_json::json!({})),
@@ -97,11 +97,18 @@ pub async fn patch_channel(
     )
     .await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    if req
+        .name
+        .as_deref()
+        .is_some_and(|n| !super::valid_name(n, 64))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     sqlx::query(
         "UPDATE channels SET name = COALESCE($2, name), config = COALESCE($3, config) WHERE id = $1",
     )
     .bind(id)
-    .bind(req.name)
+    .bind(req.name.map(|n| n.trim().to_string()))
     .bind(req.config.map(sqlx::types::Json))
     .execute(&state.config)
     .await
@@ -599,13 +606,17 @@ pub async fn create_status_page(
     Json(req): Json<CreateStatusPage>,
 ) -> Result<Json<Uuid>, StatusCode> {
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    // slug is part of the public URL → strict identifier; title is a display name.
+    if !super::valid_ns_name(&req.slug) || !super::valid_name(&req.title, 120) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let (id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO status_pages (namespace_id, slug, title, config) \
          VALUES ($1, $2, $3, $4) RETURNING id",
     )
     .bind(ns)
     .bind(&req.slug)
-    .bind(&req.title)
+    .bind(req.title.trim())
     .bind(sqlx::types::Json(
         req.config.unwrap_or_else(|| serde_json::json!({})),
     ))

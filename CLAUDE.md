@@ -95,6 +95,15 @@ docker compose up -d
   never ad-hoc one-liners (no inline `curl | python`, piped greps, etc.).** Write the check into a
   script, run it yourself, and don't ask for permission to run it. New checks should be idempotent
   and self-cleaning (e.g. `scripts/check-alerts.sh`).
+- **Validate every user-supplied field server-side — the API is the source of truth.**
+  The Vue SPA can be bypassed, so each create/patch handler must reject bad input with
+  `400` *before* the INSERT/UPDATE, and store the trimmed value. Reuse the shared validators
+  in `crates/hub/src/api/mod.rs`: `valid_name(s, max)` for display names (channel / monitor /
+  system / status-page title), `valid_ns_name` for slugs & identifiers (lowercase, hyphen,
+  no spaces — it's in URLs), `valid_email` for emails (ASCII, no whitespace). Mirror the same
+  rule in the Vue form for instant feedback (e.g. the email regex in `Members.vue`). When you
+  add or change a handler that accepts input, validate its fields in the **same** change — a
+  weak check like `email.contains('@')` is how "kiên béo ngu dốt @gmail.com" got in.
 - **Frontend: never paint a blank/black screen while loading — always show a loader.**
   - Route components in `frontend/src/router/index.js` are imported **eagerly**, not lazily
     (`() => import()`). A lazy route fetches its JS chunk on first navigation and the router renders

@@ -52,6 +52,27 @@ const stats = computed(() => {
   return { up, down, paused, total: monitors.value.length }
 })
 const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+// Up events carry no probe message; name the transition instead of showing "—".
+const evMessage = (e) => e.message || (e.up ? 'Recovered' : 'Down')
+const fmtDur = (s) => {
+  s = Math.max(0, Math.round(s))
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  if (d) return `${d}d ${h}h`
+  if (h) return `${h}h ${m}m`
+  if (m) return `${m}m ${sec}s`
+  return `${sec}s`
+}
+// How long THIS row's state lasted: from this event until the next *newer* change
+// of the same service (smaller index, events are newest-first). The newest event
+// of a service has no successor yet → the state is still ongoing.
+const stateDur = (i) => {
+  const start = new Date(events.value[i].at).getTime()
+  for (let j = i - 1; j >= 0; j--) {
+    if (events.value[j].monitor_id === events.value[i].monitor_id)
+      return { secs: (new Date(events.value[j].at).getTime() - start) / 1000, ongoing: false }
+  }
+  return { secs: (Date.now() - start) / 1000, ongoing: true }
+}
 const monName = (id) => monitors.value.find((m) => m.id === id)?.name || id.slice(0, 8)
 
 // left-list search + rough per-row uptime% from the recent-beats window
@@ -208,7 +229,7 @@ onUnmounted(() => clearInterval(timer))
                 <span class="min-w-0 flex-1 truncate text-sm font-medium text-fg group-hover:text-accent" :title="m.name">{{ m.name }}</span>
               </div>
               <div class="mt-1.5 flex items-end gap-px" :title="`last ${m.recent ? m.recent.length : 0} checks`">
-                <span v-for="(u, i) in (m.recent || [])" :key="i" class="h-3.5 w-[3px] rounded-sm" :class="u ? 'bg-accent' : 'bg-red-500'"></span>
+                <span v-for="(u, i) in (m.recent || [])" :key="i" class="h-3.5 min-w-0 flex-1 rounded-sm" :class="u ? 'bg-accent' : 'bg-red-500'"></span>
                 <span v-if="!m.recent || !m.recent.length" class="text-[10px] text-faint">no checks yet</span>
               </div>
             </RouterLink>
@@ -328,6 +349,7 @@ onUnmounted(() => clearInterval(timer))
               <th class="px-4 py-2.5 font-medium">Status</th>
               <th class="px-4 py-2.5 font-medium">Service</th>
               <th class="px-4 py-2.5 font-medium">When</th>
+              <th class="px-4 py-2.5 font-medium">Duration</th>
               <th class="px-4 py-2.5 font-medium">Message</th>
             </tr></thead>
             <tbody>
@@ -341,7 +363,10 @@ onUnmounted(() => clearInterval(timer))
                   <RouterLink :to="{ name: 'monitor', params: { id: e.monitor_id } }" class="text-fg hover:text-accent hover:underline">{{ e.name }}</RouterLink>
                 </td>
                 <td class="px-4 py-2.5 tabular-nums text-muted">{{ evTime(e.at) }}</td>
-                <td class="px-4 py-2.5 text-muted">{{ e.message || '—' }}</td>
+                <td class="whitespace-nowrap px-4 py-2.5 tabular-nums text-muted">
+                  {{ fmtDur(stateDur(i).secs) }}<span v-if="stateDur(i).ongoing" class="text-faint"> · ongoing</span>
+                </td>
+                <td class="px-4 py-2.5 text-muted">{{ evMessage(e) }}</td>
               </tr>
             </tbody>
           </table>

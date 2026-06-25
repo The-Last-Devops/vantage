@@ -1,5 +1,28 @@
 use super::*;
 
+/// Conservative email check: ASCII only, no whitespace, exactly one `@`, a dotted
+/// domain. Rejects junk like "kiên béo ngu dốt @gmail.com". Not full RFC 5322 —
+/// intentionally strict so display/login stays clean.
+fn valid_email(e: &str) -> bool {
+    if e.is_empty() || e.len() > 254 {
+        return false;
+    }
+    let mut parts = e.split('@');
+    let (local, domain) = match (parts.next(), parts.next(), parts.next()) {
+        (Some(l), Some(d), None) => (l, d),
+        _ => return false, // zero or more than one '@'
+    };
+    if local.is_empty() || domain.len() < 3 || domain.starts_with('.') || domain.ends_with('.') {
+        return false;
+    }
+    if !domain.contains('.') {
+        return false;
+    }
+    let local_ok = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
+    let domain_ok = |c: char| c.is_ascii_alphanumeric() || ".-".contains(c);
+    local.chars().all(local_ok) && domain.chars().all(domain_ok)
+}
+
 #[derive(Deserialize)]
 pub struct CreateUser {
     pub email: String,
@@ -20,7 +43,7 @@ pub async fn create_user(
         return Err(StatusCode::FORBIDDEN);
     }
     let email = req.email.trim().to_lowercase();
-    if email.is_empty() || !email.contains('@') || req.password.len() < 6 {
+    if !valid_email(&email) || req.password.len() < 6 {
         return Err(StatusCode::BAD_REQUEST);
     }
     let hash = crate::auth::hash_password(&req.password).map_err(internal)?;

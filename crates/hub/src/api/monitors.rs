@@ -36,6 +36,10 @@ pub async fn create_monitor(
     ) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // A push monitor has no target (it's a generated URL); everything else needs one.
+    if !super::valid_name(&req.name, 80) || (req.kind != "push" && req.target.trim().is_empty()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let mut config = req.config.unwrap_or_else(|| serde_json::json!({}));
     // Push monitors get a generated token; the agent/cron calls /pub/push/<token>.
@@ -51,9 +55,9 @@ pub async fn create_monitor(
          VALUES ($1, $2, $3::monitor_kind, $4, $5, $6) RETURNING id",
     )
     .bind(ns)
-    .bind(&req.name)
+    .bind(req.name.trim())
     .bind(&req.kind)
-    .bind(&req.target)
+    .bind(req.target.trim())
     .bind(req.interval_secs.unwrap_or(60).max(1))
     .bind(sqlx::types::Json(config))
     .fetch_one(&state.config)
@@ -125,6 +129,21 @@ pub async fn patch_monitor(
             .map_err(internal)?
             .ok_or(StatusCode::NOT_FOUND)?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    // Validate only the fields actually being changed.
+    if req
+        .name
+        .as_deref()
+        .is_some_and(|n| !super::valid_name(n, 80))
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if req
+        .target
+        .as_deref()
+        .is_some_and(|t| kind != "push" && t.trim().is_empty())
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     // Push monitors are addressed by their token; never let an edit drop it. The
     // edit form rebuilds config from its fields and may omit push_token, so carry
@@ -156,8 +175,8 @@ pub async fn patch_monitor(
          config = COALESCE($6, config) WHERE id = $1",
     )
     .bind(id)
-    .bind(req.name)
-    .bind(req.target)
+    .bind(req.name.map(|n| n.trim().to_string()))
+    .bind(req.target.map(|t| t.trim().to_string()))
     .bind(req.interval_secs)
     .bind(req.enabled)
     .bind(config.map(sqlx::types::Json))

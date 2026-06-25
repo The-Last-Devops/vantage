@@ -28,6 +28,15 @@ pub use namespaces::*;
 pub use servers::*;
 pub use users::*;
 
+/// A user-facing display name (channel / monitor / system / status-page title…):
+/// non-empty after trimming, at most `max` characters, and free of control
+/// characters. Spaces, punctuation and unicode are fine — this rejects only
+/// blank or junk input. Slugs/identifiers use the stricter [`valid_ns_name`].
+pub fn valid_name(s: &str, max: usize) -> bool {
+    let t = s.trim();
+    !t.is_empty() && t.chars().count() <= max && !t.chars().any(char::is_control)
+}
+
 fn internal<E: std::fmt::Display>(e: E) -> StatusCode {
     tracing::error!(error = %e, "api DB error");
     StatusCode::INTERNAL_SERVER_ERROR

@@ -14,9 +14,12 @@ pub async fn patch_system(
 ) -> Result<StatusCode, StatusCode> {
     let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
     rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    if !super::valid_name(&req.name, 80) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     sqlx::query("UPDATE systems SET name = $2 WHERE id = $1")
         .bind(id)
-        .bind(&req.name)
+        .bind(req.name.trim())
         .execute(&state.config)
         .await
         .map_err(internal)?;

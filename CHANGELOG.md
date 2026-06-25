@@ -9,6 +9,23 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [1.5.2] — 2026-06-25
+
+### Added
+- **Members** redesign — search + role filter, an *Add member* dialog and an edit
+  slide-over, per-namespace access shown as named role chips, and a clearer legend
+  distinguishing system roles from namespace roles.
+- **Services › Recent events** now shows a message on recovery ("Recovered") and a
+  **Duration** column — how long each state lasted, with the latest marked "ongoing".
+
+### Changed
+- The Services uptime/heartbeat bar now spans the full width of each card.
+
+### Fixed
+- **Input validation across the API.** Every create/edit now rejects junk server-side:
+  malformed emails (e.g. with spaces), blank or over-long names (channels, monitors,
+  systems), and invalid status-page slugs can no longer be saved.
+
 ## [1.5.1] — 2026-06-25
 
 ### Changed
@@ -110,7 +127,8 @@ Each released version's section is used verbatim as the GitHub Release notes
   agent, Uptime-Kuma-style service checks, and alerting, with multi-user namespace-scoped
   RBAC and public status pages.
 
-[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.3.1...v1.4.0
