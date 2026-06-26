@@ -9,6 +9,26 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [1.7.2] — 2026-06-26
+
+### Changed
+- **Alert notifications are now properly formatted** — a title plus Type / Namespace /
+  Condition / Detail / When, rendered natively per channel (Discord embed, Slack &
+  Mattermost colored attachment, Telegram HTML, webhook structured JSON, email HTML,
+  Matrix formatted) instead of a single terse line.
+- **Confirmations use an in-app themed dialog** (Esc/Enter/click-outside, red for
+  destructive actions) instead of the browser's plain `confirm()` box.
+- The **Recent events** feed is more compact (it's secondary on the Services page).
+- The README now shows an **architecture diagram**, and tooltips wrap long content.
+
+### Fixed
+- The alert rule **on/off toggle** now takes effect (it was flipping a table-row copy
+  instead of the underlying rule).
+
+### Ops
+- Added `scripts/disk-cleanup.sh` (reclaim `target/` + Docker build cache, never
+  volumes) with a weekly-cron snippet, documented in CLAUDE.md.
+
 ## [1.7.1] — 2026-06-26
 
 ### Added
@@ -251,7 +271,8 @@ Each released version's section is used verbatim as the GitHub Release notes
   agent, Uptime-Kuma-style service checks, and alerting, with multi-user namespace-scoped
   RBAC and public status pages.
 
-[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.7.2...HEAD
+[1.7.2]: https://github.com/The-Last-Devops/last-monitor/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/The-Last-Devops/last-monitor/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/The-Last-Devops/last-monitor/compare/v1.5.5...v1.6.0
