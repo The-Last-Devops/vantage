@@ -209,7 +209,7 @@ pub async fn test_channel_config(
         &client,
         &req.kind,
         &req.config,
-        "✅ Test notification from Last Monitor — this channel works.",
+        &crate::notify::Notification::test(),
     )
     .await
     .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
@@ -486,7 +486,7 @@ pub async fn test_channel(
         &client,
         &kind,
         &config.0,
-        "✅ Test notification from Last Monitor — this channel works.",
+        &crate::notify::Notification::test(),
     )
     .await
     .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
@@ -789,16 +789,10 @@ pub async fn test_alert(
         .build()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     // Send to every channel; report which ones failed.
+    let test = crate::notify::Notification::test();
     let mut errors = Vec::new();
     for (name, kind, config) in &channels {
-        if let Err(e) = crate::notify::dispatch(
-            &client,
-            kind,
-            &config.0,
-            "🔔 Test alert from Last Monitor — this rule's channels work.",
-        )
-        .await
-        {
+        if let Err(e) = crate::notify::dispatch(&client, kind, &config.0, &test).await {
             errors.push(format!("{name}: {e}"));
         }
     }

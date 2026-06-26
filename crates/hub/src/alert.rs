@@ -86,16 +86,26 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
             (None, _) => false,
         };
 
-        let (should_notify, subject) = match (was_firing, eval.firing) {
-            (false, true) => (true, "🔴 ALERT"),
-            (true, true) if renotify_due => (true, "🔴 ALERT (still firing)"),
-            (true, false) => (true, "✅ RECOVERED"),
-            _ => (false, ""),
+        let should_notify = match (was_firing, eval.firing) {
+            (false, true) => true,
+            (true, true) => renotify_due,
+            (true, false) => true,
+            _ => false,
         };
 
         if should_notify {
-            let body = format!("{subject}: {}", eval.message);
-            notify(client, &rule, &body).await;
+            let (target, kind_label, namespace) = target_info(state, &rule).await;
+            let n = crate::notify::Notification {
+                firing: eval.firing,
+                repeat: was_firing && eval.firing, // a re-notify while still firing
+                target,
+                kind_label: kind_label.to_string(),
+                namespace,
+                condition: condition_text(&rule),
+                detail: eval.message.clone(),
+                at: now.format("%Y-%m-%d %H:%M UTC").to_string(),
+            };
+            notify(client, &rule, &n).await;
         }
 
         // Record fired/recovered transitions for the history feed (not re-notifies).
@@ -412,13 +422,77 @@ async fn server_name(state: &AppState, id: Uuid) -> Option<String> {
 
 /// Fan a notification out to every channel wired to the rule. One channel
 /// failing must not stop the others, so each is dispatched independently.
-async fn notify(client: &reqwest::Client, rule: &Rule, body: &str) {
+async fn notify(client: &reqwest::Client, rule: &Rule, n: &crate::notify::Notification) {
     for ch in &rule.channels {
-        match crate::notify::dispatch(client, &ch.kind, &ch.config, body).await {
+        match crate::notify::dispatch(client, &ch.kind, &ch.config, n).await {
             Ok(()) => tracing::info!(rule = %rule.id, channel = %ch.name, "notified"),
             Err(e) => {
                 tracing::warn!(error = %e, rule = %rule.id, channel = %ch.name, "notify failed")
             }
         }
+    }
+}
+
+/// Human description of a rule's target: (name, "Service"|"Host", namespace).
+async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, String) {
+    if let Some(mid) = rule.monitor_id {
+        let r: Option<(String, String)> = sqlx::query_as(
+            "SELECT m.name, n.name FROM monitors m JOIN namespaces n ON n.id = m.namespace_id WHERE m.id = $1",
+        )
+        .bind(mid)
+        .fetch_optional(&state.config)
+        .await
+        .ok()
+        .flatten();
+        let (t, ns) = r.unwrap_or_else(|| ("service".into(), String::new()));
+        return (t, "Service", ns);
+    }
+    if let Some(sid) = rule.system_id {
+        let r: Option<(String, String)> = sqlx::query_as(
+            "SELECT s.name, n.name FROM systems s JOIN namespaces n ON n.id = s.namespace_id WHERE s.id = $1",
+        )
+        .bind(sid)
+        .fetch_optional(&state.config)
+        .await
+        .ok()
+        .flatten();
+        let (t, ns) = r.unwrap_or_else(|| ("host".into(), String::new()));
+        return (t, "Host", ns);
+    }
+    let ns = match rule.scope_ns {
+        Some(id) => sqlx::query_as::<_, (String,)>("SELECT name FROM namespaces WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.config)
+            .await
+            .ok()
+            .flatten()
+            .map(|(n,)| n)
+            .unwrap_or_default(),
+        None => String::new(),
+    };
+    match rule.scope_kind.as_deref() {
+        Some("all_hosts") => ("All hosts".into(), "Host", ns),
+        _ => ("All services".into(), "Service", ns),
+    }
+}
+
+/// Human condition, e.g. "is DOWN" / "CPU % > 90" / "offline > 120s".
+fn condition_text(rule: &Rule) -> String {
+    let service_like =
+        rule.monitor_id.is_some() || rule.scope_kind.as_deref() == Some("all_services");
+    if service_like {
+        return "is DOWN".into();
+    }
+    let c = &rule.condition;
+    if let Some(secs) = c.get("offline_secs").and_then(Value::as_i64) {
+        return format!("offline > {secs}s");
+    }
+    match (
+        c.get("metric").and_then(Value::as_str),
+        c.get("op").and_then(Value::as_str),
+        c.get("value"),
+    ) {
+        (Some(m), Some(op), Some(v)) => format!("{m} {op} {v}"),
+        _ => String::new(),
     }
 }

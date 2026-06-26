@@ -324,24 +324,190 @@ async fn post_json(client: &reqwest::Client, url: &str, body: Value) -> anyhow::
     Ok(())
 }
 
-/// Send `body` through a notification channel. Shared by the alert engine and the
-/// "send test" endpoint.
+/// A structured alert payload. Plain transports get a tidy multi-line [`text`];
+/// rich ones (Discord embed, Slack attachment, Telegram HTML, webhook JSON, email
+/// HTML) format it natively. Built by the alert engine; `test()` for the test button.
+pub struct Notification {
+    /// true = a problem fired; false = recovered.
+    pub firing: bool,
+    /// true = a re-notification while still firing (not the first alert).
+    pub repeat: bool,
+    pub target: String,     // "api.shop" or "All services"
+    pub kind_label: String, // "Service" / "Host"
+    pub namespace: String,
+    pub condition: String, // "is DOWN" / "CPU % > 90" / "offline > 120s"
+    pub detail: String,    // the probe / evaluation message
+    pub at: String,        // formatted UTC timestamp
+}
+
+impl Notification {
+    /// A friendly payload for the "send test" button.
+    pub fn test() -> Self {
+        Notification {
+            firing: false,
+            repeat: false,
+            target: "Test notification".into(),
+            kind_label: String::new(),
+            namespace: String::new(),
+            condition: String::new(),
+            detail: "Your channel is wired up correctly — real alerts will arrive here.".into(),
+            at: now_utc(),
+        }
+    }
+    fn status_word(&self) -> &'static str {
+        if !self.firing {
+            "RECOVERED"
+        } else if self.repeat {
+            "STILL FIRING"
+        } else {
+            "ALERT"
+        }
+    }
+    fn emoji(&self) -> &'static str {
+        if self.firing {
+            "🔴"
+        } else {
+            "✅"
+        }
+    }
+    /// Headline, e.g. "🔴 api.shop — ALERT".
+    pub fn title(&self) -> String {
+        format!("{} {} — {}", self.emoji(), self.target, self.status_word())
+    }
+    /// (label, value) rows the rich providers render; empty values are skipped.
+    fn fields(&self) -> Vec<(&'static str, &str)> {
+        let mut v: Vec<(&'static str, &str)> = Vec::new();
+        if !self.kind_label.is_empty() {
+            v.push(("Type", &self.kind_label));
+        }
+        if !self.namespace.is_empty() {
+            v.push(("Namespace", &self.namespace));
+        }
+        if !self.condition.is_empty() {
+            v.push(("Condition", &self.condition));
+        }
+        if !self.detail.is_empty() {
+            v.push(("Detail", &self.detail));
+        }
+        v.push(("When", &self.at));
+        v
+    }
+    /// Tidy multi-line plain text — the default for transports without rich markup.
+    pub fn text(&self) -> String {
+        let mut s = self.title();
+        for (k, val) in self.fields() {
+            s.push_str(&format!("\n{k}: {val}"));
+        }
+        s.push_str("\n— Last Monitor");
+        s
+    }
+    /// Telegram HTML body.
+    fn html(&self) -> String {
+        let esc = |t: &str| {
+            t.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        };
+        let mut s = format!("<b>{}</b>", esc(&self.title()));
+        for (k, val) in self.fields() {
+            s.push_str(&format!("\n<b>{k}:</b> {}", esc(val)));
+        }
+        s.push_str("\n<i>Last Monitor</i>");
+        s
+    }
+    fn color_int(&self) -> u32 {
+        if self.firing {
+            0xE0_1E_5A
+        } else {
+            0x2E_B6_7D
+        }
+    }
+    fn color_hex(&self) -> &'static str {
+        if self.firing {
+            "#E01E5A"
+        } else {
+            "#2EB67D"
+        }
+    }
+    fn slack_fields(&self) -> Vec<Value> {
+        self.fields()
+            .iter()
+            .map(|(k, v)| json!({ "title": k, "value": v, "short": true }))
+            .collect()
+    }
+    fn discord_fields(&self) -> Vec<Value> {
+        self.fields()
+            .iter()
+            .map(|(k, v)| json!({ "name": k, "value": v, "inline": true }))
+            .collect()
+    }
+    fn email_html(&self) -> String {
+        let esc = |t: &str| {
+            t.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        };
+        let rows: String = self
+            .fields()
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "<tr><td style=\"color:#64748b;padding:3px 16px 3px 0;white-space:nowrap;vertical-align:top\">{k}</td><td style=\"color:#0f172a\">{}</td></tr>",
+                    esc(v)
+                )
+            })
+            .collect();
+        format!(
+            "<div style=\"font-family:system-ui,Segoe UI,Roboto,sans-serif;font-size:14px\">\
+             <div style=\"font-size:17px;font-weight:700;color:{};margin-bottom:10px\">{}</div>\
+             <table style=\"border-collapse:collapse\">{rows}</table>\
+             <p style=\"color:#94a3b8;font-size:12px;margin-top:14px\">Last Monitor</p></div>",
+            self.color_hex(),
+            esc(&self.title())
+        )
+    }
+}
+
+fn now_utc() -> String {
+    chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+/// Send a [`Notification`] through a channel. Shared by the alert engine and the
+/// "send test" endpoint. Plain transports use `n.text()`; rich ones format natively.
 pub async fn dispatch(
     client: &reqwest::Client,
     kind: &str,
     cfg: &Value,
-    body: &str,
+    n: &Notification,
 ) -> anyhow::Result<()> {
+    let text = n.text();
+    let body = text.as_str();
     match kind {
         "webhook" => {
             let url = sreq(cfg, kind, "url")?;
             let method = s(cfg, "method").unwrap_or("POST").to_uppercase();
             let payload: Value = match s(cfg, "body") {
                 Some(tpl) => {
-                    let rendered = tpl.replace("{{message}}", body);
+                    let rendered = tpl
+                        .replace("{{message}}", body)
+                        .replace("{{title}}", &n.title())
+                        .replace("{{status}}", n.status_word());
                     serde_json::from_str(&rendered).unwrap_or_else(|_| json!({ "text": body }))
                 }
-                None => json!({ "text": body }),
+                // Default: a structured payload so downstream automation can branch on it.
+                None => json!({
+                    "event": if n.firing { "alert" } else { "recovery" },
+                    "status": n.status_word(),
+                    "firing": n.firing,
+                    "title": n.title(),
+                    "target": n.target,
+                    "type": n.kind_label,
+                    "namespace": n.namespace,
+                    "condition": n.condition,
+                    "detail": n.detail,
+                    "at": n.at,
+                    "text": body,
+                }),
             };
             let m = reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::POST);
             let mut req = client.request(m, url).json(&payload);
@@ -354,13 +520,32 @@ pub async fn dispatch(
             }
             req.send().await?.error_for_status()?;
         }
-        "slack" | "mattermost" | "teams" | "gchat" => {
+        "slack" | "mattermost" => {
+            let url = sreq(cfg, kind, "url")?;
+            post_json(
+                client,
+                url,
+                json!({ "attachments": [{
+                    "color": n.color_hex(),
+                    "title": n.title(),
+                    "fields": n.slack_fields(),
+                    "footer": "Last Monitor",
+                }] }),
+            )
+            .await?;
+        }
+        "teams" | "gchat" => {
             let url = sreq(cfg, kind, "url")?;
             post_json(client, url, json!({ "text": body })).await?;
         }
         "discord" => {
             let url = sreq(cfg, kind, "url")?;
-            let mut payload = json!({ "content": body });
+            let mut payload = json!({ "embeds": [{
+                "title": n.title(),
+                "color": n.color_int(),
+                "fields": n.discord_fields(),
+                "footer": { "text": "Last Monitor" },
+            }] });
             if let Some(u) = s(cfg, "username") {
                 payload["username"] = json!(u);
             }
@@ -377,7 +562,7 @@ pub async fn dispatch(
         "telegram" => {
             let token = sreq(cfg, kind, "bot_token")?;
             let chat_id = sreq(cfg, kind, "chat_id")?;
-            let mut payload = json!({ "chat_id": chat_id, "text": body });
+            let mut payload = json!({ "chat_id": chat_id, "text": n.html(), "parse_mode": "HTML" });
             if let Some(t) = s(cfg, "thread_id") {
                 payload["message_thread_id"] = json!(t);
             }
@@ -397,7 +582,12 @@ pub async fn dispatch(
             );
             client
                 .put(url)
-                .json(&json!({ "msgtype": "m.text", "body": body }))
+                .json(&json!({
+                    "msgtype": "m.text",
+                    "body": body,
+                    "format": "org.matrix.custom.html",
+                    "formatted_body": n.html(),
+                }))
                 .send()
                 .await?
                 .error_for_status()?;
@@ -507,13 +697,14 @@ pub async fn dispatch(
             )
             .await?;
         }
-        "email" => send_email(cfg, body).await?,
+        "email" => send_email(cfg, n).await?,
         other => anyhow::bail!("unsupported channel kind: {other}"),
     }
     Ok(())
 }
 
-async fn send_email(cfg: &Value, body: &str) -> anyhow::Result<()> {
+async fn send_email(cfg: &Value, n: &Notification) -> anyhow::Result<()> {
+    use lettre::message::header::ContentType;
     use lettre::transport::smtp::authentication::Credentials;
     use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
@@ -525,8 +716,9 @@ async fn send_email(cfg: &Value, body: &str) -> anyhow::Result<()> {
     let email = Message::builder()
         .from(from.parse()?)
         .to(to.parse()?)
-        .subject("Last Monitor alert")
-        .body(body.to_string())?;
+        .subject(n.title())
+        .header(ContentType::TEXT_HTML)
+        .body(n.email_html())?;
 
     let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)?.port(port);
     if let (Some(u), Some(pw)) = (s(cfg, "username"), s(cfg, "password")) {
