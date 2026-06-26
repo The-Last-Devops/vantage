@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { minLoad } from '../lib/minLoad'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,7 +122,7 @@ async function toggle(row) {
   catch (e) { a.enabled = prev; alert(`Failed (${e.status}).`) }
 }
 async function removeAlert(a) {
-  if (!confirm('Delete this alert rule?')) return
+  if (!(await confirm({ title: 'Delete alert rule?', message: 'This rule will stop watching and notifying. This cannot be undone.', danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/alerts/${a.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 const testState = ref({})
@@ -140,7 +141,7 @@ async function bulkEnable(rows, val) {
   await load()
 }
 async function bulkDelete(rows) {
-  if (!confirm(`Delete ${rows.length} alert rule(s)? This cannot be undone.`)) return
+  if (!(await confirm({ title: `Delete ${rows.length} alert rule(s)?`, message: 'They will stop notifying. This cannot be undone.', danger: true, confirmText: `Delete ${rows.length}` }))) return
   await Promise.all(rows.map((a) => api.del(`/api/alerts/${a.id}`).catch(() => {})))
   selectedIds.value = []
   await load()

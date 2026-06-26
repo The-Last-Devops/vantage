@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { minLoad } from '../lib/minLoad'
 import { useAuth } from '../stores/auth'
 
@@ -106,7 +107,7 @@ function copyCreds(ev) {
 }
 
 async function removeUser(u) {
-  if (!confirm(`Delete member ${u.email}? Their namespace access and sessions are removed. This cannot be undone.`)) return
+  if (!(await confirm({ title: `Delete ${u.email}?`, message: 'Their namespace access and sessions are removed. This cannot be undone.', danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/users/${u.id}`); if (editing.value?.id === u.id) editing.value = null; await loadUsers() }
   catch (e) { alert(e.status === 400 ? "You can't delete yourself." : `Failed (${e.status}).`) }
 }

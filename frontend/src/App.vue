@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount } from 'vue'
 import { RouterView } from 'vue-router'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 
 // The sidebar logo gently cycles hue via the --logo-hue CSS var. The favicon is
 // NOT animated — it stays the fixed brand mark from /favicon.svg (linked in
@@ -22,4 +23,5 @@ onBeforeUnmount(() => clearInterval(timer))
 
 <template>
   <RouterView />
+  <ConfirmDialog />
 </template>

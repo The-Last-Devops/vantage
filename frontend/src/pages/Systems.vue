@@ -2,6 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import Gauge from '../components/Gauge.vue'
@@ -187,7 +188,7 @@ function toggleExpand(k) { expanded.has(k) ? expanded.delete(k) : expanded.add(k
 async function bulkDelete() {
   const n = selected.size
   if (!n) return
-  if (!confirm(`Delete ${n} selected system${n > 1 ? 's' : ''}? This removes ${n > 1 ? 'them' : 'it'} and all collected metrics. This cannot be undone.`)) return
+  if (!(await confirm({ title: `Delete ${n} system${n > 1 ? 's' : ''}?`, message: `This removes ${n > 1 ? 'them' : 'it'} and all collected metrics. This cannot be undone.`, danger: true, confirmText: `Delete ${n}` }))) return
   for (const id of [...selected]) { try { await api.del(`/api/systems/${id}`) } catch {} }
   selected.clear(); await load()
 }

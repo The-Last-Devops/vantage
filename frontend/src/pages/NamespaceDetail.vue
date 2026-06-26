@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { minLoad } from '../lib/minLoad'
 import { useAuth } from '../stores/auth'
 
@@ -74,8 +75,8 @@ async function setRole(m, role) {
   catch (e) { memErr.value = `Failed (${e.status}).`; await loadMembers() }
 }
 async function removeMember(m) {
-  if (m.user_id === auth.user?.id && !confirm('Remove your own access to this namespace?')) return
-  if (!confirm(`Remove ${m.email} from ${ns.value.name}?`)) return
+  if (m.user_id === auth.user?.id && !(await confirm({ title: 'Remove your own access?', message: `You will lose ${ns.value.role} access to ${ns.value.name}.`, danger: true, confirmText: 'Remove' }))) return
+  if (!(await confirm({ title: 'Remove member?', message: `${m.email} will lose access to ${ns.value.name}. You can add them back later.`, danger: true, confirmText: 'Remove' }))) return
   try { await api.del(`/api/namespaces/${nsId.value}/members/${m.user_id}`); await Promise.all([loadMembers(), loadCandidates()]) }
   catch (e) { memErr.value = `Failed (${e.status}).` }
 }
@@ -105,7 +106,7 @@ async function saveThr() {
 async function removeNs() {
   if (isDefault.value) return
   if (ns.value.system_count > 0) { alert(`"${ns.value.name}" still has ${ns.value.system_count} system(s). Move or delete them first.`); return }
-  if (!confirm(`Delete namespace "${ns.value.name}"? This cannot be undone.`)) return
+  if (!(await confirm({ title: 'Delete namespace?', message: `"${ns.value.name}" — this cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/namespaces/${nsId.value}`); router.push({ name: 'namespaces' }) }
   catch (e) { alert(e.status === 409 ? 'Namespace still has systems attached.' : `Failed (${e.status}).`) }
 }

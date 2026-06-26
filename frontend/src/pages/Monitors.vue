@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { minLoad } from '../lib/minLoad'
+import { confirm } from '../lib/confirm'
 
 const route = useRoute()
 const router = useRouter()
@@ -76,11 +77,11 @@ async function load() {
   loading.value = false
 }
 async function removeMonitor(m) {
-  if (!confirm(`Delete service "${m.name}"?`)) return
+  if (!(await confirm({ title: 'Delete service?', message: `"${m.name}" and its check history are removed permanently. This cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/monitors/${m.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 async function bulkDelete(rows) {
-  if (!confirm(`Delete ${rows.length} service(s)? This cannot be undone.`)) return
+  if (!(await confirm({ title: `Delete ${rows.length} service(s)?`, message: 'They are removed along with their collected metrics. This cannot be undone.', danger: true, confirmText: `Delete ${rows.length}` }))) return
   await Promise.all(rows.map((m) => api.del(`/api/monitors/${m.id}`).catch(() => {})))
   selectedIds.value = []
   await load()

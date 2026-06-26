@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
@@ -45,7 +46,7 @@ function flash(target, text, ok = true) {
 
 async function uploadRestore() {
   if (!restoreFile.value) { flash('local', 'Pick a backup file first.', false); return }
-  if (!confirm('Restore will OVERWRITE all current configuration with the backup. Continue?')) return
+  if (!(await confirm({ title: 'Restore from backup?', message: 'This OVERWRITES all current configuration with the uploaded backup.', danger: true, confirmText: 'Restore' }))) return
   busy.value = true; msg.value = ''
   try {
     const res = await fetch('/api/admin/restore', { method: 'POST', credentials: 'include', body: restoreFile.value })
@@ -82,7 +83,7 @@ async function listS3() {
   try { const r = await api.get('/api/admin/backup/s3/list'); s3keys.value = r.keys || [] } catch { s3keys.value = [] }
 }
 async function restoreS3(key) {
-  if (!confirm(`Restore from ${key}? This OVERWRITES all current configuration.`)) return
+  if (!(await confirm({ title: 'Restore from S3?', message: `Restore "${key}"? This OVERWRITES all current configuration.`, danger: true, confirmText: 'Restore' }))) return
   busy.value = true; s3msg.value = ''
   try { await api.post('/api/admin/backup/s3/restore', { key }); flash('s3', 'Restore complete. You may need to log in again.') }
   catch (e) { flash('s3', `Restore failed (${e.status}).`, false) }

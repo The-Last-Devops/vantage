@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { minLoad } from '../lib/minLoad'
 
 const route = useRoute()
@@ -70,7 +71,7 @@ async function sendTest() {
   setTimeout(() => { testState.value = '' }, 4000)
 }
 async function remove() {
-  if (!confirm(`Delete channel "${chan.value.name}"? Alert rules using it are removed too.`)) return
+  if (!(await confirm({ title: 'Delete channel?', message: `"${chan.value.name}" — alert rules using it are removed too. This cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/channels/${id.value}`); router.push({ name: 'notifications' }) }
   catch (e) { alert(`Failed (${e.status}).`) }
 }

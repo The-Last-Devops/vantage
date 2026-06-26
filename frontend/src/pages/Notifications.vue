@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { minLoad } from '../lib/minLoad'
 
 const router = useRouter()
@@ -136,7 +137,7 @@ async function testChannel(c) {
   setTimeout(() => { testState.value = { ...testState.value, [c.id]: undefined } }, 3000)
 }
 async function removeChannel(c) {
-  if (!confirm(`Delete channel "${c.name}"? Alert rules using it are removed too.`)) return
+  if (!(await confirm({ title: 'Delete channel?', message: `"${c.name}" — alert rules using it are removed too. This cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/channels/${c.id}`); await loadChannels() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 
@@ -153,7 +154,7 @@ const selectedChannelIds = ref([])
 async function bulkDeleteChannels(rows) {
   const del = rows.filter((c) => c.can_edit)
   if (!del.length) { alert('None of the selected channels are editable by you.'); return }
-  if (!confirm(`Delete ${del.length} channel(s)? Alert rules using them are removed too.`)) return
+  if (!(await confirm({ title: `Delete ${del.length} channel(s)?`, message: 'Alert rules using them are removed too. This cannot be undone.', danger: true, confirmText: `Delete ${del.length}` }))) return
   await Promise.all(del.map((c) => api.del(`/api/channels/${c.id}`).catch(() => {})))
   selectedChannelIds.value = []
   await loadChannels()

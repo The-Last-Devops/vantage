@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
+import { confirm } from '../lib/confirm'
 import { minLoad } from '../lib/minLoad'
 
 const tokens = ref([])
@@ -44,7 +45,7 @@ function copyToken() {
   copied.value = true; setTimeout(() => (copied.value = false), 1500)
 }
 async function revoke(t) {
-  if (!confirm(`Revoke token "${t.name}"? Anything using it stops working immediately.`)) return
+  if (!(await confirm({ title: `Revoke "${t.name}"?`, message: 'Anything using this token stops working immediately. This cannot be undone.', danger: true, confirmText: 'Revoke' }))) return
   try { await api.del(`/api/pats/${t.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
 }
 
