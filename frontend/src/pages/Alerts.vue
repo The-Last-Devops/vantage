@@ -111,7 +111,10 @@ async function load() {
 watch(() => route.query.ns, load)
 
 // ---- row actions ----
-async function toggle(a) {
+async function toggle(row) {
+  // `row` is a copy from tableRows — flip the SOURCE item so the table re-renders.
+  const a = alerts.value.find((x) => x.id === row.id)
+  if (!a) return
   const prev = a.enabled
   a.enabled = !a.enabled
   try { await api.patch(`/api/alerts/${a.id}`, { enabled: a.enabled }) }
