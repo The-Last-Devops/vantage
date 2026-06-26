@@ -161,6 +161,11 @@ docker compose up -d
   (`components/UiSelect.vue`); `:options` accepts strings, `[value,label]` pairs, or
   `{value,label}` objects, plus `block` (full-width) and `placeholder`. Don't pass a `title`
   attribute to DOM elements (the `title` prop on `<AppShell>` is the page heading, not a tooltip).
+- **No native `window.confirm()`/`alert()` for confirmations — use `await confirm({…})`.**
+  Import `{ confirm }` from `lib/confirm.js` (themed dialog, `<ConfirmDialog/>` is mounted once in
+  `App.vue`): `if (!(await confirm({ title, message, danger: true, confirmText: 'Delete' }))) return`.
+  It returns a `Promise<boolean>`; the enclosing handler must be `async`. Use `danger: true` for
+  destructive actions (red + warning icon).
 - **Dev loop: stop the running hub before `cargo build`/`cargo run -p hub`** — a running binary
   holds `target/debug/last-hub` and the link fails (looks like an obscure linker error). Free
   `:8080` first. Watch disk too: a full disk surfaces as `ld: No space left on device`.
