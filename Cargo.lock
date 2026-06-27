@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent"
-version = "1.7.2"
+version = "1.7.3"
 dependencies = [
  "anyhow",
  "bollard",
@@ -1222,7 +1222,7 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hub"
-version = "1.7.2"
+version = "1.7.3"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "1.7.2"
+version = "1.7.3"
 dependencies = [
  "chrono",
  "serde",

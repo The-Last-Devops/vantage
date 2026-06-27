@@ -9,6 +9,22 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [1.7.3] — 2026-06-27
+
+### Changed
+- **Switching pages is now instant.** Every list page used to re-show its loading
+  spinner and re-fetch from scratch on each visit; pages now paint the last-known
+  data immediately and refresh in the background, so navigating between Systems,
+  Alerts, Monitors, Notifications, Members, Namespaces, Events, Audit, API tokens,
+  and Data retention no longer flashes a spinner. The spinner appears only on a
+  genuine first load or the first time you view a new namespace selection.
+
+### Fixed
+- **Cached data can't silently go stale.** Pages re-validate when the browser tab
+  regains focus or the network reconnects, and never display a snapshot older than
+  60 seconds without refreshing — so a long-open page won't show outdated values.
+  Cached data is also cleared on logout.
+
 ## [1.7.2] — 2026-06-26
 
 ### Changed
