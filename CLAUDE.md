@@ -4,9 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`vantage` is a self-hosted server & service monitoring system written in Rust,
-combining Beszel-style host metrics (agent on each server) with Uptime-Kuma-style
-service checks + alerting. Multi-user with namespace-scoped RBAC and public status pages.
+`vantage` is a self-hosted **centralized DevOps control plane** written in Rust: one
+place to manage and watch servers, clusters, services, and cloud — monitor, alert, and
+operate (incl. SSH/shell exec) from a single console. Multi-user with namespace-scoped
+RBAC and public status pages. (Grew out of Beszel-style host metrics + Uptime-Kuma-style
+service checks; the ambition is broader — see Guiding principles.)
+
+## Guiding principles (in priority order — weigh trade-offs in this order)
+
+1. **Security first, always.** Security is the top design constraint, ahead of features
+   and convenience. Default to the safe choice: least privilege, validate/escape all
+   input, redact secrets in every read path, no secret in logs, authenticate every
+   path. When a feature and security conflict, security wins — raise it, don't quietly
+   weaken it. This matters more than ever now that the product can **exec into hosts**.
+2. **Stay lightweight.** Favor small, fast, low-footprint code so Vantage runs on weak
+   machines. Prefer the lean dependency (or none) over the heavy one; keep the agent
+   tiny; don't pull a large crate/library for something small. Binary size, memory, and
+   CPU are features.
+3. **Modular by design.** Build components so they can be added / removed / upgraded
+   later without touching the rest. Define clear seams and interfaces between parts; a
+   new kind of thing should plug in, not require surgery.
+4. **The domain concepts are the modules.** Treat `system`, `service`, `notify channel`,
+   (and future: cluster, cloud provider, alert rule, …) as self-contained modules with a
+   common shape — so adding a new system kind or a new notify channel is one new module,
+   not edits scattered everywhere. (E.g. a notify channel = one arm + one definition.)
+5. **Split code into components too.** Keep files focused — split large files into
+   smaller modules/components along the same seams where it's reasonable, rather than
+   growing one big file.
 
 ## Architecture (the big picture — read this before designing changes)
 
