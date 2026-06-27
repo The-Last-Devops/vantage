@@ -5,6 +5,10 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { minLoad } from '../lib/minLoad'
 import UplotChart from '../components/UplotChart.vue'
+import MonitorMetaCard from '../components/MonitorMetaCard.vue'
+import MonitorHeartbeatBar from '../components/MonitorHeartbeatBar.vue'
+import MonitorIncidentsList from '../components/MonitorIncidentsList.vue'
+import MonitorDebugCard from '../components/MonitorDebugCard.vue'
 import { api } from '../lib/api'
 
 const route = useRoute()
@@ -129,20 +133,7 @@ onUnmounted(() => timer && clearInterval(timer))
     <PageLoader v-else-if="!m" />
     <div v-else class="space-y-5">
       <!-- header -->
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-line bg-surface p-4">
-        <div class="flex items-center gap-2">
-          <span class="h-2.5 w-2.5 rounded-full" :class="dotColor[status]"></span>
-          <span class="text-lg font-semibold" :class="statusColor[status]">{{ statusLabel[status] }}</span>
-          <span v-if="status === 'up' || status === 'down'" class="text-sm text-muted">for {{ dur(m.since) }}</span>
-        </div>
-        <div class="text-sm text-muted"><span class="text-faint">Type</span> {{ m.kind }}</div>
-        <div class="text-sm text-muted"><span class="text-faint">Namespace</span> {{ m.namespace }}</div>
-        <div class="text-sm text-muted"><span class="text-faint">Interval</span> {{ m.interval_secs }}s</div>
-        <div v-if="m.latency_ms != null" class="text-sm text-muted"><span class="text-faint">Latency</span> {{ m.latency_ms }} ms</div>
-        <div class="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted" v-tip="m.kind === 'push' ? pushUrl : m.target">
-          {{ m.kind === 'push' ? pushUrl : m.target }}
-        </div>
-      </div>
+      <MonitorMetaCard :m="m" :status="status" :status-label="statusLabel" :status-color="statusColor" :dot-color="dotColor" :dur="dur" :push-url="pushUrl" />
 
       <!-- uptime cards -->
       <div class="grid grid-cols-3 gap-3">
@@ -179,15 +170,7 @@ onUnmounted(() => timer && clearInterval(timer))
       </div>
 
       <!-- up/down strip -->
-      <div class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 text-[11px] uppercase tracking-wider text-faint">Status</div>
-        <div v-if="hb.up.length" class="flex h-7 gap-px overflow-hidden rounded">
-          <div v-for="(u, i) in hb.up" :key="i" class="flex-1"
-            :class="u == null ? 'bg-line' : u >= 1 ? 'bg-accent' : 'bg-red-500'"
-            v-tip="u == null ? 'no data' : u >= 1 ? 'up' : 'down'"></div>
-        </div>
-        <p v-else class="text-xs text-faint">No heartbeats in this range yet.</p>
-      </div>
+      <MonitorHeartbeatBar :up="hb.up" />
 
       <!-- latency chart -->
       <div class="rounded-xl border border-line bg-surface p-4">
@@ -197,45 +180,10 @@ onUnmounted(() => timer && clearInterval(timer))
       </div>
 
       <!-- down history / incidents -->
-      <div class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 text-[11px] uppercase tracking-wider text-faint">Down history</div>
-        <p v-if="!incidents.length" class="text-xs text-faint">No downtime in this range. 🎉</p>
-        <ul v-else class="divide-y divide-line/60">
-          <li v-for="(it, i) in incidents" :key="i" class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-sm">
-            <span class="inline-flex items-center gap-1.5 font-medium" :class="it.ongoing ? 'text-red-500' : 'text-amber-400'">
-              <span class="h-2 w-2 rounded-full" :class="it.ongoing ? 'bg-red-500' : 'bg-amber-400'"></span>
-              {{ it.ongoing ? 'Down' : 'Resolved' }}
-            </span>
-            <span class="tabular-nums text-muted">{{ evTime(it.at) }}</span>
-            <span class="text-faint">·</span>
-            <span class="tabular-nums text-fg">{{ it.ongoing ? durTxt(Date.now() - it.start) + ' (ongoing)' : durTxt(it.end - it.start) }}</span>
-            <span class="min-w-0 flex-1 truncate text-muted" v-tip="it.reason">{{ it.reason }}</span>
-          </li>
-        </ul>
-      </div>
+      <MonitorIncidentsList :incidents="incidents" :ev-time="evTime" :dur-txt="durTxt" />
 
       <!-- last request/response -->
-      <div v-if="debug" class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 text-[11px] uppercase tracking-wider text-faint">Last request / response</div>
-        <div class="grid gap-4 lg:grid-cols-2">
-          <div>
-            <div class="mb-1 flex items-center justify-between">
-              <span class="text-xs font-medium text-accent">Last success</span>
-              <button v-if="debug.ok" @click="copy(debug.ok, $event)" class="rounded-md border border-line bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">Copy</button>
-            </div>
-            <pre v-if="debug.ok" class="max-h-72 overflow-auto rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">{{ fmtDebug(debug.ok) }}</pre>
-            <p v-else class="text-xs text-faint">No successful check recorded yet.</p>
-          </div>
-          <div>
-            <div class="mb-1 flex items-center justify-between">
-              <span class="text-xs font-medium text-red-400">Last failure</span>
-              <button v-if="debug.err" @click="copy(debug.err, $event)" class="rounded-md border border-line bg-surface2 px-2 py-0.5 text-xs text-muted hover:text-accent">Copy</button>
-            </div>
-            <pre v-if="debug.err" class="max-h-72 overflow-auto rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">{{ fmtDebug(debug.err) }}</pre>
-            <p v-else class="text-xs text-faint">No failure recorded.</p>
-          </div>
-        </div>
-      </div>
+      <MonitorDebugCard v-if="debug" :debug="debug" :fmt-debug="fmtDebug" :copy="copy" />
     </div>
   </AppShell>
 </template>

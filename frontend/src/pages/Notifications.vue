@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
+import ChannelCard from '../components/ChannelCard.vue'
+import ChannelForm from '../components/ChannelForm.vue'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
 import { useCached } from '../lib/cache'
@@ -58,8 +60,6 @@ const cur = ref(null) // current provider meta
 const editId = ref(null)
 const search = ref('')
 const form = ref({ name: '', config: {}, nsId: '' })
-const showAdv = ref(false)
-const revealed = ref({}) // field key -> bool
 const err = ref('')
 const modalTest = ref('') // '' | 'run' | 'ok' | 'fail'
 const readOnly = ref(false) // viewing a channel you can't edit (other namespace)
@@ -76,8 +76,6 @@ const filtered = computed(() => {
     }))
     .filter((g) => g.items.length)
 })
-const basicFields = computed(() => cur.value?.fields.filter((f) => !f.advanced) || [])
-const advFields = computed(() => cur.value?.fields.filter((f) => f.advanced) || [])
 
 function openNew() {
   editId.value = null; cur.value = null; step.value = 'pick'; readOnly.value = false
@@ -89,7 +87,7 @@ function pickType(p) {
   const cfg = {}
   for (const f of p.fields) if (f.default != null) cfg[f.key] = f.default
   form.value = { name: form.value.name, config: cfg, nsId: form.value.nsId }
-  showAdv.value = false; revealed.value = {}; err.value = ''; modalTest.value = ''
+  err.value = ''; modalTest.value = ''
   step.value = 'form'
 }
 function backToPick() { step.value = 'pick'; search.value = ''; err.value = '' }
@@ -199,10 +197,8 @@ onMounted(async () => {
           <button :disabled="disabled" @click="bulkDeleteChannels(selected)" class="rounded-lg border border-rose-500/35 px-2.5 py-1.5 text-xs font-medium text-rose-500 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40">Delete</button>
         </template>
         <template #cell-name="{ row }">
-          <div class="flex items-center gap-2.5">
-            <span class="grid h-7 w-7 shrink-0 place-items-center rounded-lg" :style="{ background: byKind(row.kind)?.color || 'rgb(var(--surface2))', color: byKind(row.kind)?.fg || 'rgb(var(--fg))' }" v-html="iconSvg(byKind(row.kind)?.icon || 'chat', 16)"></span>
-            <span class="font-medium text-fg">{{ row.name }}</span>
-          </div>
+          <ChannelCard :name="row.name" :icon-html="iconSvg(byKind(row.kind)?.icon || 'chat', 16)"
+            :icon-color="byKind(row.kind)?.color || 'rgb(var(--surface2))'" :icon-fg="byKind(row.kind)?.fg || 'rgb(var(--fg))'" />
         </template>
         <template #cell-namespace="{ row }"><span class="text-muted">{{ row.namespace }}</span></template>
         <template #cell-access="{ row }">
@@ -257,77 +253,8 @@ onMounted(async () => {
 
         <!-- STEP 2: configure -->
         <template v-else>
-          <fieldset :disabled="readOnly" class="max-h-[60vh] space-y-4 overflow-auto p-5">
-            <p v-if="readOnly" class="rounded-lg border border-line bg-surface2/50 px-3 py-2 text-xs text-muted">View only — this channel belongs to another namespace. Editors of that namespace can change it.</p>
-            <label v-if="!editId" class="block">
-              <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Namespace</span>
-              <UiSelect v-model="form.nsId" block :options="namespaces.map((n) => ({ value: n.id, label: n.name }))" />
-              <span class="mt-1.5 block text-xs text-faint">The channel lives here; only editors of this namespace can change it later. Any alert can still use it.</span>
-            </label>
-            <label class="block">
-              <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Name</span>
-              <input v-model="form.name" placeholder="e.g. ops-alerts" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-            </label>
-
-            <!-- basic fields -->
-            <div v-for="f in basicFields" :key="f.key">
-              <component :is="'div'">
-                <!-- toggle -->
-                <label v-if="f.type === 'toggle'" class="flex cursor-pointer items-center gap-3">
-                  <input type="checkbox" class="peer sr-only" v-model="form.config[f.key]" />
-                  <span class="relative h-[22px] w-10 shrink-0 rounded-full bg-line transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-[18px] after:w-[18px] after:rounded-full after:bg-fg after:transition-transform peer-checked:bg-accent peer-checked:after:translate-x-[18px]"></span>
-                  <span>
-                    <span class="block text-sm text-fg">{{ f.label }}</span>
-                    <span v-if="f.hint" class="block text-xs text-faint">{{ f.hint }}</span>
-                  </span>
-                </label>
-                <!-- everything else -->
-                <label v-else class="block">
-                  <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">{{ f.label }}<span v-if="f.required" class="ml-0.5 text-rose-400">*</span></span>
-                  <UiSelect v-if="f.type === 'select'" v-model="form.config[f.key]" block :options="f.options" />
-                  <textarea v-else-if="f.type === 'textarea'" v-model="form.config[f.key]" :placeholder="f.placeholder" rows="3" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none"></textarea>
-                  <span v-else-if="f.type === 'secret'" class="relative block">
-                    <input :type="revealed[f.key] ? 'text' : 'password'" v-model="form.config[f.key]" :placeholder="f.placeholder" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 pr-10 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-                    <button type="button" @click="revealed[f.key] = !revealed[f.key]" class="absolute right-1.5 top-1.5 rounded p-1.5 text-faint hover:text-fg" :class="revealed[f.key] && 'text-accent'" aria-label="Show">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                    </button>
-                  </span>
-                  <input v-else :type="f.type === 'number' ? 'number' : 'text'" v-model="form.config[f.key]" :placeholder="f.placeholder" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-                  <span v-if="f.hint" class="mt-1.5 block text-xs text-faint">{{ f.hint }}</span>
-                </label>
-              </component>
-            </div>
-
-            <!-- advanced (always expanded — plenty of room, nothing to hide) -->
-            <div v-if="advFields.length" class="border-t border-line/70 pt-4">
-              <div class="mb-3 text-[11px] font-semibold uppercase tracking-wide text-faint">Advanced options <span class="font-normal normal-case text-faint/70">· optional</span></div>
-              <div class="space-y-4">
-                <div v-for="f in advFields" :key="f.key">
-                  <label v-if="f.type === 'toggle'" class="flex cursor-pointer items-center gap-3">
-                    <input type="checkbox" class="peer sr-only" v-model="form.config[f.key]" />
-                    <span class="relative h-[22px] w-10 shrink-0 rounded-full bg-line transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-[18px] after:w-[18px] after:rounded-full after:bg-fg after:transition-transform peer-checked:bg-accent peer-checked:after:translate-x-[18px]"></span>
-                    <span>
-                      <span class="block text-sm text-fg">{{ f.label }}</span>
-                      <span v-if="f.hint" class="block text-xs text-faint">{{ f.hint }}</span>
-                    </span>
-                  </label>
-                  <label v-else class="block">
-                    <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">{{ f.label }}<span v-if="f.required" class="ml-0.5 text-rose-400">*</span></span>
-                    <UiSelect v-if="f.type === 'select'" v-model="form.config[f.key]" block :options="f.options" />
-                    <textarea v-else-if="f.type === 'textarea'" v-model="form.config[f.key]" :placeholder="f.placeholder" rows="3" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none"></textarea>
-                    <span v-else-if="f.type === 'secret'" class="relative block">
-                      <input :type="revealed[f.key] ? 'text' : 'password'" v-model="form.config[f.key]" :placeholder="f.placeholder" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 pr-10 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-                      <button type="button" @click="revealed[f.key] = !revealed[f.key]" class="absolute right-1.5 top-1.5 rounded p-1.5 text-faint hover:text-fg" :class="revealed[f.key] && 'text-accent'" aria-label="Show">
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                      </button>
-                    </span>
-                    <input v-else :type="f.type === 'number' ? 'number' : 'text'" v-model="form.config[f.key]" :placeholder="f.placeholder" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-                    <span v-if="f.hint" class="mt-1.5 block text-xs text-faint">{{ f.hint }}</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </fieldset>
+          <ChannelForm :cur="cur" :config="form.config" :namespaces="namespaces" :edit-id="editId" :read-only="readOnly"
+            v-model:name="form.name" v-model:ns-id="form.nsId" />
 
           <!-- which alert rules notify through this channel -->
           <div v-if="editId" class="border-t border-line px-5 py-4">

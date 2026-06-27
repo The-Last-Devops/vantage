@@ -1,10 +1,7 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
-import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { api } from '../lib/api'
-import { useAuth } from '../stores/auth'
-import { useUi } from '../stores/ui'
-import { useVersion } from '../stores/version'
+import { ref, watch } from 'vue'
+import SidebarNav from './SidebarNav.vue'
+import AppHeader from './AppHeader.vue'
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -14,127 +11,7 @@ const props = defineProps({
   breadcrumb: { type: Array, default: null },
 })
 
-const auth = useAuth()
-const ui = useUi()
-const ver = useVersion()
-const route = useRoute()
-const router = useRouter()
-onMounted(() => ver.ensureLoaded())
-
 const drawer = ref(false)
-const nsOpen = ref(false)
-const nsRef = ref(null)
-const namespaces = ref([]) // [{id,name}]
-
-// ---- primary nav (collapsible groups) ----------------------------------
-// Parent groups: clicking the parent jumps to its first child; hovering a
-// parent reveals its children. When nothing is hovered, the group owning the
-// current route stays expanded so you always see where you are.
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
-const isAdmin = computed(() => !!auth.user?.is_admin)
-const groups = computed(() =>
-  [
-    {
-      key: 'infra', label: 'Infrastructure',
-      // `owns` = extra route names (e.g. detail pages) that belong to this group
-      // so it stays highlighted + expanded when you're on them.
-      owns: ['system'],
-      children: [
-        { label: 'All', name: 'systems', owns: ['system'] },
-        { label: 'Needs attention', name: 'attention' },
-      ],
-    },
-    {
-      key: 'services', label: 'Services',
-      owns: ['monitor', 'monitor-new', 'monitor-edit'],
-      children: [
-        { label: 'All', name: 'monitors', owns: ['monitor', 'monitor-new', 'monitor-edit'] },
-        { label: 'Down', name: 'monitors', down: true },
-      ],
-    },
-    {
-      key: 'alert', label: 'Alert',
-      owns: ['alert-new', 'alert-edit', 'channel'],
-      children: [
-        { label: 'Events', name: 'events' },
-        { label: 'Rules', name: 'alerts', owns: ['alert-new', 'alert-edit'] },
-        { label: 'Notify channel', name: 'notifications', owns: ['channel'] },
-      ],
-    },
-    {
-      key: 'settings', label: 'Settings',
-      owns: ['namespace'],
-      children: [
-        { label: 'Namespace', name: 'namespaces', owns: ['namespace'] },
-        { label: 'Members', name: 'members', admin: true },
-        { label: 'Audit', name: 'audit', admin: true },
-        { label: 'Data & retention', name: 'data', admin: true },
-        { label: 'Backup', name: 'backup', admin: true },
-        { label: 'API tokens', name: 'tokens' },
-        { label: 'About', name: 'about' },
-      ],
-    },
-  ].map((g) => ({ ...g, children: g.children.filter((c) => !c.admin || isAdmin.value) })),
-)
-// Carry the namespace selection (?ns) onto every nav link so it never drops.
-const childTo = (c) => {
-  const query = { ...nsq.value }
-  if (c.down) query.status = 'down'
-  return { name: c.name, query }
-}
-const childActive = (c) => {
-  // Detail / editor sub-routes (e.g. /channel/:id) highlight their owning child.
-  if (c.owns && c.owns.includes(route.name)) return true
-  if (route.name !== c.name) return false
-  if (c.name === 'monitors') return (route.query.status === 'down') === !!c.down
-  return true
-}
-const groupActive = (g) => g.children.some((c) => childActive(c)) || (g.owns || []).includes(route.name)
-// A group is expanded when it's the active route's group (always open) or when
-// the user has clicked its chevron open. No hover — opening is an explicit click.
-const openKey = ref(null)
-const expanded = (g) => openKey.value === g.key || groupActive(g)
-function openGroup(g) {
-  const first = g.children[0]
-  if (first && !childActive(first)) router.push(childTo(first))
-}
-
-const nsNames = computed(() => namespaces.value.map((n) => n.name))
-// Selected namespaces live in the URL (?ns=a,b) so they're shareable; empty = all.
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const isAll = computed(() => selectedNs.value.length === 0 || selectedNs.value.length === nsNames.value.length)
-const nsLabel = computed(() => {
-  const n = selectedNs.value.length
-  if (n === 0 || n === nsNames.value.length) return 'All namespaces'
-  return n === 1 ? selectedNs.value[0] : `${n} namespaces`
-})
-const nsChecked = (name) => selectedNs.value.length === 0 || selectedNs.value.includes(name)
-const allChecked = isAll
-
-function setNs(arr) {
-  const all = arr.length === 0 || arr.length === nsNames.value.length
-  router.replace({ query: { ...route.query, ns: all ? undefined : arr.join(',') } })
-}
-function toggleNs(name) {
-  // from "all" (nothing selected), a click picks just that namespace; further
-  // clicks add/remove from the explicit selection
-  if (selectedNs.value.length === 0) { setNs([name]); return }
-  const cur = [...selectedNs.value]
-  const i = cur.indexOf(name)
-  if (i >= 0) cur.splice(i, 1); else cur.push(name)
-  setNs(cur)
-}
-function toggleAllNs() { setNs([]) } // clears the filter → show all namespaces
-
-onMounted(async () => {
-  try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
-})
-// close the namespace dropdown on any click outside it (e.g. on the fleet table)
-function onDocClick(e) { if (nsOpen.value && nsRef.value && !nsRef.value.contains(e.target)) nsOpen.value = false }
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
-
-async function logout() { await auth.logout(); router.push({ name: 'login' }) }
 
 // browser tab title follows the page (e.g. "docker-01 — Vantage")
 watch(() => props.title, (t) => { document.title = t ? `${t} — Vantage` : 'Vantage' }, { immediate: true })
@@ -145,109 +22,15 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Vantage` : 'Van
     <div v-if="drawer" class="fixed inset-0 z-30 bg-black/60 md:hidden" @click="drawer = false"></div>
 
     <!-- sidebar -->
-    <aside :class="['fixed inset-y-0 left-0 z-40 flex h-[100dvh] w-60 shrink-0 flex-col border-r border-line bg-surface transition-transform md:sticky md:top-0 md:translate-x-0', drawer ? '' : '-translate-x-full']">
-      <RouterLink :to="{ name: 'systems', query: nsq }" class="flex items-center gap-2.5 px-5 py-4 transition-opacity hover:opacity-80" v-tip="`Home`">
-        <span class="vantage-logo grid h-6 w-6 place-items-center rounded-md">
-          <svg viewBox="0 0 64 64" class="h-[15px] w-[15px]" fill="none" stroke="#08231F" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M7 43 L21 21 L35 43"/>
-            <rect x="42" y="37.5" width="14" height="6" rx="1.8" fill="#08231F" stroke="none"/>
-          </svg>
-        </span>
-        <span class="text-base font-semibold tracking-tight text-fg">Vantage</span>
-      </RouterLink>
-
-      <!-- nav -->
-      <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        <div v-for="g in groups" :key="g.key">
-          <div class="flex items-center rounded-lg text-sm transition hover:bg-surface2"
-            :class="groupActive(g) ? 'font-semibold text-fg' : 'font-medium text-fg'">
-            <button @click="openGroup(g)" class="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-1 text-left"
-              :class="groupActive(g) ? 'text-fg' : 'hover:text-fg'">
-              <svg v-if="g.key === 'infra'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-              <svg v-else-if="g.key === 'services'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              <svg v-else-if="g.key === 'alert'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-              <svg v-else class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
-              <span class="flex-1 truncate">{{ g.label }}</span>
-            </button>
-            <!-- the submenu opens only on clicking this chevron (no hover) -->
-            <button @click.stop="openKey = openKey === g.key ? null : g.key"
-              class="shrink-0 px-3 py-2 text-faint hover:text-fg" v-tip="expanded(g) ? 'Hide submenu' : 'Show submenu'" aria-label="Toggle submenu">
-              <svg class="h-3.5 w-3.5 transition-transform" :class="expanded(g) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
-            </button>
-          </div>
-          <div v-show="expanded(g)" class="mt-0.5 space-y-0.5">
-            <RouterLink v-for="c in g.children" :key="c.label + (c.down ? '-down' : '')" :to="childTo(c)"
-              class="flex items-center rounded-lg py-1.5 pl-10 pr-3 text-sm transition hover:bg-surface2 hover:text-fg"
-              :class="childActive(c) ? '!bg-accent/10 font-semibold !text-accent' : 'font-medium text-muted'">{{ c.label }}</RouterLink>
-          </div>
-        </div>
-      </nav>
-
-      <!-- namespace multi-select — at the bottom so its dropdown opens upward
-           and never covers the nav links -->
-      <div ref="nsRef" class="relative border-t border-line px-3 py-2">
-        <div class="px-1 pb-1 text-[11px] uppercase tracking-wider text-faint">Namespace</div>
-        <button @click="nsOpen = !nsOpen"
-          class="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg hover:border-accent/50">
-          <span class="flex min-w-0 items-center gap-2"><span class="h-2 w-2 shrink-0 rounded-full bg-accent"></span><span class="truncate">{{ nsLabel }}</span></span>
-          <svg class="h-4 w-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
-        </button>
-        <div v-if="nsOpen" class="absolute bottom-full left-3 right-3 z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-line bg-surface2 py-1 shadow-xl">
-          <button @click="toggleAllNs()" class="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left text-sm hover:bg-surface" :class="allChecked ? 'text-accent' : 'text-muted'">
-            <span class="grid h-4 w-4 place-items-center rounded border" :class="allChecked ? 'border-accent bg-accent' : 'border-line'"></span>All namespaces
-          </button>
-          <button v-for="n in namespaces" :key="n.id" @click="toggleNs(n.name)"
-            class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface" :class="nsChecked(n.name) ? 'text-fg' : 'text-muted'">
-            <span class="grid h-4 w-4 place-items-center rounded border" :class="nsChecked(n.name) ? 'border-accent bg-accent' : 'border-line'"></span>{{ n.name }}
-          </button>
-        </div>
-      </div>
-
-      <div class="border-t border-line p-3">
-        <div class="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-          <span class="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-xs text-accent">{{ (auth.user?.email || '?').slice(0,2).toUpperCase() }}</span>
-          <div class="min-w-0 flex-1"><div class="truncate text-sm text-fg">{{ auth.user?.email }}</div><div class="text-[11px] text-faint">{{ auth.user?.is_admin ? 'Admin' : 'Member' }}</div></div>
-          <button @click="logout" v-tip="`Logout`" class="text-muted hover:text-accent"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
-        </div>
-      </div>
-    </aside>
+    <SidebarNav :drawer="drawer" />
 
     <!-- main -->
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="flex min-h-[60px] items-center justify-between gap-3 border-b border-line bg-surface/60 px-4 py-2.5 backdrop-blur sm:px-6">
-        <div class="flex min-w-0 items-center gap-3">
-          <button @click="drawer = true" class="rounded-lg border border-line bg-surface2 p-1.5 text-muted hover:text-accent md:hidden">
-            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
-          </button>
-          <nav v-if="breadcrumb" class="flex min-w-0 items-center gap-1.5 text-sm">
-            <template v-for="(b, i) in breadcrumb" :key="i">
-              <RouterLink v-if="b.to" :to="b.to" class="shrink-0 text-muted hover:text-accent">{{ i === 0 ? '‹ ' : '' }}{{ b.label }}</RouterLink>
-              <span v-else class="truncate font-semibold text-fg">{{ b.label }}</span>
-              <span v-if="i < breadcrumb.length - 1" class="shrink-0 text-faint">/</span>
-            </template>
-          </nav>
-          <h1 v-else-if="title && !hideTitle" class="text-lg font-semibold text-fg">{{ title }}</h1>
-          <slot name="title-after" />
-        </div>
-        <div class="flex items-center gap-3">
-          <slot name="actions" />
-          <slot name="header" />
-          <button @click="ui.toggleTheme()" v-tip="`Toggle theme`" class="rounded-lg border border-line bg-surface2 p-1.5 text-muted hover:text-accent">
-          <svg v-if="!ui.light" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-          <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-          </button>
-          <!-- build version → About; green = up to date / unknown, amber = newer release out -->
-          <RouterLink v-if="ver.current" :to="{ name: 'about' }"
-            v-tip="ver.isOutdated ? `Update available: ${ver.latestTag} — you have v${ver.current}` : `You're on v${ver.current}`"
-            class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors"
-            :class="ver.isOutdated
-              ? 'border-amber-400/40 bg-amber-400/10 text-amber-400 hover:bg-amber-400/20'
-              : 'border-emerald-400/40 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20'">
-            <span class="h-1.5 w-1.5 rounded-full" :class="ver.isOutdated ? 'bg-amber-400' : 'bg-emerald-400'"></span>
-            v{{ ver.current }}
-          </RouterLink>
-        </div>
-      </header>
+      <AppHeader :title="title" :hide-title="hideTitle" :breadcrumb="breadcrumb" @open-drawer="drawer = true">
+        <template #title-after><slot name="title-after" /></template>
+        <template #actions><slot name="actions" /></template>
+        <template #header><slot name="header" /></template>
+      </AppHeader>
       <main class="flex-1 p-4 sm:p-6"><slot /></main>
     </div>
   </div>

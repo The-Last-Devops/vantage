@@ -2,6 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
+import MemberAddForm from '../components/MemberAddForm.vue'
+import MemberRoleEditor from '../components/MemberRoleEditor.vue'
+import MemberAccessChips from '../components/MemberAccessChips.vue'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
 import { useCached } from '../lib/cache'
@@ -67,44 +70,32 @@ const shown = computed(() => {
 
 // ---- add member (modal) ----
 const addOpen = ref(false)
-const nu = ref({ email: '', password: '' })
-const showPw = ref(false)
 const adding = ref(false)
 const addErr = ref('')
 const created = ref(null) // { email, password } shown after success
-const showCreatedPw = ref(false)
 
 function openAdd() {
-  nu.value = { email: '', password: '' }; showPw.value = false
   addErr.value = ''; created.value = null; addOpen.value = true
 }
-function genPassword(target) {
+function genResetPw() {
   const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   const a = new Uint32Array(16); crypto.getRandomValues(a)
-  const pw = Array.from(a, (n) => chars[n % chars.length]).join('')
-  if (target === 'reset') resetPw.value = pw
-  else { nu.value.password = pw; showPw.value = true }
+  resetPw.value = Array.from(a, (n) => chars[n % chars.length]).join('')
 }
 // ASCII email, no whitespace/odd characters — mirrors the server's check.
 const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/
-async function addUser() {
+async function addUser({ email: rawEmail, password }) {
   addErr.value = ''
-  const email = nu.value.email.trim()
+  const email = rawEmail.trim()
   if (!EMAIL_RE.test(email)) { addErr.value = 'Enter a valid email — letters, digits and . _ % + - only, no spaces.'; return }
-  if (nu.value.password.length < 6) { addErr.value = 'Password must be at least 6 characters.'; return }
+  if (password.length < 6) { addErr.value = 'Password must be at least 6 characters.'; return }
   adding.value = true
   try {
-    const password = nu.value.password
     await api.post('/api/users', { email, password })
-    created.value = { email, password }; showCreatedPw.value = false
+    created.value = { email, password }
     await loadUsers()
   } catch (e) { addErr.value = e.status === 409 ? 'A member with that email already exists.' : `Failed (${e.status}).` }
   finally { adding.value = false }
-}
-const credentialsText = computed(() => created.value ? `Vantage\nURL: ${location.origin}\nEmail: ${created.value.email}\nPassword: ${created.value.password}` : '')
-function copyCreds(ev) {
-  navigator.clipboard?.writeText(credentialsText.value)
-  const b = ev.target, o = b.textContent; b.textContent = 'Copied'; setTimeout(() => (b.textContent = o), 1200)
 }
 
 async function removeUser(u) {
@@ -194,13 +185,7 @@ onMounted(async () => {
           <StatePill :tone="row.is_admin ? 'info' : row.read_all ? 'warn' : 'muted'" :label="sysLabel(row)" />
         </template>
         <template #cell-access="{ row }">
-          <span v-if="row.access === 'all'" class="inline-flex rounded-md border border-accent/30 bg-accent/8 px-2 py-0.5 text-xs text-accent">All namespaces</span>
-          <span v-else-if="!row.access || !row.access.length" class="inline-flex rounded-md border border-dashed border-line px-2 py-0.5 text-xs text-faint">No namespaces yet</span>
-          <div v-else class="flex flex-wrap gap-1.5">
-            <span v-for="m in row.access" :key="m.namespace_id" class="inline-flex items-center gap-1 rounded-md border border-line bg-surface2 px-2 py-0.5 text-xs text-fg">
-              {{ nameOf(m.namespace_id) }}<span class="text-faint" :class="{ 'text-accent': m.role === 'owner', 'text-amber-400': m.role === 'editor' }">· {{ nsRoleLabel(m.role) }}</span>
-            </span>
-          </div>
+          <MemberAccessChips :access="row.access" :name-of="nameOf" :ns-role-label="nsRoleLabel" />
         </template>
         <template #cell-actions="{ row }">
           <div class="flex items-center justify-end gap-1">
@@ -237,103 +222,14 @@ onMounted(async () => {
     </div>
 
     <!-- Add member modal -->
-    <div v-if="addOpen" class="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-black/65 p-4 backdrop-blur-sm sm:p-8" @click.self="addOpen = false">
-      <div class="w-full max-w-md overflow-hidden rounded-2xl border border-line bg-surface shadow-2xl">
-        <div class="flex items-center gap-3 border-b border-line px-5 py-4">
-          <h3 class="text-base font-semibold text-fg">{{ created ? 'Member created' : 'Add member' }}</h3>
-          <button @click="addOpen = false" class="ml-auto rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        </div>
-
-        <!-- form -->
-        <form v-if="!created" @submit.prevent="addUser" class="space-y-4 p-5">
-          <label class="block">
-            <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Email</span>
-            <input v-model="nu.email" placeholder="email@company.com" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-          </label>
-          <label class="block">
-            <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Temporary password</span>
-            <div class="flex gap-2">
-              <div class="relative flex-1">
-                <input v-model="nu.password" :type="showPw ? 'text' : 'password'" placeholder="password" class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 pr-9 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-                <button type="button" @click="showPw = !showPw" class="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-fg"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path v-if="showPw" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle v-if="showPw" cx="12" cy="12" r="3"/><path v-else d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 4.2A10 10 0 0 1 22 12a13 13 0 0 1-2.2 3M6.1 6.1A13 13 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 3-.5"/></svg></button>
-              </div>
-              <button type="button" @click="genPassword()" class="shrink-0 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-muted hover:border-accent/50 hover:text-fg">Generate</button>
-            </div>
-            <span class="mt-1.5 block text-xs text-faint">The new member signs in with this; they can change it later. Set the role after creating.</span>
-          </label>
-          <p v-if="addErr" class="text-xs text-rose-400">{{ addErr }}</p>
-          <div class="flex justify-end gap-2.5 pt-1">
-            <button type="button" @click="addOpen = false" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button>
-            <button type="submit" :disabled="adding" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ adding ? 'Adding…' : 'Add member' }}</button>
-          </div>
-        </form>
-
-        <!-- credentials hand-off -->
-        <div v-else class="space-y-3 p-5">
-          <p class="text-xs text-muted">Send these credentials to the new member — the password isn't shown again.</p>
-          <div class="space-y-1.5 rounded-lg border border-line bg-bg p-3 text-xs leading-relaxed text-fg">
-            <div><span class="inline-block w-20 text-faint">Email</span>{{ created.email }}</div>
-            <div class="flex items-center gap-2">
-              <span><span class="inline-block w-20 text-faint">Password</span><span class="font-mono">{{ showCreatedPw ? created.password : '•'.repeat(created.password.length) }}</span></span>
-              <button @click="showCreatedPw = !showCreatedPw" class="text-muted hover:text-accent"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path v-if="showCreatedPw" d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle v-if="showCreatedPw" cx="12" cy="12" r="3"/><path v-else d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 4.2A10 10 0 0 1 22 12a13 13 0 0 1-2.2 3M6.1 6.1A13 13 0 0 0 2 12s3.5 7 10 7a10 10 0 0 0 3-.5"/></svg></button>
-            </div>
-          </div>
-          <div class="flex justify-end gap-2.5">
-            <button @click="copyCreds" class="rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg hover:border-accent/50">Copy</button>
-            <button @click="addOpen = false" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Done</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <MemberAddForm v-if="addOpen" :adding="adding" :error="addErr" :created="created"
+      @submit="addUser" @close="addOpen = false" />
 
     <!-- Edit member slide-over -->
-    <div v-if="editing" class="fixed inset-0 z-50 flex justify-end bg-black/55 backdrop-blur-sm" @click.self="closeEdit">
-      <aside class="flex h-full w-full max-w-[420px] flex-col border-l border-line bg-surface shadow-2xl">
-        <div class="flex items-center gap-3 border-b border-line px-5 py-4">
-          <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-xs font-semibold text-muted">{{ initials(editing.email) }}</span>
-          <span class="min-w-0 flex-1 truncate text-sm font-medium text-fg">{{ editing.email }}</span>
-          <button @click="closeEdit" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        </div>
-
-        <div class="flex-1 space-y-6 overflow-y-auto p-5">
-          <!-- system role -->
-          <div>
-            <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">System role</div>
-            <UiSelect v-model="editRole" block @update:model-value="saveSysRole" :options="SYS.map((r) => ({ value: r.v, label: r.label }))" />
-            <p class="mt-1.5 text-xs text-faint">{{ SYS.find((r) => r.v === editRole)?.desc }}</p>
-          </div>
-
-          <!-- namespace access -->
-          <div>
-            <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Namespace access</div>
-            <p v-if="editRole !== 'user'" class="rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">{{ editRole === 'admin' ? 'Admins have full access to every namespace.' : 'Read-only admins can view every namespace.' }}</p>
-            <div v-else-if="!namespaces.length" class="text-xs text-faint">No namespaces exist yet.</div>
-            <div v-else class="divide-y divide-line/60">
-              <div v-for="n in namespaces" :key="n.id" class="flex items-center gap-3 py-2.5">
-                <span class="flex-1 truncate text-sm" :class="editNs[n.id] ? 'text-fg' : 'text-faint'">{{ n.name }}</span>
-                <UiSelect :model-value="editNs[n.id]" @update:model-value="(v) => setNsRole(n, v)" class="shrink-0"
-                  :options="[{ value: '', label: '— no access' }, ...NS_ROLES.map((r) => ({ value: r.v, label: r.label }))]" />
-              </div>
-            </div>
-          </div>
-
-          <!-- reset password -->
-          <div>
-            <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Reset password</div>
-            <div class="flex gap-2">
-              <input v-model="resetPw" type="text" placeholder="new password" class="flex-1 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-              <button @click="genPassword('reset')" class="shrink-0 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-muted hover:border-accent/50 hover:text-fg">Generate</button>
-              <button @click="doResetPw" class="shrink-0 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-accentfg hover:opacity-90">Set</button>
-            </div>
-          </div>
-
-          <p v-if="editErr" class="text-xs" :class="editErr.startsWith('✓') ? 'text-accent' : 'text-rose-400'">{{ editErr }}</p>
-        </div>
-
-        <div class="border-t border-line px-5 py-3.5 text-center">
-          <button @click="closeEdit" class="text-sm text-muted hover:text-fg">Changes save as you make them — Close</button>
-        </div>
-      </aside>
-    </div>
+    <MemberRoleEditor v-if="editing" :member="editing" :sys="SYS" :ns-roles="NS_ROLES"
+      :namespaces="namespaces" :edit-ns="editNs" :error="editErr" :initials="initials"
+      v-model:edit-role="editRole" v-model:reset-pw="resetPw"
+      @close="closeEdit" @save-sys-role="saveSysRole" @set-ns-role="setNsRole"
+      @gen-password="genResetPw" @reset-password="doResetPw" />
   </AppShell>
 </template>

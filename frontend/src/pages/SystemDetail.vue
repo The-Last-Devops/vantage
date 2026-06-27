@@ -5,9 +5,12 @@ import { api } from '../lib/api'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { minLoad } from '../lib/minLoad'
-import UplotChart from '../components/UplotChart.vue'
 import FleetCharts from '../components/FleetCharts.vue'
 import Gauge from '../components/Gauge.vue'
+import SystemMetaCard from '../components/SystemMetaCard.vue'
+import SystemAlertRules from '../components/SystemAlertRules.vue'
+import SystemRangePicker from '../components/SystemRangePicker.vue'
+import SystemChartPanel from '../components/SystemChartPanel.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
 
@@ -66,13 +69,6 @@ const fmtBps = (v) => {
   const u = ['B', 'K', 'M', 'G']; let i = 0; let n = v
   while (n >= 1024 && i < 3) { n /= 1024; i++ }
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}/s`
-}
-// Total bytes → human size (RAM/disk capacity in the metadata bar).
-const fmtBytes = (v) => {
-  if (v == null || v <= 0) return null
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let n = v
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
-  return `${n.toFixed(n < 10 && i > 1 ? 1 : 0)} ${u[i]}`
 }
 
 const metrics = ref(null)
@@ -242,64 +238,21 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     <!-- first paint while metadata loads — never a blank content area -->
     <PageLoader v-if="!meta" />
 
-    <!-- node metadata — every field links to the fleet filtered by that value -->
-    <div v-if="meta && type !== 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
-      <span><span class="text-faint">Type</span> <RouterLink :to="{ path: '/', query: { q: `kind:${meta.kind}` } }" class="text-fg hover:text-accent">{{ TYPE_LABEL[meta.kind] || meta.kind }}</RouterLink></span>
-      <span v-if="meta.cluster"><span class="text-faint">Cluster</span> <RouterLink :to="{ path: '/', query: { q: `cluster:${meta.cluster}` } }" class="text-fg hover:text-accent">{{ meta.cluster }}</RouterLink></span>
-      <span><span class="text-faint">Namespace</span> <RouterLink :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" class="text-fg hover:text-accent">{{ meta.namespace }}</RouterLink></span>
-      <span v-if="meta.hostname"><span class="text-faint">Hostname</span> <RouterLink :to="{ path: '/', query: { q: meta.hostname } }" class="text-fg hover:text-accent">{{ meta.hostname }}</RouterLink></span>
-      <span v-if="meta.cpu_model"><span class="text-faint">CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
-      <span v-if="fmtBytes(meta.mem_total)"><span class="text-faint">RAM</span> <span class="text-fg">{{ fmtBytes(meta.mem_total) }}</span></span>
-      <span v-if="fmtBytes(meta.disk_total)"><span class="text-faint">Disk</span> <span class="text-fg">{{ fmtBytes(meta.disk_total) }}</span></span>
-      <span v-if="meta.kernel"><span class="text-faint">Kernel</span> <RouterLink :to="{ path: '/', query: { q: `kernel:${meta.kernel}` } }" class="text-fg hover:text-accent">{{ meta.kernel }}</RouterLink></span>
-      <span v-if="meta.agent_version"><span class="text-faint">Agent</span> <RouterLink :to="{ path: '/', query: { q: `agent:${meta.agent_version}` } }" class="text-fg hover:text-accent">v{{ meta.agent_version }}</RouterLink></span>
-    </div>
-
-    <!-- container metadata: context about its host -->
-    <div v-if="meta && type === 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
-      <span><span class="text-faint">Type</span> <span class="text-fg">Container</span></span>
-      <span><span class="text-faint">Host</span> <RouterLink :to="`/system/${id}?type=docker&name=${encodeURIComponent(meta.name)}`" class="text-fg hover:text-accent">{{ meta.name }}</RouterLink></span>
-      <span><span class="text-faint">Namespace</span> <RouterLink :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" class="text-fg hover:text-accent">{{ meta.namespace }}</RouterLink></span>
-      <span v-if="meta.cpu_model"><span class="text-faint">Host CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
-      <span v-if="meta.kernel"><span class="text-faint">Host kernel</span> <span class="text-fg">{{ meta.kernel }}</span></span>
-      <RouterLink :to="`/system/${id}?type=containers&name=${encodeURIComponent(meta.name)}`" class="ml-auto text-accent hover:underline">All containers ›</RouterLink>
-    </div>
+    <!-- node / container metadata — every field links to the fleet filtered by that value -->
+    <SystemMetaCard v-if="meta" :meta="meta" :type="type" :id="id" />
 
     <!-- alert rules covering this host -->
-    <div v-if="meta && type !== 'container'" class="mb-4 rounded-xl border border-line bg-surface p-4">
-      <div class="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-        Alert rules <span class="rounded-full bg-surface2 px-2 py-0.5 text-[10px]">{{ rules.length }}</span>
-      </div>
-      <p v-if="!rules.length" class="text-xs text-faint">No alert rules cover this host. <RouterLink :to="{ name: 'alerts', query: nsq }" class="text-accent hover:underline">Add one</RouterLink>.</p>
-      <div v-else class="flex flex-wrap gap-2">
-        <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ...nsq, rule: r.id } }"
-          class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs hover:border-accent/50">
-          <span class="h-1.5 w-1.5 rounded-full" :class="r.firing === true ? 'bg-red-500' : r.firing === false ? 'bg-accent' : 'bg-faint'"></span>
-          <span class="text-fg">{{ r.scope_kind === 'all_hosts' ? 'All hosts in namespace' : 'This host' }}</span>
-          <span v-if="!r.enabled" class="text-faint">· off</span>
-        </RouterLink>
-      </div>
-    </div>
+    <SystemAlertRules v-if="meta && type !== 'container'" :rules="rules" :nsq="nsq" />
 
     <!-- range (charts views) -->
-    <div v-if="['node','host','container','docker','containers'].includes(type)" class="mb-4 flex flex-wrap items-center gap-2">
-      <div class="flex rounded-lg border border-line bg-surface2 p-0.5 text-sm">
-        <button v-for="[rr] in RANGES" :key="rr" @click="setRange(rr)" class="rounded-md px-3 py-1" :class="range === rr ? 'bg-accent/15 font-medium text-accent' : 'text-muted hover:text-fg'">{{ rr }}</button>
-      </div>
-      <span class="text-xs text-muted">Resolution <span class="rounded bg-surface2 px-1.5 py-0.5 text-fg">{{ resOf }}</span></span>
-      <span v-if="live" class="ml-auto flex items-center gap-1.5 text-xs text-accent"><span class="h-1.5 w-1.5 animate-pulse rounded-full bg-accent"></span>Live</span>
-      <span v-else class="ml-auto text-xs text-faint">auto-refresh 5s</span>
-    </div>
+    <SystemRangePicker v-if="['node','host','container','docker','containers'].includes(type)" :ranges="RANGES" :range="range" :res-of="resOf" :live="live" @set-range="setRange" />
 
     <p v-if="error" class="text-sm text-red-500">{{ error }}</p>
 
     <!-- node / docker / k8s-node: the host's own charts -->
     <div v-if="['node','host','docker'].includes(type)" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div v-for="c in hostCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 flex items-start justify-between"><div><div class="text-sm font-medium text-fg">{{ c.title }}</div><div class="text-xs text-faint">{{ c.sub }}</div></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-        <UplotChart :time="gappedMetrics?.t || []" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :area="c.area !== false" :sync-key="'host:' + String(id)"
-          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
-      </div>
+      <SystemChartPanel v-for="c in hostCharts" :key="c.title" :chart="c" :time="gappedMetrics?.t || []" :header-time="headerTime" :span-seconds="spanSeconds" :sync-key="'host:' + String(id)"
+        :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
     </div>
 
     <!-- docker: its containers, as a separate table (link to the fleet view) -->
@@ -344,11 +297,8 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
 
     <!-- container: charts -->
     <div v-else-if="type === 'container'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div v-for="c in containerLeafCharts" :key="c.title" class="rounded-xl border border-line bg-surface p-4">
-        <div class="mb-2 flex items-start justify-between"><div class="text-sm font-medium text-fg">{{ c.title }} <span class="text-xs text-faint">{{ c.sub }}</span></div><span class="tabular-nums text-xs text-faint">{{ headerTime }}</span></div>
-        <UplotChart :time="containersTime" :series="c.series" :unit="c.unit" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)"
-          :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
-      </div>
+      <SystemChartPanel v-for="c in containerLeafCharts" :key="c.title" :chart="c" :time="containersTime" :header-time="headerTime" :span-seconds="spanSeconds" :sync-key="'ctr:' + String(id)" inline-sub
+        :focus-names="chartFocus(c.series)" :selected-names="selectedMetrics" :view-range="viewRange" @legend-hover="hoverMetric = $event" @legend-toggle="toggleMetric" @cursor-time="chartTime = $event" @zoom="setZoom" />
       <p v-if="!containerLeaf" class="text-sm text-muted">No data for this container.</p>
     </div>
   </AppShell>
