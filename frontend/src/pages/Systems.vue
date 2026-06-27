@@ -12,6 +12,7 @@ import SystemSearch from '../components/SystemSearch.vue'
 import FleetCharts from '../components/FleetCharts.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
+import { pct, online, parseQuery, matchPred } from '../lib/hostFilter'
 
 const showAdd = ref(false)
 
@@ -48,46 +49,11 @@ const KIND_LABEL = { node: 'Node', docker: 'Docker', k8s: 'K8s' }
 let timer = null
 
 const r = (x) => Math.round(x || 0)
-const pct = (u, t) => (u != null && t ? Math.round((u / t) * 100) : null)
-const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTime() < 60000
 const LATEST = computed(() => servers.value.map((s) => s.agent_version).filter(Boolean).sort(cmpVer).pop())
 function cmpVer(a, b) { const p = (x) => x.split('.').map(Number); const A = p(a), B = p(b); for (let i = 0; i < 3; i++) if ((A[i]||0)!==(B[i]||0)) return (A[i]||0)-(B[i]||0); return 0 }
 function agentCls(v) { if (!v) return 'bg-surface2 text-faint'; if (v === LATEST.value) return 'bg-accent/10 text-accent'; return cmpVer(v, '0.7.0') >= 0 ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500' }
 
-// Query mini-language: "cpu>50 disk<30 status:online kind:docker ns:prod web" (space = AND)
-function parseQuery(qs) {
-  return (qs || '').trim().split(/\s+/).filter(Boolean).map((tok) => {
-    let m = tok.match(/^(cpu|mem|disk)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
-    if (m) return { t: 'num', f: m[1].toLowerCase(), op: m[2], v: +m[3] }
-    m = tok.match(/^(status|kind|type|cluster|ns|agent|kernel|name|node|system):(.+)$/i)
-    if (m) return { t: 'kv', k: m[1].toLowerCase(), v: m[2].toLowerCase() }
-    return { t: 'text', v: tok.toLowerCase() }
-  })
-}
-const metricVal = (s, f) => (f === 'cpu' ? s.cpu_percent : f === 'mem' ? pct(s.mem_used, s.mem_total) : pct(s.disk_used, s.disk_total))
-const cmpOp = (a, op, b) => (op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b : op === '<=' ? a <= b : a === b)
-// wildcard match: substring by default; '*' acts as a glob (web*, *-prod, db*1)
-const escapeRe = (s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-function wild(hay, pat) {
-  if (!pat) return true
-  hay = (hay || '').toLowerCase()
-  if (pat.includes('*')) return new RegExp('^' + pat.split('*').map(escapeRe).join('.*') + '$').test(hay)
-  return hay.includes(pat)
-}
-function matchPred(s, p) {
-  if (p.t === 'num') { const v = metricVal(s, p.f); return v != null && cmpOp(v, p.op, p.v) }
-  if (p.t === 'kv') {
-    if (['name', 'node', 'system'].includes(p.k)) return wild(s.name, p.v)
-    if (p.k === 'status') return (online(s) ? 'online' : 'offline').startsWith(p.v)
-    if (p.k === 'kind' || p.k === 'type') return s.kind === p.v
-    if (p.k === 'cluster') return wild(s.cluster, p.v)
-    if (p.k === 'ns') return wild(s.namespace, p.v)
-    if (p.k === 'agent') return wild(s.agent_version, p.v)
-    if (p.k === 'kernel') return wild(s.kernel, p.v)
-  }
-  // default (plain text) = node name (+ hostname), wildcard-aware
-  return wild(s.name + ' ' + (s.hostname || ''), p.v)
-}
+// Host search mini-language (parseQuery/matchPred) + pct/online → ../lib/hostFilter.
 // committed filters shown as chips (each token in q); search box appends via @add
 const chips = computed(() => q.value.trim().split(/\s+/).filter(Boolean))
 function addToken(tok) { const t = (tok || '').trim(); if (t) q.value = q.value.trim() ? `${q.value.trim()} ${t}` : t }
