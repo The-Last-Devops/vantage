@@ -4,7 +4,7 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
@@ -12,14 +12,13 @@ const isAdmin = computed(() => !!auth.user?.is_admin)
 
 const users = ref([])
 const namespaces = ref([])
-const loading = ref(true)
 
 const nameOf = (id) => namespaces.value.find((n) => n.id === id)?.name || id
 
-async function loadUsers() {
-  loading.value = true
-  try {
-    const us = await minLoad(api.get('/api/users'))
+const { loaded: usersLoaded, reload: loadUsers } = useCached({
+  key: () => 'members:users',
+  load: async () => {
+    const us = await api.get('/api/users')
     // The list endpoint returns a namespace count only; fetch each member's
     // per-namespace roles so the table can show named chips. Admins see all.
     await Promise.all(
@@ -28,10 +27,12 @@ async function loadUsers() {
         try { u.access = await api.get(`/api/users/${u.id}/memberships`) } catch { u.access = [] }
       }),
     )
-    users.value = us
-  } catch { users.value = [] }
-  loading.value = false
-}
+    return us
+  },
+  apply: (us) => { users.value = us },
+  onError: () => { users.value = [] },
+})
+const loading = computed(() => !usersLoaded.value)
 
 // ---- roles ----
 const SYS = [

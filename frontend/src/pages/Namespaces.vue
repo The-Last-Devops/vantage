@@ -4,19 +4,22 @@ import { useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 
 const router = useRouter()
 const rows = ref([])
-const loaded = ref(false)
 const err = ref('')
 const newName = ref('')
 const creating = ref(false)
 
-async function load() {
-  try { rows.value = await api.get('/api/namespaces') } catch { rows.value = [] }
-}
-onMounted(async () => { await minLoad(load()); loaded.value = true })
+const { loaded, reload: load } = useCached({
+  key: () => 'namespaces',
+  load: async () => {
+    try { return await api.get('/api/namespaces') } catch { return [] }
+  },
+  apply: (d) => { rows.value = d },
+})
+onMounted(load)
 
 // k8s-style DNS label, mirrors the server-side validator.
 const valid = (name) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(name)

@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 
 const route = useRoute()
 const nsQuery = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
@@ -19,37 +19,36 @@ const activeNs = computed(() =>
 )
 const alerts = ref([])
 const events = ref([])
-const loading = ref(true)
 const filterStatus = ref('all') // all | active | resolved
 const filterSource = ref('all') // all | monitor | host
 let timer = null
 
-async function load() {
-  const nss = activeNs.value
-  if (!nss.length) { alerts.value = []; events.value = []; loading.value = false; return }
-  const first = loading.value
-  try {
-    const work = (async () => {
-      const [aLists, eLists] = await Promise.all([
-        Promise.all(nss.map((n) =>
-          api.get(`/api/namespaces/${n.id}/alerts`)
-            .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
-            .catch(() => []),
-        )),
-        Promise.all(nss.map((n) =>
-          api.get(`/api/namespaces/${n.id}/alert-events`)
-            .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
-            .catch(() => []),
-        )),
-      ])
-      alerts.value = aLists.flat()
+const { loaded, reload: load } = useCached({
+  key: () => 'events:' + activeNs.value.map((n) => n.id).join(','),
+  load: async () => {
+    const nss = activeNs.value
+    if (!nss.length) return { alerts: [], events: [] }
+    const [aLists, eLists] = await Promise.all([
+      Promise.all(nss.map((n) =>
+        api.get(`/api/namespaces/${n.id}/alerts`)
+          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+          .catch(() => []),
+      )),
+      Promise.all(nss.map((n) =>
+        api.get(`/api/namespaces/${n.id}/alert-events`)
+          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+          .catch(() => []),
+      )),
+    ])
+    return {
+      alerts: aLists.flat(),
       // one global feed, newest first across all selected namespaces
-      events.value = eLists.flat().sort((x, y) => new Date(y.at) - new Date(x.at))
-    })()
-    await (first ? minLoad(work) : work)
-  } catch { alerts.value = []; events.value = [] }
-  loading.value = false
-}
+      events: eLists.flat().sort((x, y) => new Date(y.at) - new Date(x.at)),
+    }
+  },
+  apply: (d) => { alerts.value = d.alerts; events.value = d.events },
+  onError: () => { alerts.value = []; events.value = [] },
+})
 watch(() => route.query.ns, load)
 
 // active = enabled rules currently firing
@@ -130,7 +129,7 @@ onUnmounted(() => clearInterval(timer))
         </div>
       </div>
 
-      <PageLoader v-if="loading" />
+      <PageLoader v-if="!loaded" />
 
       <!-- empty -->
       <div v-else-if="!active.length && !shownHistory.length" class="flex flex-col items-center gap-3.5 rounded-2xl border border-line bg-surface/50 px-7 py-12 text-center">

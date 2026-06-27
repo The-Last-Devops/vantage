@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../lib/api'
+import { dropCache } from '../lib/cache'
 
 export const useAuth = defineStore('auth', {
   state: () => ({
@@ -33,6 +34,7 @@ export const useAuth = defineStore('auth', {
     async logout() {
       await api.post('/api/auth/logout')
       this.user = null
+      dropCache() // never paint one user's cached data for the next
     },
   },
 })

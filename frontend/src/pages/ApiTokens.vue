@@ -4,16 +4,16 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 
 const tokens = ref([])
-const loading = ref(true)
 
-async function load() {
-  loading.value = true
-  try { tokens.value = await minLoad(api.get('/api/pats')) } catch { tokens.value = [] }
-  finally { loading.value = false }
-}
+const { loaded, reload: load } = useCached({
+  key: () => 'api-tokens',
+  load: async () => ({ tokens: await api.get('/api/pats') }),
+  apply: (d) => { tokens.value = d.tokens },
+  onError: () => { tokens.value = [] },
+})
 
 // ---- create ----
 const modalOpen = ref(false)
@@ -76,7 +76,7 @@ onMounted(load)
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6"><PageLoader min-height="40vh" /></td></tr>
+            <tr v-if="!loaded"><td colspan="6"><PageLoader min-height="40vh" /></td></tr>
             <tr v-else-if="!tokens.length"><td colspan="6" class="px-4 py-10 text-center text-muted">No tokens yet. Create one to use the API or connect an MCP client.</td></tr>
             <tr v-for="t in tokens" :key="t.id" class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
               <td class="px-4 py-3 text-fg">{{ t.name }}</td>

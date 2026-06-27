@@ -4,15 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
-import { minLoad } from '../lib/minLoad'
 import { confirm } from '../lib/confirm'
+import { useCached } from '../lib/cache'
 
 const route = useRoute()
 const router = useRouter()
 
 const monitors = ref([])
 const events = ref([])
-const loading = ref(true)
 const err = ref('')
 let timer = null
 
@@ -69,13 +68,19 @@ const openCreate = () => router.push({ name: 'monitor-new', query: nsq.value })
 const openEdit = (m) => router.push({ name: 'monitor-edit', params: { id: m.id }, query: nsq.value })
 const openDetail = (m) => router.push({ name: 'monitor', params: { id: m.id }, query: nsq.value })
 
-async function load() {
-  const first = loading.value
-  try { const w = api.get('/api/monitors'); monitors.value = await (first ? minLoad(w) : w); err.value = '' }
-  catch { if (!monitors.value.length) err.value = 'Failed to load monitors' }
-  try { events.value = await api.get('/api/events?range=7d') } catch { events.value = [] }
-  loading.value = false
-}
+const { loaded, reload: load } = useCached({
+  key: () => 'monitors',
+  load: async () => {
+    let mons = monitors.value
+    let evs = []
+    let error = ''
+    try { mons = await api.get('/api/monitors'); error = '' }
+    catch { if (!monitors.value.length) error = 'Failed to load monitors'; mons = monitors.value }
+    try { evs = await api.get('/api/events?range=7d') } catch { evs = [] }
+    return { monitors: mons, events: evs, err: error }
+  },
+  apply: (d) => { monitors.value = d.monitors; events.value = d.events; err.value = d.err },
+})
 async function removeMonitor(m) {
   if (!(await confirm({ title: 'Delete service?', message: `"${m.name}" and its check history are removed permanently. This cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/monitors/${m.id}`); await load() } catch (e) { alert(`Failed (${e.status}).`) }
@@ -125,7 +130,7 @@ onUnmounted(() => clearInterval(timer))
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add service
       </button>
     </template>
-    <PageLoader v-if="loading" />
+    <PageLoader v-if="!loaded" />
     <div v-else class="space-y-4">
       <p v-if="err" class="rounded-lg border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-sm text-rose-500">{{ err }}</p>
 

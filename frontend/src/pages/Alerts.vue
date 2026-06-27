@@ -3,9 +3,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
-import { minLoad } from '../lib/minLoad'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
+import { useCached } from '../lib/cache'
 
 const route = useRoute()
 const router = useRouter()
@@ -20,7 +20,6 @@ const activeNs = computed(() =>
 const alerts = ref([])
 const channels = ref([])
 const types = ref([])
-const loaded = ref(false)
 let timer = null
 
 // ---- channel badge helpers (kind → color/icon) ----
@@ -80,35 +79,32 @@ const columns = [
   { key: 'actions', label: '', align: 'right', width: '116px' },
 ]
 
-async function load() {
-  const nss = activeNs.value
-  if (!nss.length) { alerts.value = []; channels.value = []; loaded.value = true; return }
-  const first = !loaded.value
-  try {
-    const work = (async () => {
-      const [aLists, allChannels] = await Promise.all([
-        Promise.all(nss.map((n) =>
-          api.get(`/api/namespaces/${n.id}/alerts`)
-            .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
-            .catch(() => []),
-        )),
-        api.get('/api/channels').catch(() => []),
-      ])
-      const seen = new Set()
-      alerts.value = aLists
-        .flat()
-        .filter((a) => !seen.has(a.id) && seen.add(a.id))
-        .sort((a, b) =>
-          (a.namespace || '').localeCompare(b.namespace || '') ||
-          String(a.target_name).localeCompare(String(b.target_name)) ||
-          String(a.id).localeCompare(String(b.id)),
-        )
-      channels.value = allChannels
-    })()
-    await (first ? minLoad(work) : work)
-  } catch { alerts.value = [] }
-  finally { loaded.value = true }
-}
+const { loaded, reload: load } = useCached({
+  key: () => 'alerts:' + activeNs.value.map((n) => n.id).join(','),
+  load: async () => {
+    const nss = activeNs.value
+    if (!nss.length) return { alerts: [], channels: [] }
+    const [aLists, allChannels] = await Promise.all([
+      Promise.all(nss.map((n) =>
+        api.get(`/api/namespaces/${n.id}/alerts`)
+          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+          .catch(() => []),
+      )),
+      api.get('/api/channels').catch(() => []),
+    ])
+    const seen = new Set()
+    const merged = aLists
+      .flat()
+      .filter((a) => !seen.has(a.id) && seen.add(a.id))
+      .sort((a, b) =>
+        (a.namespace || '').localeCompare(b.namespace || '') ||
+        String(a.target_name).localeCompare(String(b.target_name)) ||
+        String(a.id).localeCompare(String(b.id)),
+      )
+    return { alerts: merged, channels: allChannels }
+  },
+  apply: (d) => { alerts.value = d.alerts; channels.value = d.channels },
+})
 watch(() => route.query.ns, load)
 
 // ---- row actions ----

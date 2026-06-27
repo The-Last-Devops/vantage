@@ -6,7 +6,7 @@ import { confirm } from '../lib/confirm'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import Gauge from '../components/Gauge.vue'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 import AddSystemModal from '../components/AddSystemModal.vue'
 import SystemSearch from '../components/SystemSearch.vue'
 import FleetCharts from '../components/FleetCharts.vue'
@@ -18,7 +18,6 @@ const showAdd = ref(false)
 const route = useRoute()
 const router = useRouter()
 const servers = ref([])
-const loaded = ref(false) // true after the first successful load
 const error = ref('')
 const q = ref(route.query.q || '')
 let qTimer
@@ -255,19 +254,16 @@ const fleetCharts = computed(() => {
   ]
 })
 
-async function load() {
-  const first = !loaded.value
-  try {
-    const w = api.get('/api/systems')
-    servers.value = await (first ? minLoad(w) : w)
-    error.value = ''
-    loaded.value = true
-  } catch {
-    // Keep showing existing data on a transient poll failure; only surface an
-    // error before the first successful load.
-    if (!loaded.value) error.value = 'Failed to load systems'
-  }
-}
+// `/api/systems` is global (not namespace-scoped), so one cache key — navigating
+// back to Systems paints the last fleet instantly, then revalidates silently.
+const { loaded, reload: load } = useCached({
+  key: () => 'systems',
+  load: () => api.get('/api/systems'),
+  apply: (list) => { servers.value = list; error.value = '' },
+  // Keep showing existing data on a transient poll failure; only surface an
+  // error before the first successful load.
+  onError: () => { if (!servers.value.length) error.value = 'Failed to load systems' },
+})
 onMounted(() => { load(); loadFleet(); loadThresholds(); timer = setInterval(() => { load(); loadFleet() }, 5000) })
 onUnmounted(() => clearInterval(timer))
 watch(frange, loadFleet)

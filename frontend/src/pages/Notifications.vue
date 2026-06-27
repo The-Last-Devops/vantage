@@ -5,7 +5,7 @@ import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { confirm } from '../lib/confirm'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 
 const router = useRouter()
 // Existing channels open on their own full page; this list only creates new ones.
@@ -16,8 +16,6 @@ const openChannel = (c) => router.push({ name: 'channel', params: { id: c.id } }
 // row with `can_edit` and masks secrets for everyone else).
 const namespaces = ref([]) // for the "create in namespace" picker
 const channels = ref([])
-// Start true so the first paint shows the loader, never an empty-state flash.
-const loading = ref(true)
 
 // Provider manifest comes from the backend (GET /api/channel-types), so adding a
 // provider server-side surfaces here with no frontend change.
@@ -45,11 +43,13 @@ function iconSvg(name, size = 20) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" ${attrs}>${ic.body}</svg>`
 }
 
-async function loadChannels() {
-  loading.value = true
-  try { channels.value = await minLoad(api.get('/api/channels')) } catch { channels.value = [] }
-  finally { loading.value = false }
-}
+const { loaded, reload: loadChannels } = useCached({
+  key: () => 'channels',
+  load: async () => {
+    try { return { channels: await api.get('/api/channels') } } catch { return { channels: [] } }
+  },
+  apply: (d) => { channels.value = d.channels },
+})
 
 // ---- modal ----
 const modalOpen = ref(false)
@@ -179,7 +179,7 @@ onMounted(async () => {
       </div>
 
       <!-- list -->
-      <PageLoader v-if="loading" />
+      <PageLoader v-if="!loaded" />
       <div v-else-if="!channels.length" class="flex flex-col items-center gap-3.5 rounded-2xl border border-line bg-surface/50 px-7 py-12 text-center">
         <span class="grid h-16 w-16 place-items-center rounded-2xl border border-accent/30 bg-accent/10 text-accent">
           <svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11Z"/></svg>

@@ -3,25 +3,25 @@ import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
 const isAdmin = computed(() => !!auth.user?.is_admin)
 
 const stats = ref(null)
-const loading = ref(true)
 const draft = ref({})   // table -> value being edited (in the tier's unit)
 const msg = ref('')
 
-async function load() {
-  loading.value = true
-  try {
-    stats.value = await minLoad(api.get('/api/admin/data'))
-    draft.value = Object.fromEntries(stats.value.retention.map((t) => [t.table, t.value ?? '']))
-  } catch { stats.value = null }
-  loading.value = false
-}
+const { loaded, reload: load } = useCached({
+  key: () => 'data-retention',
+  load: () => api.get('/api/admin/data'),
+  apply: (d) => {
+    stats.value = d
+    draft.value = Object.fromEntries(d.retention.map((t) => [t.table, t.value ?? '']))
+  },
+  onError: () => { stats.value = null },
+})
 onMounted(() => { if (isAdmin.value) load() })
 
 async function save(tier) {
@@ -39,7 +39,7 @@ async function save(tier) {
       Only system admins can manage data retention.
     </div>
     <div v-else class="space-y-6">
-      <PageLoader v-if="loading" />
+      <PageLoader v-if="!loaded" />
       <template v-else-if="stats">
         <!-- DB size + tables -->
         <section class="space-y-3">

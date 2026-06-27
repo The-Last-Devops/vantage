@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
-import { minLoad } from '../lib/minLoad'
+import { useCached } from '../lib/cache'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
@@ -12,7 +12,6 @@ const isAdmin = computed(() => !!auth.user?.is_admin)
 const rows = ref([])
 const total = ref(0)
 const retention = ref(null) // days | null (forever)
-const loaded = ref(false)
 
 // ---- filters + paging ----
 const PAGE = 100
@@ -25,20 +24,21 @@ const pages = computed(() => Math.max(1, Math.ceil(total.value / PAGE)))
 const showingFrom = computed(() => (total.value ? offset.value + 1 : 0))
 const showingTo = computed(() => Math.min(offset.value + PAGE, total.value))
 
-async function load(first = false) {
-  const params = new URLSearchParams({ limit: PAGE, offset: offset.value })
-  if (q.value.trim()) params.set('q', q.value.trim())
-  if (method.value) params.set('method', method.value)
-  if (status.value) params.set('status', status.value)
-  const fetchP = api.get(`/api/audit?${params}`)
-  try {
-    const r = first ? await minLoad(fetchP) : await fetchP
-    rows.value = r.rows || []
-    total.value = r.total || 0
-    retention.value = r.retention_days ?? null
-  } catch { rows.value = []; total.value = 0 }
-}
-onMounted(async () => { if (!isAdmin.value) { loaded.value = true; return } await load(true); loaded.value = true })
+// The fetch is driven by the filters + page, so the cache key includes them all —
+// changing any filter is a new key and refetches fresh.
+const { loaded, reload: load } = useCached({
+  key: () => `audit:${offset.value}:${q.value.trim()}:${method.value}:${status.value}`,
+  load: async () => {
+    const params = new URLSearchParams({ limit: PAGE, offset: offset.value })
+    if (q.value.trim()) params.set('q', q.value.trim())
+    if (method.value) params.set('method', method.value)
+    if (status.value) params.set('status', status.value)
+    return await api.get(`/api/audit?${params}`)
+  },
+  apply: (r) => { rows.value = r.rows || []; total.value = r.total || 0; retention.value = r.retention_days ?? null },
+  onError: () => { rows.value = []; total.value = 0 },
+})
+onMounted(() => { if (isAdmin.value) load() })
 
 // Reset to the first page whenever a filter changes; debounce the text box.
 let deb = null
