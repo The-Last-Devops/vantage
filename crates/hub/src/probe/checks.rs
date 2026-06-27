@@ -12,6 +12,17 @@ use super::{
 
 pub(super) async fn probe(m: &Monitor) -> Beat {
     let start = Instant::now();
+    // SSRF egress guard: reject internal/metadata targets before connecting.
+    // `dns` is resolution-only (no outbound data connection), so it's exempt.
+    // Resolve off the async worker — getaddrinfo can block.
+    if m.kind != "dns" {
+        let t = m.target.clone();
+        match tokio::task::spawn_blocking(move || crate::net_guard::check_target(&t)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return down(&e.to_string()),
+            Err(_) => return down("egress check failed"),
+        }
+    }
     match m.kind.as_str() {
         "http" | "keyword" => probe_http(m, start).await,
         "tcp" => probe_tcp(m, start).await,
@@ -68,7 +79,17 @@ async fn probe_http(m: &Monitor, start: Instant) -> Beat {
     let redirect = if max_redirects == 0 {
         reqwest::redirect::Policy::none()
     } else {
-        reqwest::redirect::Policy::limited(max_redirects)
+        // Follow up to the limit, but re-check each hop so a redirect can't bounce
+        // the request to an internal/metadata address (SSRF via redirect).
+        reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() >= max_redirects {
+                attempt.stop()
+            } else if crate::net_guard::check_target(attempt.url().as_str()).is_err() {
+                attempt.error("blocked redirect to internal/metadata address".to_string())
+            } else {
+                attempt.follow()
+            }
+        })
     };
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(to))

@@ -23,6 +23,14 @@ use crate::AppState;
 pub(crate) const SESSION_COOKIE: &str = "session";
 const SESSION_DAYS: i64 = 30;
 
+/// Whether to set the `Secure` attribute on the session cookie. Defaults to
+/// `true` so the session token never travels over plaintext HTTP. Local dev
+/// runs the hub on http://localhost:8080, where a hard `Secure` would stop
+/// login over http — so it can be disabled by setting `INSECURE_COOKIES=1`.
+fn secure_cookies() -> bool {
+    !matches!(std::env::var("INSECURE_COOKIES").as_deref(), Ok("1"))
+}
+
 /// The authenticated user, extracted from the session cookie on each request.
 #[derive(Clone, Debug, Serialize)]
 pub struct CurrentUser {
@@ -212,7 +220,15 @@ pub async fn logout(
             .execute(&state.config)
             .await;
     }
-    Ok(jar.remove(Cookie::from(SESSION_COOKIE)))
+    // Mirror mint_session's attributes so the browser actually clears the cookie
+    // (a removal cookie must match path/http_only/same_site/secure to take effect).
+    let removal = Cookie::build(SESSION_COOKIE)
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(secure_cookies())
+        .build();
+    Ok(jar.remove(removal))
 }
 
 pub async fn me(user: CurrentUser) -> Json<CurrentUser> {
@@ -297,6 +313,7 @@ async fn mint_session(
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
+        .secure(secure_cookies())
         .build();
     Ok(jar.add(cookie))
 }

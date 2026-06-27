@@ -17,6 +17,7 @@ fn flag(cfg: &Value, k: &str) -> bool {
 }
 
 async fn post_json(client: &reqwest::Client, url: &str, body: Value) -> anyhow::Result<()> {
+    crate::net_guard::check_target(url)?;
     client
         .post(url)
         .json(&body)
@@ -39,6 +40,7 @@ pub async fn dispatch(
     match kind {
         "webhook" => {
             let url = sreq(cfg, kind, "url")?;
+            crate::net_guard::check_target(url)?;
             let method = s(cfg, "method").unwrap_or("POST").to_uppercase();
             let payload: Value = match s(cfg, "body") {
                 Some(tpl) => {
@@ -128,6 +130,7 @@ pub async fn dispatch(
         }
         "matrix" => {
             let hs = sreq(cfg, kind, "homeserver")?.trim_end_matches('/');
+            crate::net_guard::check_target(hs)?;
             let room = sreq(cfg, kind, "room_id")?;
             let token = sreq(cfg, kind, "token")?;
             let txn = uuid::Uuid::new_v4();
@@ -150,6 +153,7 @@ pub async fn dispatch(
             let server = s(cfg, "server")
                 .unwrap_or("https://ntfy.sh")
                 .trim_end_matches('/');
+            crate::net_guard::check_target(server)?;
             let topic = sreq(cfg, kind, "topic")?;
             let url = format!("{server}/{topic}");
             let mut req = client.post(url).body(body.to_string());

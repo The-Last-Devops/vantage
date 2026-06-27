@@ -99,13 +99,12 @@ pub async fn list_monitors(
             Some((t, up, lat, msg)) => (Some(t), Some(up), lat, msg),
             None => (None, None, None, None),
         };
-        // A push monitor's token is a write credential (anyone with it can post
-        // beats). The list/cards never need it — only the detail page shows the
-        // URL, gated to editors — so strip it here for everyone.
+        // The list/cards never need credentials — editors get full values from
+        // the detail endpoint — so redact every secret in config (push token,
+        // header creds, auth/redis passwords) and the target for everyone.
         let mut config = config.0;
-        if let Some(o) = config.as_object_mut() {
-            o.remove("push_token");
-        }
+        super::redact_monitor_config(&mut config);
+        let target = super::mask_target(&target);
         rows.push(MonitorRow {
             id,
             name,

@@ -55,29 +55,30 @@ pub async fn monitor_detail(
     let (namespace, name, kind, target, interval_secs, enabled, mut config) =
         load_monitor(&state, &user, id).await?;
 
-    // The push token is a write credential — show it only to those who can edit
-    // this monitor (so they can configure the cron); strip it for plain viewers.
-    if config.get("push_token").is_some() {
-        let can_edit: (bool,) = if user.is_admin {
-            (true,)
-        } else {
-            sqlx::query_as(
-                "SELECT EXISTS(SELECT 1 FROM memberships me \
-                 JOIN monitors mo ON mo.namespace_id = me.namespace_id \
-                 WHERE mo.id = $1 AND me.user_id = $2 AND me.role IN ('editor', 'owner'))",
-            )
-            .bind(id)
-            .bind(user.id)
-            .fetch_one(&state.config)
-            .await
-            .map_err(internal)?
-        };
-        if !can_edit.0 {
-            if let Some(o) = config.as_object_mut() {
-                o.remove("push_token");
-            }
-        }
-    }
+    // config (push token, header creds, auth/redis passwords) and the target
+    // (DB connection-string passwords) are credentials — show them only to those
+    // who can edit this monitor (so they can configure it); redact for plain
+    // viewers. One role check gates both.
+    let can_edit: (bool,) = if user.is_admin {
+        (true,)
+    } else {
+        sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM memberships me \
+             JOIN monitors mo ON mo.namespace_id = me.namespace_id \
+             WHERE mo.id = $1 AND me.user_id = $2 AND me.role IN ('editor', 'owner'))",
+        )
+        .bind(id)
+        .bind(user.id)
+        .fetch_one(&state.config)
+        .await
+        .map_err(internal)?
+    };
+    let target = if can_edit.0 {
+        target
+    } else {
+        super::redact_monitor_config(&mut config);
+        super::mask_target(&target)
+    };
 
     let latest: Option<(
         chrono::DateTime<chrono::Utc>,

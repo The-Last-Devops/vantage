@@ -1,9 +1,12 @@
-//! vantage hub: ingest endpoint, JSON API, and the server-rendered web UI.
+//! vantage hub: ingest endpoint, JSON API, and the embedded Vue web UI.
 //!
 //! Environment:
 //!   CONFIG_DATABASE_URL  Postgres URL for the config DB (users, namespaces, configs)
 //!   DATA_DATABASE_URL    Postgres URL for the data DB (metrics, TimescaleDB)
 //!   BIND_ADDR            listen address, default 0.0.0.0:8080
+//!   INSECURE_COOKIES     set to 1 to drop the Secure flag on the session cookie (local http dev)
+//!   EGRESS_POLICY        set to `strict` to also block private (RFC1918/ULA) outbound
+//!                        targets for probes/notify/backup (default allows them)
 #![allow(clippy::type_complexity, clippy::items_after_test_module)]
 
 mod alert;
@@ -16,6 +19,7 @@ mod db;
 mod ingest;
 mod install;
 mod mcp;
+mod net_guard;
 mod notify;
 mod probe;
 mod rbac;

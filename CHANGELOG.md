@@ -9,6 +9,28 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-06-28
+
+### Security
+- **Monitor credentials no longer leak to viewers.** The monitor list/detail
+  endpoints now redact secret `config` (auth headers like `Authorization`/`Cookie`,
+  basic-auth/bearer credentials, Redis password) and mask the password in DB
+  connection-string `target`s for anyone who isn't an editor of the monitor's
+  namespace. (Previously only `push_token` was stripped, so read-only members could
+  read stored credentials.)
+- **SSRF egress guard on all outbound requests.** Service probes, notification
+  webhooks, and the S3 backup endpoint resolve the target and reject loopback,
+  link-local / cloud-metadata (`169.254.169.254`), CGNAT, and other reserved
+  addresses — including IPv4-mapped forms and redirect hops — before connecting.
+  This closes a read-SSRF where an editor could point an HTTP monitor at the cloud
+  metadata endpoint and read the response back via the debug view. Private
+  (RFC1918/ULA) targets stay allowed so internal monitoring works; set
+  `EGRESS_POLICY=strict` to block those too.
+- **Agent enrollment keys masked for viewers.** The namespace key list only shows
+  the full `x-api-key` to editors; viewers see a short non-usable preview.
+- **Session cookie now sets the `Secure` flag** (set `INSECURE_COOKIES=1` to keep
+  plain-http local dev working).
+
 ## [2.0.1] — 2026-06-27
 
 ### Changed

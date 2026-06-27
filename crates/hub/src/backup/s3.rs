@@ -131,6 +131,8 @@ pub(super) async fn s3_request(
             url.origin().ascii_serialization()
         )
     };
+    // SSRF guard: reject internal/metadata S3 endpoints before connecting.
+    crate::net_guard::check_target(&full).map_err(|e| e.to_string())?;
     let client = reqwest::Client::new();
     let req = client
         .request(

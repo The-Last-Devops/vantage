@@ -53,7 +53,11 @@ pub async fn list_keys(
     user: CurrentUser,
     Path(ns): Path<Uuid>,
 ) -> Result<Json<Vec<KeyRow>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let role = rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    // The enrollment key is a secret that grants metric ingest / auto-registration
+    // into the namespace; only editors+ may see it in full. Viewers get a masked
+    // preview that can't be used to enroll an agent.
+    let can_see_secret = role >= Role::Editor;
     let rows: Vec<(Uuid, String, String, i64)> = sqlx::query_as(
         "SELECT k.id, k.name, k.key, count(s.id) \
          FROM api_keys k LEFT JOIN systems s ON s.key_id = k.id \
@@ -68,11 +72,17 @@ pub async fn list_keys(
             .map(|(id, name, key, system_count)| KeyRow {
                 id,
                 name,
-                key,
+                key: if can_see_secret { key } else { mask_key(&key) },
                 system_count,
             })
             .collect(),
     ))
+}
+
+/// Non-reversible preview of an enrollment key for viewers: first 6 chars + "…".
+fn mask_key(key: &str) -> String {
+    let prefix: String = key.chars().take(6).collect();
+    format!("{prefix}…")
 }
 
 #[derive(Serialize)]
