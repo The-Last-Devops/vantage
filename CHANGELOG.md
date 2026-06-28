@@ -9,6 +9,18 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-06-29
+
+### Changed
+- **Unified top bar.** The namespace switcher and your account menu moved up from the
+  sidebar into a single 56px header — alongside a global search (⌘K), alerts, theme
+  toggle, version, and avatar. The sidebar is now just brand + navigation. Picking
+  namespaces works exactly as before (`?ns=` in the URL).
+- **Redesigned Services.** The list gains a health KPI strip and a severity-aware table
+  (down/degraded rows washed) with uptime, latency, and a trend sparkline per check,
+  plus a related live events feed. A service's detail page leads with a status hero and
+  per-window uptime/latency KPIs, with its checks, history, and event log in clean cards.
+
 ## [2.2.0] — 2026-06-29
 
 ### Added
