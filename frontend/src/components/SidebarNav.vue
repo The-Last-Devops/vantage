@@ -1,7 +1,6 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { api } from '../lib/api'
 import { useAuth } from '../stores/auth'
 
 defineProps({
@@ -11,10 +10,6 @@ defineProps({
 const auth = useAuth()
 const route = useRoute()
 const router = useRouter()
-
-const nsOpen = ref(false)
-const nsRef = ref(null)
-const namespaces = ref([]) // [{id,name}]
 
 // ---- primary nav (collapsible groups) ----------------------------------
 // Parent groups: clicking the parent jumps to its first child; hovering a
@@ -95,43 +90,6 @@ function openGroup(g) {
   const first = g.children[0]
   if (first && !childActive(first)) router.push(childTo(first))
 }
-
-const nsNames = computed(() => namespaces.value.map((n) => n.name))
-// Selected namespaces live in the URL (?ns=a,b) so they're shareable; empty = all.
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const isAll = computed(() => selectedNs.value.length === 0 || selectedNs.value.length === nsNames.value.length)
-const nsLabel = computed(() => {
-  const n = selectedNs.value.length
-  if (n === 0 || n === nsNames.value.length) return 'All namespaces'
-  return n === 1 ? selectedNs.value[0] : `${n} namespaces`
-})
-const nsChecked = (name) => selectedNs.value.length === 0 || selectedNs.value.includes(name)
-const allChecked = isAll
-
-function setNs(arr) {
-  const all = arr.length === 0 || arr.length === nsNames.value.length
-  router.replace({ query: { ...route.query, ns: all ? undefined : arr.join(',') } })
-}
-function toggleNs(name) {
-  // from "all" (nothing selected), a click picks just that namespace; further
-  // clicks add/remove from the explicit selection
-  if (selectedNs.value.length === 0) { setNs([name]); return }
-  const cur = [...selectedNs.value]
-  const i = cur.indexOf(name)
-  if (i >= 0) cur.splice(i, 1); else cur.push(name)
-  setNs(cur)
-}
-function toggleAllNs() { setNs([]) } // clears the filter → show all namespaces
-
-onMounted(async () => {
-  try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
-})
-// close the namespace dropdown on any click outside it (e.g. on the fleet table)
-function onDocClick(e) { if (nsOpen.value && nsRef.value && !nsRef.value.contains(e.target)) nsOpen.value = false }
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
-
-async function logout() { await auth.logout(); router.push({ name: 'login' }) }
 </script>
 
 <template>
@@ -177,33 +135,5 @@ async function logout() { await auth.logout(); router.push({ name: 'login' }) }
         </div>
       </div>
     </nav>
-
-    <!-- namespace multi-select — at the bottom so its dropdown opens upward
-         and never covers the nav links -->
-    <div ref="nsRef" class="relative border-t border-line px-3 py-2">
-      <div class="px-1 pb-1 text-[11px] uppercase tracking-wider text-faint">Namespace</div>
-      <button @click="nsOpen = !nsOpen"
-        class="flex w-full items-center justify-between gap-2 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg hover:border-accent/50">
-        <span class="flex min-w-0 items-center gap-2"><span class="h-2 w-2 shrink-0 rounded-full bg-accent"></span><span class="truncate">{{ nsLabel }}</span></span>
-        <svg class="h-4 w-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>
-      </button>
-      <div v-if="nsOpen" class="absolute bottom-full left-3 right-3 z-30 mb-1 max-h-72 overflow-y-auto rounded-lg border border-line bg-surface2 py-1 shadow-xl">
-        <button @click="toggleAllNs()" class="flex w-full items-center gap-2.5 border-b border-line px-3 py-2 text-left text-sm hover:bg-surface" :class="allChecked ? 'text-accent' : 'text-muted'">
-          <span class="grid h-4 w-4 place-items-center rounded border" :class="allChecked ? 'border-accent bg-accent' : 'border-line'"></span>All namespaces
-        </button>
-        <button v-for="n in namespaces" :key="n.id" @click="toggleNs(n.name)"
-          class="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface" :class="nsChecked(n.name) ? 'text-fg' : 'text-muted'">
-          <span class="grid h-4 w-4 place-items-center rounded border" :class="nsChecked(n.name) ? 'border-accent bg-accent' : 'border-line'"></span>{{ n.name }}
-        </button>
-      </div>
-    </div>
-
-    <div class="border-t border-line p-3">
-      <div class="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-        <span class="grid h-8 w-8 place-items-center rounded-full bg-surface2 text-xs text-accent">{{ (auth.user?.email || '?').slice(0,2).toUpperCase() }}</span>
-        <div class="min-w-0 flex-1"><div class="truncate text-sm text-fg">{{ auth.user?.email }}</div><div class="text-[11px] text-faint">{{ auth.user?.is_admin ? 'Admin' : 'Member' }}</div></div>
-        <button @click="logout" v-tip="`Logout`" class="text-muted hover:text-accent"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></button>
-      </div>
-    </div>
   </aside>
 </template>
