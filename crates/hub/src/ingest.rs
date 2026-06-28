@@ -144,6 +144,8 @@ pub async fn ingest(
     Ok(Json(IngestAck {
         ok: true,
         next_interval_secs: 0, // 0 => agent keeps its current interval
+        // Advertise the hub's build so `auto`-channel agents can follow it.
+        hub_build: Some(env!("GIT_SHA").to_string()),
     }))
 }
 

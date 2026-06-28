@@ -23,6 +23,11 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --target "$(uname -m)-unknown-linux-musl" -p vantage-agent --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+# Build id + release channel baked via build.rs (auto-update). Set per CI build:
+# GIT_SHA=<commit>, VANTAGE_CHANNEL=auto for :auto-update, else stable/dev.
+ARG GIT_SHA=""
+ARG VANTAGE_CHANNEL=dev
+ENV GIT_SHA=$GIT_SHA VANTAGE_CHANNEL=$VANTAGE_CHANNEL
 RUN cargo build --release --target "$(uname -m)-unknown-linux-musl" -p vantage-agent \
     && cp "target/$(uname -m)-unknown-linux-musl/release/vantage-agent" /vantage-agent
 

@@ -34,6 +34,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 # rust-embed reads crates/hub/../../frontend/dist at compile time.
 COPY --from=web /web/dist ./frontend/dist
+# Build id + release channel baked via build.rs (About page + auto-update). Set per
+# CI build: GIT_SHA=<commit>, VANTAGE_CHANNEL=auto for :auto-update, else stable/dev.
+ARG GIT_SHA=""
+ARG VANTAGE_CHANNEL=dev
+ENV GIT_SHA=$GIT_SHA VANTAGE_CHANNEL=$VANTAGE_CHANNEL
 RUN cargo build --release -p vantage-hub && cp target/release/vantage-hub /usr/local/bin/vantage-hub
 
 FROM debian:bookworm-slim

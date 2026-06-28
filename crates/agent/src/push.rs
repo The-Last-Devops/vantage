@@ -27,8 +27,12 @@ pub async fn shutdown_signal() {
 
 /// Outcome of a single report POST.
 pub enum Sent {
-    /// Accepted; optional next interval (secs) from the IngestAck.
-    Ok(Option<u64>),
+    /// Accepted; carries the optional next interval (secs) and the hub's build id
+    /// (for the auto-update channel) from the IngestAck.
+    Ok {
+        next: Option<u64>,
+        hub_build: Option<String>,
+    },
     /// Hub returned a 3xx; carries the Location header (may be empty / relative).
     Redirect(String),
     /// Hub returned a non-success, non-redirect status.
@@ -51,13 +55,13 @@ pub async fn send_report(
         .await
     {
         Ok(resp) if resp.status().is_success() => {
-            let next = resp
-                .json::<IngestAck>()
-                .await
-                .ok()
+            let ack = resp.json::<IngestAck>().await.ok();
+            let next = ack
+                .as_ref()
                 .map(|a| a.next_interval_secs)
                 .filter(|n| *n > 0);
-            Sent::Ok(next)
+            let hub_build = ack.and_then(|a| a.hub_build);
+            Sent::Ok { next, hub_build }
         }
         Ok(resp) if resp.status().is_redirection() => Sent::Redirect(
             resp.headers()
@@ -69,6 +73,43 @@ pub async fn send_report(
         Ok(resp) => Sent::Rejected(resp.status().as_u16()),
         Err(_) => Sent::Failed,
     }
+}
+
+/// True if this agent should self-restart to pick up a newer image. Gated HARD so
+/// only the rolling `:auto-update` channel ever does it. All must hold:
+///
+/// - baked channel is `auto` (stable/dev images can never self-update);
+/// - not disabled via `AUTO_UPDATE=0` (kill switch);
+/// - running under Kubernetes (else a restart wouldn't re-pull the image);
+/// - our build id is known and differs from the hub's advertised build.
+///
+/// The restart itself is a clean `exit(0)` — k8s does the actual pull (requires
+/// `imagePullPolicy: Always` on the rolling tag).
+pub fn should_self_update(hub_build: Option<&str>) -> bool {
+    if env!("VANTAGE_CHANNEL") != "auto" {
+        return false;
+    }
+    if std::env::var("AUTO_UPDATE").as_deref() == Ok("0") {
+        return false;
+    }
+    if std::env::var("KUBERNETES_SERVICE_HOST").is_err() {
+        return false;
+    }
+    let me = env!("GIT_SHA");
+    if me == "unknown" {
+        return false;
+    }
+    matches!(hub_build, Some(h) if !h.is_empty() && h != me)
+}
+
+/// Deterministic per-host jitter in `0..max_secs`, so the whole fleet doesn't
+/// restart (and re-pull) at the same instant. Derived from the hostname so each
+/// host keeps a stable, spread-out offset.
+pub fn restart_jitter(hostname: &str, max_secs: u64) -> std::time::Duration {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    hostname.hash(&mut h);
+    std::time::Duration::from_secs(h.finish() % max_secs.max(1))
 }
 
 /// scheme://authority of a URL (everything before the path).
