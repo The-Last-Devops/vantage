@@ -9,6 +9,27 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-06-29
+
+### Added
+- **New Overview dashboard** — an attention-first landing: open incidents lead, then a
+  health KPI strip, with the fleet CPU trend demoted to the bottom.
+- **Fleet war-room** (`Fleet`) — every host & service at a glance: a namespace-grouped
+  health heatmap, services with uptime, live incidents with inline SSH/Exec, and top-load.
+- **Fleet metrics** (`Metrics`) — small-multiples across the fleet (CPU / Memory / Disk /
+  Network), one line per host; click a host to isolate its line across every panel, with
+  1h/6h/24h/7d ranges.
+- **SSH key library** — manage your own SSH keys under **Settings → SSH keys**; they're
+  encrypted with your account password and reusable across hosts.
+
+### Changed
+- **Opening a console now lets you choose how to authenticate** — your SSH user with a
+  host password, or a key from your library. SSH keys moved from per-host credentials to
+  your account (one library, used everywhere).
+- **Refreshed interface** — a new icon set, a tidier sidebar + 50px header, and
+  severity-aware host tables (row washes + a left rail, utilisation bars coloured by
+  threshold, and inline per-row operate actions).
+
 ## [2.1.1] — 2026-06-28
 
 ### Added
