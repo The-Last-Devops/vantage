@@ -26,6 +26,7 @@ const isAdmin = computed(() => !!auth.user?.is_admin)
 const topLinks = [
   { name: 'overview', label: 'Overview', icon: 'dashboard' },
   { name: 'fleet', label: 'Fleet', icon: 'fleet' },
+  { name: 'metrics', label: 'Metrics', icon: 'metrics' },
 ]
 const groups = computed(() =>
   [
