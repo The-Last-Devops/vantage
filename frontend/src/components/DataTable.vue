@@ -94,7 +94,7 @@ const alignCls = (a) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-c
               <input ref="headCb" type="checkbox" :checked="allSel" @change="toggleAll" class="h-[15px] w-[15px] cursor-pointer align-middle accent-[rgb(var(--accent))]" />
             </th>
             <th v-for="c in columns" :key="c.key" @click="toggleSort(c)"
-              class="select-none border-b border-line2 bg-head px-3.5 py-2.5 text-xs font-semibold text-muted"
+              class="select-none border-b border-line2 bg-head px-3.5 py-2.5 text-xs font-extrabold uppercase tracking-wide text-fg"
               :class="[alignCls(c.align), c.sortable ? 'cursor-pointer hover:text-fg' : '', c.nowrap !== false ? 'whitespace-nowrap' : '']"
               :style="c.width ? { width: c.width } : null">
               {{ c.label }}<span v-if="c.sortable && sortKey === c.key" class="ml-1 text-accent">{{ sortDir === 'asc' ? '▲' : '▼' }}</span>
@@ -106,7 +106,7 @@ const alignCls = (a) => (a === 'right' ? 'text-right' : a === 'center' ? 'text-c
           <tr v-else-if="!sorted.length"><td :colspan="colCount" class="px-4 py-12 text-center text-sm text-muted">{{ q.trim() ? emptyFiltered : empty }}</td></tr>
           <tr v-for="row in sorted" :key="rowKey(row)"
             class="border-b border-line last:border-0 hover:bg-hover"
-            :class="[selected.includes(rowKey(row)) ? 'bg-accent/[0.07]' : '', clickable ? 'cursor-pointer' : '']"
+            :class="[selected.includes(rowKey(row)) ? 'bg-accent/[0.14] shadow-[inset_3px_0_0_rgb(var(--accent))]' : '', clickable ? 'cursor-pointer' : '']"
             @click="clickable && emit('row-click', row)">
             <td v-if="selectable" class="px-3 py-2.5" @click.stop>
               <input type="checkbox" :checked="selected.includes(rowKey(row))" @change="toggleRow(rowKey(row))" class="h-[15px] w-[15px] cursor-pointer align-middle accent-[rgb(var(--accent))]" />
