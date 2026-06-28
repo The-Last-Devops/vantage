@@ -25,6 +25,7 @@ mod probe;
 mod rbac;
 mod selfupdate;
 mod spa;
+mod tunnel;
 mod web;
 
 use std::net::SocketAddr;
@@ -40,6 +41,9 @@ pub struct AppState {
     pub config: sqlx::PgPool,
     /// Pool for the data DB (Postgres + TimescaleDB).
     pub data: sqlx::PgPool,
+    /// Live agent reverse-tunnels (shell/exec transport). Empty until agents with
+    /// `ALLOW_SHELL=1` connect; see `tunnel.rs` / docs/exec-design.md.
+    pub tunnels: tunnel::TunnelRegistry,
 }
 
 #[tokio::main]
@@ -73,6 +77,7 @@ async fn main() -> Result<()> {
         .route("/pub/push/{token}", get(ingest::push).post(ingest::push))
         .route("/pub/agent.yaml", get(install::k8s_agent_yaml))
         .route("/pub/install.sh", get(install::install_sh))
+        .route("/pub/tunnel", get(tunnel::tunnel_ws))
         // auth + first-run setup
         .route(
             "/api/setup",

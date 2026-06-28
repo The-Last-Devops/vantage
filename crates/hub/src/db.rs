@@ -21,7 +21,11 @@ pub async fn connect() -> Result<AppState> {
         .await
         .context("connecting to data DB")?;
 
-    Ok(AppState { config, data })
+    Ok(AppState {
+        config,
+        data,
+        tunnels: crate::tunnel::TunnelRegistry::new(),
+    })
 }
 
 /// If `LOCAL_API_KEY` is set, ensure a `default` namespace and a `local`

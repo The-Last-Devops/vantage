@@ -7,6 +7,7 @@
 
 mod collect;
 mod push;
+mod tunnel;
 
 use std::time::Duration;
 
@@ -112,6 +113,20 @@ async fn main() -> Result<()> {
     let mut prev_ticks = disk_io_ticks();
     let mut prev_t = std::time::Instant::now();
     tracing::info!(hub = %cfg.hub_url, ?interval, "agent started");
+
+    // Shell/exec reverse tunnel (opt-in via ALLOW_SHELL). Forward-only, loopback
+    // only — see tunnel.rs / docs/exec-design.md. Off by default.
+    if tunnel::enabled() {
+        // tungstenite's rustls TLS builder reads the process-default crypto provider.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let host = if cfg.hostname_override.is_empty() {
+            System::host_name().unwrap_or_default()
+        } else {
+            cfg.hostname_override.clone()
+        };
+        tracing::warn!(%host, "ALLOW_SHELL=1 — opening reverse shell tunnel to the hub");
+        tokio::spawn(tunnel::run(cfg.hub_url.clone(), cfg.api_key.clone(), host));
+    }
 
     let mut shutdown = Box::pin(shutdown_signal());
     loop {

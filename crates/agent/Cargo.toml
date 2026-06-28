@@ -11,10 +11,16 @@ path = "src/main.rs"
 shared.workspace = true
 # Minimal tokio (not the workspace "full") — the agent only needs a single-thread
 # runtime, timers and a subprocess for nvidia-smi. Keeps threads + size down.
-tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "process", "net", "io-util", "signal"] }
+tokio = { version = "1", default-features = false, features = ["rt", "macros", "time", "process", "net", "io-util", "signal", "sync"] }
 # Own reqwest (not workspace) with webpki-roots: the CA bundle is compiled into
 # the binary, so the static musl build needs no cert files → runs on `scratch`.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+# Reverse tunnel for the shell/exec feature (only used when ALLOW_SHELL=1). Same
+# rustls + webpki-roots stack as reqwest so the static musl build still needs no
+# cert files. `rustls` is pulled directly only to install the ring crypto provider
+# as the process default (tungstenite's TLS builder reads it).
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

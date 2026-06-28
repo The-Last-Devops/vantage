@@ -1,5 +1,7 @@
 //! Types shared between the agent and the hub.
 
+pub mod tunnel;
+
 use serde::{Deserialize, Serialize};
 
 /// A single metrics report pushed by an agent to the hub.

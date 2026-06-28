@@ -18,7 +18,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 chrono.workspace = true
 uuid.workspace = true
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 axum-extra = { version = "0.10", features = ["cookie"] }
 rust-embed = "8"
 mime_guess = "2"
