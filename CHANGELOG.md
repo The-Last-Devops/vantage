@@ -9,6 +9,18 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+### Added
+- **Auto-update is an explicit opt-in.** The Helm charts (hub + agent) take an
+  `autoUpdate` flag (default `false` = pinned/manual); `true` switches to the
+  `:auto-update` image and sets `AUTO_UPDATE=1`. The **Add System → Kubernetes** flow
+  has an **Auto-update** toggle that adds `?autoupdate=1` to the rendered DaemonSet
+  manifest. Not everyone wants auto-update, so it's off unless chosen.
+
+### Fixed
+- About page: when running a pre-release build ahead of the latest GitHub release it
+  now shows "Running a pre-release (vX) — ahead of …" instead of wrongly claiming
+  "you're on the latest (older-tag)". Build sha is displayed short.
+
 ## [2.0.3] — 2026-06-28
 
 ### Added

@@ -37,7 +37,7 @@ spec:
       containers:
         - name: agent
           image: "<IMAGE>"
-          imagePullPolicy: Always   # :main is mutable; always pull the latest build
+          imagePullPolicy: Always   # rolling tag is mutable; always pull the latest build
           env:
             - name: HUB_URL
               value: "<HUB_URL>"
@@ -45,6 +45,8 @@ spec:
               value: "k8s"
             - name: CLUSTER
               value: "<CLUSTER>"
+            - name: AUTO_UPDATE        # 1 = self-restart to follow the hub (auto-update channel)
+              value: "<AUTO_UPDATE>"
             - name: DISK_PATH
               value: "/host"
             - name: NODE_NAME            # stable identity = k8s node name

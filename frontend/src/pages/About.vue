@@ -13,7 +13,13 @@ const isNewer = computed(() => {
   if (!about.value || !latest.value) return false
   const cur = about.value.version
   const tag = latest.value.tag.replace(/^v/, '')
-  return tag !== cur && cmp(tag, cur) > 0
+  return cmp(tag, cur) > 0
+})
+// We're running a build NEWER than the latest GitHub release (an :auto-update /
+// pre-release dev build). Don't claim "you're behind".
+const isAhead = computed(() => {
+  if (!about.value || !latest.value) return false
+  return cmp(about.value.version, latest.value.tag.replace(/^v/, '')) > 0
 })
 // naive semver compare
 function cmp(a, b) {
@@ -53,7 +59,7 @@ onMounted(async () => {
       <div class="overflow-hidden rounded-xl border border-line bg-surface">
         <dl class="divide-y divide-line/60 text-sm">
           <div class="flex justify-between px-4 py-3"><dt class="text-faint">Version</dt><dd class="font-mono text-fg">{{ about?.version || '—' }}</dd></div>
-          <div class="flex justify-between px-4 py-3"><dt class="text-faint">Build</dt><dd class="font-mono text-fg">{{ about?.git_sha || '—' }}</dd></div>
+          <div class="flex justify-between px-4 py-3"><dt class="text-faint">Build</dt><dd class="font-mono text-fg">{{ (about?.git_sha || '—').slice(0, 12) }}</dd></div>
           <div class="flex justify-between px-4 py-3"><dt class="text-faint">Built</dt><dd class="font-mono text-fg">{{ about?.build_date || '—' }}</dd></div>
         </dl>
       </div>
@@ -64,8 +70,9 @@ onMounted(async () => {
           <div>
             <div v-if="checking" class="text-sm text-muted">Checking for updates…</div>
             <div v-else-if="checkErr" class="text-sm text-muted">{{ checkErr }}</div>
-            <div v-else-if="isNewer" class="text-sm font-medium text-amber-400">Update available: {{ latest.tag }} (you have {{ about?.version }})</div>
-            <div v-else-if="latest" class="text-sm font-medium text-accent">You're on the latest version ({{ latest.tag }})</div>
+            <div v-else-if="isNewer" class="text-sm font-medium text-amber-400">Update available: {{ latest.tag }} (you have v{{ about?.version }})</div>
+            <div v-else-if="isAhead" class="text-sm font-medium text-accent">Running a pre-release (v{{ about?.version }}) — ahead of the latest release {{ latest.tag }}</div>
+            <div v-else-if="latest" class="text-sm font-medium text-accent">You're on the latest version (v{{ about?.version }})</div>
           </div>
           <a :href="`https://github.com/${REPO}/releases`" target="_blank" rel="noopener" class="shrink-0 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Releases ↗</a>
         </div>

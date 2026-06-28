@@ -29,12 +29,12 @@ const METHODS = {
     { id: 'compose', label: 'Compose', snippet: (k) => `services:\n  vantage-agent:\n    image: ghcr.io/the-last-devops/vantage-agent:main\n    network_mode: host\n    pid: host\n    environment:\n      HUB_URL: ${HUB}\n      API_KEY: ${k}\n      AGENT_KIND: docker\n    volumes:\n      - /proc:/host/proc:ro\n      - /sys:/host/sys:ro\n      - /var/run/docker.sock:/var/run/docker.sock:ro\n    restart: unless-stopped` },
   ],
   k8s: [
-    { id: 'kubectl', label: 'kubectl', snippet: (k) => `kubectl apply -f "${HUB}/pub/agent.yaml?key=${k}&cluster=${state.cluster || 'my-cluster'}"` },
+    { id: 'kubectl', label: 'kubectl', snippet: (k) => `kubectl apply -f "${HUB}/pub/agent.yaml?key=${k}&cluster=${state.cluster || 'my-cluster'}${state.autoUpdate ? '&autoupdate=1' : ''}"` },
   ],
 }
 
 const namespaces = ref([])
-const state = reactive({ type: 'node', method: 0, name: '', nsId: '', cluster: '', key: '', keyId: '', connected: [], busy: false, error: '' })
+const state = reactive({ type: 'node', method: 0, name: '', nsId: '', cluster: '', autoUpdate: false, key: '', keyId: '', connected: [], busy: false, error: '' })
 const cfg = computed(() => TYPES.find((t) => t.id === state.type))
 const methods = computed(() => METHODS[state.type])
 const snippet = computed(() => (state.key ? methods.value[state.method].snippet(state.key) : ''))
@@ -119,6 +119,15 @@ function copy(ev) {
               <UiSelect v-model="state.nsId" block class="mt-1.5" :options="namespaces.map((n) => ({ value: n.id, label: n.name }))" />
             </label>
           </div>
+
+          <!-- auto-update (k8s only: the agent self-restarts so k8s re-pulls) -->
+          <label v-if="state.type === 'k8s'" class="flex cursor-pointer select-none items-start gap-2.5 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm">
+            <input type="checkbox" v-model="state.autoUpdate" class="mt-0.5 h-4 w-4 accent-accent" />
+            <span>
+              <span class="font-medium text-fg">Auto-update</span>
+              <span class="ml-1.5 text-muted">— run the <span class="font-mono text-accent">:auto-update</span> image; agents self-restart to follow the hub. Off = pinned, manual updates.</span>
+            </span>
+          </label>
 
           <!-- create / install -->
           <div v-if="!state.key">

@@ -17,6 +17,8 @@ use axum::{
 use serde::Deserialize;
 
 const AGENT_IMAGE: &str = "ghcr.io/the-last-devops/vantage-agent:main";
+// The rolling auto-update channel — the agent self-restarts to follow the hub.
+const AGENT_IMAGE_AUTO: &str = "ghcr.io/the-last-devops/vantage-agent:auto-update";
 
 /// Reconstruct the hub's public base URL from the request the caller hit, so the
 /// agent reports back to the same domain (works behind an ingress / TLS).
@@ -47,6 +49,10 @@ pub struct AgentParams {
     /// k8s namespace to install the DaemonSet into (NOT the RBAC namespace, which
     /// the API key already encodes). Defaults to `vantage`.
     ns: Option<String>,
+    /// `1`/`true` → use the rolling `:auto-update` image so the agent self-updates.
+    /// Anything else (default) pins the `:main` build (manual updates).
+    #[serde(default)]
+    autoupdate: Option<String>,
 }
 
 const AGENT_MANIFEST: &str = include_str!("../templates/agent.yaml.tmpl");
@@ -62,12 +68,19 @@ pub async fn k8s_agent_yaml(headers: HeaderMap, Query(p): Query<AgentParams>) ->
         p.ns.as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or("vantage");
+    let auto = matches!(p.autoupdate.as_deref(), Some("1") | Some("true"));
+    let (image, auto_env) = if auto {
+        (AGENT_IMAGE_AUTO, "1")
+    } else {
+        (AGENT_IMAGE, "0")
+    };
     let body = AGENT_MANIFEST
         .replace("<HUB_URL>", &base_url(&headers))
         .replace("<API_KEY>", &p.key)
         .replace("<CLUSTER>", cluster)
         .replace("<NAMESPACE>", ns)
-        .replace("<IMAGE>", AGENT_IMAGE);
+        .replace("<IMAGE>", image)
+        .replace("<AUTO_UPDATE>", auto_env);
     Response::builder()
         .header(header::CONTENT_TYPE, "application/yaml")
         .header(header::CACHE_CONTROL, "no-store")

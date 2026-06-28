@@ -1,3 +1,4 @@
+{{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,10 +14,12 @@ spec:
       {{- include "vantage.pullSecrets" . | nindent 6 }}
       containers:
         - name: hub
-          image: {{ .Values.image.hub }}
+          image: "{{ .Values.image.hub }}:{{ $tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - { name: BIND_ADDR, value: "0.0.0.0:8080" }
+            # 1 = self-restart when a newer :auto-update image is published; 0 = manual.
+            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
             - { name: CONFIG_DATABASE_URL, value: {{ include "vantage.configUrl" . | quote }} }
             - { name: DATA_DATABASE_URL, value: {{ include "vantage.dataUrl" . | quote }} }
             {{- if .Values.admin.password }}

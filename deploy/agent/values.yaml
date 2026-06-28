@@ -1,13 +1,13 @@
 # vantage AGENT chart — deploy after the hub, with a token you create in the
 # UI under Add System. One DaemonSet pod runs per node and pushes host metrics.
 
-image: ghcr.io/the-last-devops/vantage-agent:main
-# Tags: :main = rolling latest (manual redeploy to update); :auto-update = rolling
-# latest that ALSO self-restarts to follow the hub (agent exits → k8s re-pulls);
-# :X.Y.Z = pinned, never self-updates. For auto-update set image to :auto-update
-# (pullPolicy MUST stay Always). Kill switch: env AUTO_UPDATE=0.
-# :main / :auto-update are mutable → Always so a redeploy/restart pulls the new build.
-pullPolicy: Always
+image:
+  repository: ghcr.io/the-last-devops/vantage-agent
+  tag: main              # rolling latest (redeploy to update); pin :X.Y.Z for a stable version
+# Auto-update: when true, run the :auto-update image so each agent self-restarts to
+# follow the hub (k8s re-pulls). Overrides image.tag. Default false = manual updates.
+autoUpdate: false
+pullPolicy: Always       # rolling tags are mutable → Always so a redeploy pulls the new build
 pullSecrets: []          # e.g. [ghcr] for private packages
 
 # Where the hub is reachable from inside this cluster.

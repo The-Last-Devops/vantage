@@ -33,12 +33,15 @@ spec:
         - operator: Exists
       containers:
         - name: agent
-          image: {{ .Values.image }}
+          {{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate }}
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
           imagePullPolicy: {{ .Values.pullPolicy }}
           env:
             - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
             - { name: AGENT_KIND, value: "k8s" }
             - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
+            # 1 = self-restart to follow the hub (auto-update); 0 = pinned/manual.
+            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
             - { name: DISK_PATH, value: "/host" }
             - name: NODE_NAME
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
