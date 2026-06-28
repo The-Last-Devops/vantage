@@ -19,7 +19,7 @@ onMounted(() => ver.ensureLoaded())
 </script>
 
 <template>
-  <header class="flex min-h-[60px] items-center justify-between gap-3 border-b border-line bg-surface/60 px-4 py-2.5 backdrop-blur sm:px-6">
+  <header class="flex h-[50px] items-center justify-between gap-3 border-b border-line2 bg-head px-4 sm:px-6">
     <div class="flex min-w-0 items-center gap-3">
       <button @click="$emit('open-drawer')" class="rounded-lg border border-line bg-surface2 p-1.5 text-muted hover:text-accent md:hidden">
         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>

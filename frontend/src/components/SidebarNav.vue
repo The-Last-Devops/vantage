@@ -25,7 +25,7 @@ const isAdmin = computed(() => !!auth.user?.is_admin)
 const groups = computed(() =>
   [
     {
-      key: 'infra', label: 'Infrastructure',
+      key: 'infra', label: 'Infrastructure', icon: 'server',
       // `owns` = extra route names (e.g. detail pages) that belong to this group
       // so it stays highlighted + expanded when you're on them.
       owns: ['system'],
@@ -35,7 +35,7 @@ const groups = computed(() =>
       ],
     },
     {
-      key: 'services', label: 'Services',
+      key: 'services', label: 'Services', icon: 'service',
       owns: ['monitor', 'monitor-new', 'monitor-edit'],
       children: [
         { label: 'All', name: 'monitors', owns: ['monitor', 'monitor-new', 'monitor-edit'] },
@@ -43,7 +43,7 @@ const groups = computed(() =>
       ],
     },
     {
-      key: 'alert', label: 'Alert',
+      key: 'alert', label: 'Alert', icon: 'alert-triangle',
       owns: ['alert-new', 'alert-edit', 'channel'],
       children: [
         { label: 'Events', name: 'events' },
@@ -52,7 +52,7 @@ const groups = computed(() =>
       ],
     },
     {
-      key: 'settings', label: 'Settings',
+      key: 'settings', label: 'Settings', icon: 'settings',
       owns: ['namespace'],
       children: [
         { label: 'Namespace', name: 'namespaces', owns: ['namespace'] },
@@ -142,14 +142,12 @@ async function logout() { await auth.logout(); router.push({ name: 'login' }) }
     <!-- nav -->
     <nav class="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
       <div v-for="g in groups" :key="g.key">
-        <div class="flex items-center rounded-lg text-sm transition hover:bg-surface2"
-          :class="groupActive(g) ? 'font-semibold text-fg' : 'font-medium text-fg'">
+        <div class="relative flex items-center rounded-lg text-sm transition"
+          :class="groupActive(g) ? 'bg-surface2 font-semibold text-fg' : 'font-medium text-fg hover:bg-surface2'">
+          <span v-if="groupActive(g)" class="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r bg-accent"></span>
           <button @click="openGroup(g)" class="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-1 text-left"
-            :class="groupActive(g) ? 'text-fg' : 'hover:text-fg'">
-            <svg v-if="g.key === 'infra'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-            <svg v-else-if="g.key === 'services'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            <svg v-else-if="g.key === 'alert'" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-            <svg v-else class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+            :class="groupActive(g) ? 'text-fg' : 'text-muted hover:text-fg'">
+            <VIcon :name="g.icon" :size="18" class="shrink-0" />
             <span class="flex-1 truncate">{{ g.label }}</span>
           </button>
           <!-- the submenu opens only on clicking this chevron (no hover) -->
