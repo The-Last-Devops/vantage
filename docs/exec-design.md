@@ -63,6 +63,20 @@ Shell is **off by default** and must be enabled on **both** sides:
 
 If an attacker owns only the hub, agents not deployed with the flag refuse the tunnel.
 
+## Privilege escalation (sudo)
+
+Tier 1 is a real PTY over SSH, so `sudo` works whenever the configured SSH login
+user is in the host's sudoers — interactive password prompt included. Escalation is
+governed by the **host's own sudoers**, not bypassed by the hub: least privilege, the
+host stays in control. Log in as a normal sudo-capable user (not root) per the
+"no root by default" invariant and escalate on demand; the host's auth/sudo logs
+record it too. Tier 2 (nsenter) is already root, so no sudo step.
+
+**Transcript must not capture typed secrets.** Recording the input stream would also
+record a sudo (or any) password the user types. Mitigation: record the **output**
+stream for audit; for input, detect terminal echo-off (PTY `ECHO` cleared) and mask
+those bytes (store a `‹masked›` marker, not the keystrokes).
+
 ## Non-negotiable invariants
 
 - **Step-up auth** before opening a shell (re-enter password / 2FA), like sudo.
