@@ -6,7 +6,8 @@
 //   3. Open WS .../console?ticket=<id>, pipe xterm <-> binary stdout/stdin, JSON resize.
 // On close → "Session ended" + Reconnect (re-does the ticket step).
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { confirm } from '../lib/confirm'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -226,8 +227,21 @@ function cleanup() {
 
 function onWinResize() { try { fit?.fit() } catch {} ; sendResize() }
 
-onMounted(() => { precheck(); window.addEventListener('resize', onWinResize) })
-onBeforeUnmount(() => { window.removeEventListener('resize', onWinResize); cleanup() })
+// Warn before leaving while a session is live — closing/reloading the tab (native
+// prompt) or navigating away in-app (themed confirm) would drop the SSH connection.
+function beforeUnload(e) { if (phase.value === 'live') { e.preventDefault(); e.returnValue = '' } }
+onBeforeRouteLeave(async () => {
+  if (phase.value !== 'live') return true
+  return await confirm({
+    title: 'Leave the console?',
+    message: 'Your SSH session is still connected and will be closed if you leave.',
+    confirmText: 'Leave',
+    danger: true,
+  })
+})
+
+onMounted(() => { precheck(); window.addEventListener('resize', onWinResize); window.addEventListener('beforeunload', beforeUnload) })
+onBeforeUnmount(() => { window.removeEventListener('resize', onWinResize); window.removeEventListener('beforeunload', beforeUnload); cleanup() })
 
 function back() { router.push(`/system/${id.value}`) }
 </script>
