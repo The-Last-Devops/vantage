@@ -12,6 +12,7 @@ const router = useRouter()
 const TILE = {
   ok: 'bg-ok/70',
   warn: 'bg-warn',
+  crit: 'bg-crit',
   down: 'bg-down ring-2 ring-down/45',
   pending: 'bg-pending',
   disabled: 'bg-surface2 border border-line',
@@ -19,6 +20,7 @@ const TILE = {
 const LEGEND = [
   ['ok', 'OK'],
   ['warn', 'Warning'],
+  ['crit', 'Critical'],
   ['down', 'Down'],
   ['pending', 'Pending'],
   ['disabled', 'Disabled'],

@@ -12,7 +12,7 @@ import VIcon from '../components/VIcon.vue'
 import StatePill from '../components/StatePill.vue'
 import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
-import { online, hostState, worstReason, ago, DEFAULT_THR } from '../lib/triage'
+import { online, hostState, worstReason, ago, DEFAULT_THR, STATE_RANK } from '../lib/triage'
 
 const route = useRoute()
 const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
@@ -38,11 +38,12 @@ const updatedAgo = computed(() => Math.max(0, Math.round((nowTick.value - lastUp
 
 // ---- KPIs ----
 const kpis = computed(() => {
-  let up = 0, down = 0, warn = 0
+  let up = 0, down = 0, warn = 0, crit = 0
   for (const s of hosts.value) {
     if (online(s)) up++
     const st = hostState(s, thrOf(s))
     if (st === 'down') down++
+    else if (st === 'crit') crit++
     else if (st === 'warn') warn++
   }
   let svcUp = 0, svcTotal = 0
@@ -51,7 +52,7 @@ const kpis = computed(() => {
     svcTotal++
     if (m.up === true) svcUp++
   }
-  return { up, total: hosts.value.length, down, warn, svcUp, svcTotal, firing: firing.value.length }
+  return { up, total: hosts.value.length, down, warn, crit, svcUp, svcTotal, firing: firing.value.length }
 })
 
 // ---- heatmap groups (by namespace) ----
@@ -119,7 +120,7 @@ const incidents = computed(() => {
     const dur = a.since ? ' · ' + ago(a.since) : ''
     out.push({ id: 'a:' + a.id, tone: 'down', host: a.target_name || 'alert', reason: `${condText(a)} firing${dur}`, ns: a.namespace, systemId: a.system_id || null })
   }
-  return out.sort((x, y) => (x.tone === y.tone ? x.host.localeCompare(y.host) : x.tone === 'down' ? -1 : 1))
+  return out.sort((x, y) => (STATE_RANK[x.tone] ?? 9) - (STATE_RANK[y.tone] ?? 9) || x.host.localeCompare(y.host))
 })
 
 const { loaded, reload: load } = useCached({
@@ -184,6 +185,10 @@ onUnmounted(() => { clearInterval(timer); clearInterval(tick) })
           <div class="flex-1 rounded-xl border p-3" :class="kpis.down ? 'border-down/38 bg-down/12' : 'border-line bg-surface'">
             <div class="text-micro uppercase tracking-wider text-muted">Down</div>
             <div class="mt-0.5 font-mono text-metric font-extrabold tabular-nums" :class="kpis.down ? 'text-down' : 'text-fg'">{{ kpis.down }}</div>
+          </div>
+          <div class="flex-1 rounded-xl border p-3" :class="kpis.crit ? 'border-crit/38 bg-crit/12' : 'border-line bg-surface'">
+            <div class="text-micro uppercase tracking-wider text-muted">Critical</div>
+            <div class="mt-0.5 font-mono text-metric font-extrabold tabular-nums" :class="kpis.crit ? 'text-crit' : 'text-fg'">{{ kpis.crit }}</div>
           </div>
           <div class="flex-1 rounded-xl border p-3" :class="kpis.warn ? 'border-warn/38 bg-warn/12' : 'border-line bg-surface'">
             <div class="text-micro uppercase tracking-wider text-muted">Warning</div>

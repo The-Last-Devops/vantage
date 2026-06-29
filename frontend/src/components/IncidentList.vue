@@ -21,9 +21,11 @@ const router = useRouter()
 const count = computed(() => props.incidents.length)
 const RAIL = {
   down: 'bg-down/12 shadow-[inset_3px_0_0_rgb(var(--down))]',
+  crit: 'bg-crit/12 shadow-[inset_3px_0_0_rgb(var(--crit))]',
   warn: 'bg-warn/12 shadow-[inset_3px_0_0_rgb(var(--warn))]',
   pending: 'bg-pending/12 shadow-[inset_3px_0_0_rgb(var(--pending))]',
 }
+const LABEL = { down: 'Down', crit: 'Critical', warn: 'Warn', ok: 'Up' }
 function openConsole(inc) {
   if (inc.systemId) router.push({ name: 'console', params: { id: inc.systemId } })
 }
@@ -46,7 +48,7 @@ function openConsole(inc) {
     <ul v-else class="divide-y divide-line" :class="scroll ? 'max-h-[22rem] overflow-y-auto' : ''">
       <li v-for="inc in incidents" :key="inc.id"
         class="flex items-center gap-3 px-4 py-2.5" :class="RAIL[inc.tone] || RAIL.warn">
-        <StatePill :tone="inc.tone" :label="inc.tone === 'down' ? 'Down' : 'Warn'" />
+        <StatePill :tone="inc.tone" :label="LABEL[inc.tone] || 'Warn'" />
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
             <span class="truncate font-mono text-body tabular-nums text-fg">{{ inc.host }}</span>

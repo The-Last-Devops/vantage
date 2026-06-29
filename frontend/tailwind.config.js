@@ -22,6 +22,7 @@ export default {
         accentfg: 'rgb(var(--accentfg) / <alpha-value>)',
         ok: 'rgb(var(--ok) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
+        crit: 'rgb(var(--crit) / <alpha-value>)',
         down: 'rgb(var(--down) / <alpha-value>)',
         pending: 'rgb(var(--pending) / <alpha-value>)',
         track: 'rgb(var(--track) / <alpha-value>)',

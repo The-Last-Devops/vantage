@@ -19,7 +19,7 @@
   --cap: 93 107 125;     /* #5D6B7D faintest labels */
   --accent: 52 225 196;  /* #34E1C4 teal */
   --accentfg: 6 35 31;   /* #06231F text on accent */
-  --ok: 52 211 153; --warn: 251 191 36; --down: 248 113 113; --pending: 96 165 250; /* state */
+  --ok: 52 211 153; --warn: 251 191 36; --crit: 251 146 60; --down: 248 113 113; --pending: 96 165 250; /* state */
   --track: 30 38 50;     /* #1E2632 bar tracks */
   --hover: 22 29 43;     /* #161D2B — row hover */
   --logobg: 52 225 196; --logostroke: 8 35 31; /* logo tile + knockout */
@@ -37,7 +37,7 @@
   --cap: 138 151 166;    /* #8A97A6 */
   --accent: 13 148 136;  /* teal-600 */
   --accentfg: 255 255 255;
-  --ok: 21 163 74; --warn: 194 137 11; --down: 220 38 38; --pending: 37 99 235;
+  --ok: 21 163 74; --warn: 194 137 11; --crit: 234 88 12; --down: 220 38 38; --pending: 37 99 235;
   --track: 228 231 236;
   --hover: 243 246 248;  /* #F3F6F8 */
   --logobg: 13 148 136; --logostroke: 255 255 255;
@@ -88,6 +88,8 @@
 .vantage-pill-ok   .d { background: rgb(var(--ok)); }
 .vantage-pill-warn { color: rgb(var(--warn)); background: rgb(var(--warn) / 0.13); border-color: rgb(var(--warn) / 0.30); }
 .vantage-pill-warn .d { background: rgb(var(--warn)); }
+.vantage-pill-crit { color: rgb(var(--crit)); background: rgb(var(--crit) / 0.13); border-color: rgb(var(--crit) / 0.30); }
+.vantage-pill-crit .d { background: rgb(var(--crit)); }
 .vantage-pill-down { color: rgb(var(--down)); background: rgb(var(--down) / 0.12); border-color: rgb(var(--down) / 0.30); }
 .vantage-pill-down .d { background: rgb(var(--down)); }
 .vantage-pill-pending { color: rgb(var(--pending)); background: rgb(var(--pending) / 0.13); border-color: rgb(var(--pending) / 0.30); }

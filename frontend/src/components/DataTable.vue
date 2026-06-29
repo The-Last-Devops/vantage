@@ -76,6 +76,7 @@ const toneOf = (row) => (props.rowTone ? props.rowTone(row) : null)
 function rowCls(row) {
   const tone = toneOf(row)
   if (tone === 'down') return 'bg-down/12 shadow-[inset_3px_0_0_rgb(var(--down))]'
+  if (tone === 'crit') return 'bg-crit/12 shadow-[inset_3px_0_0_rgb(var(--crit))]'
   if (tone === 'warn') return 'bg-warn/12 shadow-[inset_3px_0_0_rgb(var(--warn))]'
   if (selected.value.includes(props.rowKey(row))) return 'bg-accent/[0.14] shadow-[inset_3px_0_0_rgb(var(--accent))]'
   return ''

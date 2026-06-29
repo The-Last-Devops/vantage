@@ -18,7 +18,11 @@ const metricsOf = (s) => ({
 const LABEL = { cpu: 'CPU', mem: 'Memory', disk: 'Disk', dutil: 'Disk I/O' }
 const ORDER = ['cpu', 'disk', 'mem', 'dutil']
 
-// State for the heatmap/KPIs: 'down' | 'warn' | 'ok' (offline host = down).
+// State for the heatmap/KPIs: 'down' | 'crit' | 'warn' | 'ok'.
+//   down = unreachable (no recent heartbeat) — the host is gone.
+//   crit = reachable but a metric is past its critical threshold (e.g. disk 93%).
+//          NOT "down" — the host is alive, it just needs attention urgently.
+//   warn = reachable, a metric is past its warning threshold.
 export function hostState(s, thr = DEFAULT_THR) {
   if (!online(s)) return 'down'
   const m = metricsOf(s)
@@ -26,11 +30,16 @@ export function hostState(s, thr = DEFAULT_THR) {
   for (const k of ORDER) {
     const v = m[k], w = thr[k + '_warn'], c = thr[k + '_crit']
     if (v == null) continue
-    if (v >= c) return 'down'
+    if (v >= c) return 'crit'
     if (v >= w) warn = true
   }
   return warn ? 'warn' : 'ok'
 }
+
+// Human label + StatePill tone for a host state.
+export const STATE_LABEL = { ok: 'Up', warn: 'Warn', crit: 'Critical', down: 'Down' }
+// Sort rank, worst first (down and crit both demand attention; down sorts first).
+export const STATE_RANK = { down: 0, crit: 1, warn: 2, ok: 3 }
 
 // The single worst metric breach as human text, e.g. "CPU 91%". null if none.
 export function worstReason(s, thr = DEFAULT_THR) {

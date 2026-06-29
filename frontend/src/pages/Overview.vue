@@ -10,7 +10,7 @@ import IncidentList from '../components/IncidentList.vue'
 import StatePill from '../components/StatePill.vue'
 import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
-import { online, hostState, worstReason, ago, pct, DEFAULT_THR } from '../lib/triage'
+import { online, hostState, worstReason, ago, pct, DEFAULT_THR, STATE_RANK } from '../lib/triage'
 
 const route = useRoute()
 const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
@@ -31,16 +31,17 @@ const monName = computed(() => { const m = {}; for (const x of monitors.value) m
 function avg(arr, f) { const v = arr.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null }
 
 const summary = computed(() => {
-  let up = 0, down = 0, warn = 0
+  let up = 0, down = 0, warn = 0, crit = 0
   for (const s of hosts.value) {
     if (online(s)) up++
     const st = hostState(s, thrOf(s))
     if (st === 'down') down++
+    else if (st === 'crit') crit++
     else if (st === 'warn') warn++
   }
   const onl = hosts.value.filter(online)
   return {
-    total: hosts.value.length, up, down, warn,
+    total: hosts.value.length, up, down, warn, crit,
     cpu: avg(onl, (s) => s.cpu_percent),
     mem: avg(onl, (s) => pct(s.mem_used, s.mem_total)),
     disk: avg(onl, (s) => pct(s.disk_used, s.disk_total)),
@@ -76,7 +77,7 @@ const incidents = computed(() => {
     const dur = a.since ? ' · ' + ago(a.since) : ''
     out.push({ id: 'a:' + a.id, tone: 'down', host: a.target_name || 'alert', reason: `${condText(a)} firing${dur}`, ns: a.namespace, systemId: a.system_id || null })
   }
-  return out.sort((x, y) => (x.tone === y.tone ? x.host.localeCompare(y.host) : x.tone === 'down' ? -1 : 1))
+  return out.sort((x, y) => (STATE_RANK[x.tone] ?? 9) - (STATE_RANK[y.tone] ?? 9) || x.host.localeCompare(y.host))
 })
 const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
 function condText(a) {
@@ -143,7 +144,7 @@ onUnmounted(() => clearInterval(timer))
       <!-- BASIC INFO: summary counters -->
       <section class="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div class="rounded-xl border border-line bg-surface p-4">
-          <div class="flex items-baseline gap-2"><span class="font-mono text-metric font-extrabold tabular-nums text-fg">{{ summary.total }}</span><span v-if="summary.down" class="rounded bg-down/15 px-1.5 text-xs font-semibold text-down">{{ summary.down }} down</span></div>
+          <div class="flex flex-wrap items-baseline gap-1.5"><span class="font-mono text-metric font-extrabold tabular-nums text-fg">{{ summary.total }}</span><span v-if="summary.down" class="rounded bg-down/15 px-1.5 text-xs font-semibold text-down">{{ summary.down }} down</span><span v-if="summary.crit" class="rounded bg-crit/15 px-1.5 text-xs font-semibold text-crit">{{ summary.crit }} critical</span></div>
           <div class="mt-1 text-sm text-muted">Hosts <span class="text-faint">· {{ summary.up }} up</span></div>
         </div>
         <div class="rounded-xl border border-line bg-surface p-4">
