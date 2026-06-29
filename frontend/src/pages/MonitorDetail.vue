@@ -140,13 +140,6 @@ onUnmounted(() => timer && clearInterval(timer))
 
 <template>
   <AppShell :title="m?.name || 'Service'" :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: m?.name || 'Service' }]">
-    <template #title-after>
-      <nav class="flex items-center gap-2 text-lg font-semibold">
-        <RouterLink :to="{ name: 'monitors' }" class="text-muted hover:text-accent">Services</RouterLink>
-        <span class="text-faint">›</span>
-        <span class="truncate text-fg">{{ m?.name || 'Service' }}</span>
-      </nav>
-    </template>
 
     <div v-if="err" class="rounded-xl border border-line bg-surface p-6 text-center text-down">{{ err }}</div>
     <PageLoader v-else-if="!m" />

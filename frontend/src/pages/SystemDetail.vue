@@ -225,13 +225,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
 
 <template>
   <AppShell :title="name" :breadcrumb="[{ label: 'Infrastructure', to: { name: 'systems', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: name }]">
-    <!-- breadcrumb sits in the top bar (left); status on the right -->
-    <template #title-after>
-      <nav class="flex items-center gap-1.5 text-base font-semibold">
-        <RouterLink :to="{ path: '/', query: route.query.ns ? { ns: route.query.ns } : {} }" class="text-muted hover:text-accent">Infrastructure</RouterLink>
-        <span class="text-faint">›</span><span class="text-fg">{{ name }}</span>
-      </nav>
-    </template>
+    <!-- status pill next to the header breadcrumb (the breadcrumb prop renders the trail) -->
     <template #header>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusDot"></span><span class="text-xs font-medium" :class="statusText">{{ statusLabel }}</span></span>
     </template>

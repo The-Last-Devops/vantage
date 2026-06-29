@@ -93,10 +93,17 @@ watch(shell, syncPort)
       <div class="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
         <span><span class="text-faint">SSH port</span> <span class="text-fg tabular-nums">{{ shell.ssh_port }}</span></span>
         <span class="flex items-center gap-1.5">
-          <span class="h-1.5 w-1.5 rounded-full" :class="shell.tunnel_online ? 'bg-accent' : 'bg-faint'"></span>
-          <span :class="shell.tunnel_online ? 'text-fg' : 'text-faint'">{{ shell.tunnel_online ? 'Agent online' : 'Agent offline' }}</span>
+          <span class="h-1.5 w-1.5 rounded-full" :class="shell.tunnel_online ? 'bg-ok' : 'bg-faint'"></span>
+          <span :class="shell.tunnel_online ? 'text-fg' : 'text-faint'">{{ shell.tunnel_online ? 'Shell channel ready' : 'Shell channel offline' }}</span>
         </span>
       </div>
+
+      <!-- the host pushes metrics over one path; the interactive shell needs a SECOND,
+           opt-in tunnel. Explain the gap so "offline" here isn't confused with the host. -->
+      <p v-if="shell.shell_enabled && !shell.tunnel_online" class="mb-3 text-xs text-faint">
+        This host reports metrics fine, but no shell tunnel is connected. Redeploy its agent with
+        <span class="font-mono text-cap">ALLOW_SHELL=1</span> (and make sure the host runs sshd) to open the console.
+      </p>
 
       <!-- owner-only enable/port form. We show it to anyone with exec and let a 403 surface
            a message, since the API doesn't return an explicit owner flag. -->
