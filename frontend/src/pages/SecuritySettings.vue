@@ -151,9 +151,15 @@ async function disableTfa() {
 
         <!-- enrolling: show secret + code field -->
         <template v-else-if="enroll">
-          <p class="mb-2 text-xs text-muted">In your authenticator app, add an account with this setup key (or scan the URI):</p>
-          <div class="mb-2 break-all rounded-lg border border-line bg-surface2 px-3 py-2 font-mono text-sm text-fg">{{ enroll.secret }}</div>
-          <div class="mb-3 break-all text-[11px] text-faint">{{ enroll.otpauth_uri }}</div>
+          <p class="mb-3 text-xs text-muted">Scan this QR with your authenticator app (Google Authenticator, 1Password, Authy…), or enter the setup key manually:</p>
+          <div class="mb-3 flex flex-wrap items-start gap-4">
+            <div v-if="enroll.qr_svg" class="shrink-0 rounded-lg bg-white p-2" v-html="enroll.qr_svg"></div>
+            <div class="min-w-0">
+              <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-faint">Setup key</span>
+              <div class="mb-2 break-all rounded-lg border border-line bg-surface2 px-3 py-2 font-mono text-sm text-fg">{{ enroll.secret }}</div>
+              <div class="break-all text-[11px] text-faint">{{ enroll.otpauth_uri }}</div>
+            </div>
+          </div>
           <label class="mb-3 block max-w-[220px]">
             <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-faint">Code from the app</span>
             <input v-model="enrollCode" inputmode="numeric" placeholder="123456"

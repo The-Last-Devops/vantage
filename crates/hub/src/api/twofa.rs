@@ -79,6 +79,32 @@ pub async fn twofa_status(
 pub struct TwoFaStart {
     secret: String,      // base32, for manual entry
     otpauth_uri: String, // for a QR / "add account" link
+    qr_svg: String,      // the otpauth URI rendered as a scannable QR (inline SVG)
+}
+
+/// Render `data` as a QR code → a self-contained SVG string (black on white).
+fn qr_svg(data: &str) -> String {
+    let Ok(code) = qrcode::QrCode::new(data.as_bytes()) else {
+        return String::new();
+    };
+    let w = code.width();
+    let colors = code.to_colors();
+    let (quiet, scale) = (4usize, 4usize); // quiet-zone modules, px per module
+    let dim = (w + 2 * quiet) * scale;
+    let mut rects = String::new();
+    for y in 0..w {
+        for x in 0..w {
+            if colors[y * w + x] == qrcode::Color::Dark {
+                let (px, py) = ((x + quiet) * scale, (y + quiet) * scale);
+                rects.push_str(&format!(
+                    "<rect x='{px}' y='{py}' width='{scale}' height='{scale}'/>"
+                ));
+            }
+        }
+    }
+    format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='{dim}' height='{dim}' viewBox='0 0 {dim} {dim}' shape-rendering='crispEdges'><rect width='{dim}' height='{dim}' fill='#fff'/><g fill='#000'>{rects}</g></svg>"
+    )
 }
 
 /// POST /api/me/2fa/start — generate a fresh (pending) secret. Overwrites any earlier
@@ -110,9 +136,11 @@ pub async fn twofa_start(
     .execute(&state.config)
     .await
     .map_err(internal)?;
+    let qr = qr_svg(&uri);
     Ok(Json(TwoFaStart {
         secret: b32,
         otpauth_uri: uri,
+        qr_svg: qr,
     }))
 }
 
