@@ -133,21 +133,21 @@ const sections = computed(() => [
     ],
   },
   {
-    title: 'Security',
+    // Security + system folded into one grid so the rows fill out (Two-factor alone
+    // left a near-empty row). Admin sees 4 tiles (a full row); non-admin sees just
+    // the one Two-factor tile, left-aligned.
+    title: 'Account & system',
     items: [
       { label: 'Two-factor', value: secured.value ? 'On' : 'Off', sub: securedSub.value, icon: 'shield', to: { name: 'security' }, bad: !secured.value, color: 'warn', good: secured.value },
+      ...(isAdmin.value
+        ? [
+            { label: 'Database', value: dataStats.value?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
+            { label: 'Namespaces', value: namespaces.value.length, icon: 'globe', to: { name: 'namespaces' } },
+            { label: 'Members', value: memberCount.value ?? '—', icon: 'user', to: { name: 'members' } },
+          ]
+        : []),
     ],
   },
-  ...(isAdmin.value
-    ? [{
-        title: 'System',
-        items: [
-          { label: 'Database', value: dataStats.value?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
-          { label: 'Namespaces', value: namespaces.value.length, icon: 'globe', to: { name: 'namespaces' } },
-          { label: 'Members', value: memberCount.value ?? '—', icon: 'user', to: { name: 'members' } },
-        ],
-      }]
-    : []),
 ])
 
 const BAD_BORDER = { down: 'border-down/40 bg-down/10', crit: 'border-crit/40 bg-crit/10', warn: 'border-warn/40 bg-warn/10' }
@@ -199,7 +199,7 @@ onUnmounted(() => clearInterval(timer))
           <RouterLink v-for="t in sec.items" :key="t.label" :to="t.to"
             class="flex min-h-[104px] flex-col rounded-xl border p-4 transition hover:border-accent/60"
             :class="t.bad ? BAD_BORDER[t.color] : t.good ? 'border-ok/40 bg-ok/10' : 'border-line bg-surface'">
-            <div class="flex items-center gap-1.5 text-micro uppercase tracking-wider text-faint">
+            <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-faint">
               <VIcon :name="t.icon" :size="13" class="shrink-0" />{{ t.label }}
             </div>
             <div class="mt-auto font-mono text-metric font-extrabold tabular-nums" :class="t.bad ? BAD_TEXT[t.color] : t.good ? 'text-ok' : 'text-fg'">{{ t.value }}</div>
