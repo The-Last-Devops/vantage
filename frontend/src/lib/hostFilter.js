@@ -9,10 +9,12 @@
 /** Percentage of used/total, rounded; null when not computable. */
 export const pct = (u, t) => (u != null && t ? Math.round((u / t) * 100) : null)
 
-/** A host is "down" only after it's been silent for more than OFFLINE_MS — a grace
- *  window so a brief blip (one late push) doesn't flip it down. Assumes agents push
- *  more often than this; raise it if the push interval is longer. */
-export const OFFLINE_MS = 15000
+/** A host is "down" only after it's been silent for more than OFFLINE_MS. This MUST be
+ *  comfortably larger than the agent push interval (default 60s), or a healthy host
+ *  grazes the boundary just before each push and flickers down→up. 120s (2× the 60s
+ *  push) leaves a full interval of headroom + tolerates one missed push.
+ *  (Faster down-detection needs a shorter agent INTERVAL; ideally make this interval-aware.) */
+export const OFFLINE_MS = 120000
 export const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTime() < OFFLINE_MS
 
 /** Parse the query string into a list of predicates. */
