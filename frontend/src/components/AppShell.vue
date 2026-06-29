@@ -28,9 +28,15 @@ watch(() => props.title, (t) => { document.title = t ? `${t} — Vantage` : 'Van
     <div class="flex min-w-0 flex-1 flex-col">
       <AppHeader :title="title" :hide-title="hideTitle" :breadcrumb="breadcrumb" @open-drawer="drawer = true">
         <template #title-after><slot name="title-after" /></template>
-        <template #actions><slot name="actions" /></template>
-        <template #header><slot name="header" /></template>
       </AppHeader>
+      <!-- page bar: page-scoped controls live here, NOT in the header (design system).
+           Renders only when a page supplies them. -->
+      <div v-if="$slots.actions || $slots.header"
+        class="flex flex-wrap items-center gap-2 border-b border-line bg-bg px-4 py-2.5 sm:px-6">
+        <slot name="header" />
+        <span class="ml-auto"></span>
+        <slot name="actions" />
+      </div>
       <main class="flex-1 p-4 sm:p-6"><slot /></main>
     </div>
   </div>

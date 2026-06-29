@@ -42,6 +42,11 @@ export default {
         micro: ['10px', { lineHeight: '1.4' }],
       },
       borderRadius: { pill: '999px' },
+      // Default border colour for a bare `border` (and `divide-*`). Without this,
+      // Tailwind falls back to gray-200 (#e5e7eb) — a glaring bright line on the dark
+      // UI. Point it at the subtle `--line` token so every bare border matches the
+      // design system and flips with the theme.
+      borderColor: { DEFAULT: 'rgb(var(--line))' },
     },
   },
   plugins: [],
