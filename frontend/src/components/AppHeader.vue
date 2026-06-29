@@ -1,13 +1,15 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
+import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useUi } from '../stores/ui'
 import { useVersion } from '../stores/version'
 import NamespacePicker from './NamespacePicker.vue'
 import AccountMenu from './AccountMenu.vue'
 
-defineProps({
+const props = defineProps({
   title: { type: String, default: '' },
+  // Deprecated: the header always shows a name now (see headTitle). Kept so existing
+  // call sites don't break; it no longer blanks the header.
   hideTitle: { type: Boolean, default: false },
   // Breadcrumb shown in the header bar instead of `title` (saves a row vs an
   // in-page breadcrumb). Array of { label, to? }; the last item is the current page.
@@ -18,7 +20,13 @@ defineEmits(['open-drawer'])
 const ui = useUi()
 const ver = useVersion()
 const router = useRouter()
+const route = useRoute()
 onMounted(() => ver.ensureLoaded())
+
+// The header is NEVER blank: an explicit `title` wins, else the route's `meta.title`.
+// Pages that want a richer trail pass `breadcrumb` instead. (Adding a route without a
+// meta.title still shows nothing here — keep meta.title set in router/index.js.)
+const headTitle = computed(() => props.title || route.meta?.title || '')
 
 // ⌘K / Ctrl-K focuses the search affordance. The full command palette is a
 // follow-up; for now Enter jumps to the Systems list so it isn't a dead end.
@@ -53,7 +61,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
           <span v-if="i < breadcrumb.length - 1" class="shrink-0 text-faint">/</span>
         </template>
       </nav>
-      <h1 v-else-if="title && !hideTitle" class="text-lg font-semibold text-fg">{{ title }}</h1>
+      <h1 v-else-if="headTitle" class="truncate text-base font-semibold text-fg">{{ headTitle }}</h1>
       <slot name="title-after" />
     </div>
 

@@ -135,6 +135,14 @@ docker compose up -d
   rule in the Vue form for instant feedback (e.g. the email regex in `Members.vue`). When you
   add or change a handler that accepts input, validate its fields in the **same** change — a
   weak check like `email.contains('@')` is how "kiên béo ngu dốt @gmail.com" got in.
+- **The header is never blank — every route sets `meta.title`.** The unified top bar
+  (`AppHeader`) shows, in priority order, an explicit `breadcrumb` prop → an explicit
+  `title` prop → `route.meta.title`. So **every new route in `frontend/src/router/index.js`
+  must carry `meta: { title: '…' }`** (the page name), even if the page also passes a
+  `title`/`breadcrumb`. A page rendering its own in-body hero may still want the header
+  name — don't rely on `hide-title` (deprecated; it no longer blanks the header). This is
+  why a page like Fleet once showed an empty header: it passed `hide-title` with no title
+  and the route had no `meta.title`.
 - **Frontend: never paint a blank/black screen while loading — always show a loader.**
   - Route components in `frontend/src/router/index.js` are imported **eagerly**, not lazily
     (`() => import()`). A lazy route fetches its JS chunk on first navigation and the router renders
