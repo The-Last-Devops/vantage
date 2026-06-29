@@ -166,9 +166,8 @@ pub async fn create_ssh_key(
     let key = russh::keys::decode_secret_key(&req.private_key, None).map_err(|_| {
         bad(
             "Couldn't read that private key. It must be an unencrypted OpenSSH key \
-             (\"BEGIN OPENSSH PRIVATE KEY\"). Convert an old PEM/RSA key with: \
-             ssh-keygen -p -m RFC4716 -f <keyfile>, and remove any passphrase with \
-             ssh-keygen -p -N '' -f <keyfile>.",
+             (\"BEGIN OPENSSH PRIVATE KEY\"). Convert an old PEM/RSA key (and drop any \
+             passphrase) with:  ssh-keygen -p -N \"\" -f <keyfile>  — then paste the new file.",
         )
     })?;
     let fingerprint = key
