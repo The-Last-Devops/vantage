@@ -78,14 +78,16 @@ Exec is **not** folded into "edit config". A user may open a shell only if they 
 New gate `rbac::require_exec(state, user, namespace_id)` is the single place this
 rule lives.
 
-## Two-sided opt-in (a hub compromise alone cannot exec)
+## A hub compromise alone cannot exec
 
-Shell is **off by default** and must be enabled on **both** sides:
-1. **Agent side:** deployed with `ALLOW_SHELL=1` (Tier 1) / `ALLOW_HOST_EXEC=1` (Tier 2).
-2. **Hub side:** the system has `shell_enabled = true`; the user authenticates at
-   connect with their own SSH account + host password, or a key from their library.
-
-If an attacker owns only the hub, agents not deployed with the flag refuse the tunnel.
+The Tier-1 agent tunnel is now **on by default** (set `ALLOW_SHELL=0` to opt a host out;
+Tier-2 host-exec stays a hard opt-in via `ALLOW_HOST_EXEC=1` + privileged). So the tunnel
+being open is *not* the security boundary — it's only a byte-pipe to the node's loopback
+sshd. The real boundary is **per-user SSH auth**: the hub stores **no usable credential**
+(each user's key is sealed under their own password; password auth is typed at connect),
+so even a fully-compromised hub with open tunnels to every host cannot authenticate a
+shell. To open a console a caller still needs: `shell_enabled` on the system, `require_exec`
+(owner + can_exec), a step-up password, and the host's own SSH acceptance.
 
 ## Privilege escalation (sudo)
 

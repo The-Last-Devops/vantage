@@ -32,11 +32,14 @@ impl Conn {
     }
 }
 
-/// True when `ALLOW_SHELL` is set to an affirmative value.
+/// Whether to open the shell tunnel. **On by default** — only an explicit
+/// `ALLOW_SHELL=0/false/no/off` turns it off. So an older install whose deployment spec
+/// never set the env still gets the tunnel just by running a recent agent image (access
+/// stays fully gated hub-side: RBAC + step-up + the host's own SSH auth).
 pub fn enabled() -> bool {
-    matches!(
+    !matches!(
         std::env::var("ALLOW_SHELL").ok().as_deref(),
-        Some("1") | Some("true") | Some("yes")
+        Some("0") | Some("false") | Some("no") | Some("off")
     )
 }
 
