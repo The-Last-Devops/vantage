@@ -10,7 +10,7 @@ import PageLoader from '../components/PageLoader.vue'
 import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
 import { useAuth } from '../stores/auth'
-import { online, hostState, DEFAULT_THR } from '../lib/triage'
+import { online, hostState, pct, DEFAULT_THR } from '../lib/triage'
 
 const route = useRoute()
 const auth = useAuth()
@@ -28,6 +28,8 @@ const alerts = ref([])
 const backup = ref(null) // { enabled, last_backup_at } (admin only)
 const tfa = ref({ enabled: false })
 const passkeys = ref([])
+const dataStats = ref(null) // { db_size, ... } (admin only)
+const memberCount = ref(null) // user count (admin only)
 let timer = null
 
 const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
@@ -57,6 +59,26 @@ const svc = computed(() => {
 })
 const firing = computed(() => alerts.value.filter((a) => a.enabled && a.firing === true).length)
 const events24 = computed(() => events.value.length)
+
+// average host utilisation (online hosts only) — for the Capacity tiles
+function avg(arr, f) { const v = arr.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null }
+const cap = computed(() => {
+  const on = hosts.value.filter(online)
+  return {
+    cpu: avg(on, (s) => s.cpu_percent),
+    mem: avg(on, (s) => pct(s.mem_used, s.mem_total)),
+    disk: avg(on, (s) => pct(s.disk_used, s.disk_total)),
+  }
+})
+// per-tile tone for a utilisation %: >90 critical, >=70 warning
+function capTone(v) { return v == null ? null : v > 90 ? 'down' : v >= 70 ? 'warn' : null }
+
+// average service uptime (SLA) over services that have recent checks
+const upPct = (m) => (m.recent && m.recent.length ? Math.round((m.recent.filter(Boolean).length / m.recent.length) * 100) : null)
+const svcUptime = computed(() => {
+  const ups = nsMonitors.value.map(upPct).filter((u) => u != null)
+  return ups.length ? Math.round(ups.reduce((a, b) => a + b, 0) / ups.length) : null
+})
 
 // agents on an older version than the newest one reporting
 function cmpVer(a, b) {
@@ -109,7 +131,15 @@ const sections = computed(() => [
     items: [
       { label: 'Services', value: svc.value.total, sub: `${svc.value.up} up`, icon: 'service', to: { name: 'monitors', query: nsq.value } },
       { label: 'Down', value: svc.value.down, icon: 'wifi-off', to: { name: 'monitors', query: { ...nsq.value, status: 'down' } }, bad: svc.value.down > 0, color: 'down' },
-      { label: 'Pending', value: svc.value.pending, icon: 'clock', to: { name: 'monitors', query: nsq.value }, bad: false },
+      { label: 'Avg uptime', value: svcUptime.value == null ? 'N/A' : `${svcUptime.value}%`, sub: 'recent checks', icon: 'uptime', to: { name: 'monitors', query: nsq.value }, bad: svcUptime.value != null && svcUptime.value < 99, color: svcUptime.value != null && svcUptime.value < 90 ? 'down' : 'warn' },
+    ],
+  },
+  {
+    title: 'Capacity',
+    items: [
+      { label: 'Avg CPU', value: cap.value.cpu == null ? '—' : `${cap.value.cpu}%`, icon: 'cpu', to: { name: 'systems', query: nsq.value }, bad: capTone(cap.value.cpu) != null, color: capTone(cap.value.cpu) || 'warn' },
+      { label: 'Avg memory', value: cap.value.mem == null ? '—' : `${cap.value.mem}%`, icon: 'memory', to: { name: 'systems', query: nsq.value }, bad: capTone(cap.value.mem) != null, color: capTone(cap.value.mem) || 'warn' },
+      { label: 'Avg disk', value: cap.value.disk == null ? '—' : `${cap.value.disk}%`, icon: 'disk', to: { name: 'systems', query: nsq.value }, bad: capTone(cap.value.disk) != null, color: capTone(cap.value.disk) || 'warn' },
     ],
   },
   {
@@ -129,6 +159,16 @@ const sections = computed(() => [
       { label: 'Two-factor', value: secured.value ? 'On' : 'Off', sub: securedSub.value, icon: 'shield', to: { name: 'security' }, bad: !secured.value, color: 'warn' },
     ],
   },
+  ...(isAdmin.value
+    ? [{
+        title: 'System',
+        items: [
+          { label: 'Database', value: dataStats.value?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
+          { label: 'Namespaces', value: namespaces.value.length, icon: 'globe', to: { name: 'namespaces' } },
+          { label: 'Members', value: memberCount.value ?? '—', icon: 'user', to: { name: 'members' } },
+        ],
+      }]
+    : []),
 ])
 
 const BAD_BORDER = { down: 'border-down/40 bg-down/10', crit: 'border-crit/40 bg-crit/10', warn: 'border-warn/40 bg-warn/10' }
@@ -138,22 +178,26 @@ const { loaded, reload: load } = useCached({
   key: () => 'overview:' + selectedNs.value.join(','),
   load: async () => {
     const nss = namespaces.value
-    const [sys, mons, evs, thr, alertLists, bk, t2, pks] = await Promise.all([
+    const admin = isAdmin.value
+    const [sys, mons, evs, thr, alertLists, bk, t2, pks, ds, users] = await Promise.all([
       api.get('/api/systems').catch(() => []),
       api.get('/api/monitors').catch(() => []),
       api.get('/api/events?range=24h').catch(() => []),
       api.get('/api/thresholds').catch(() => ({})),
       Promise.all(nss.map((n) => api.get(`/api/namespaces/${n.id}/alerts`).catch(() => []))),
-      isAdmin.value ? api.get('/api/admin/backup/schedule').catch(() => null) : Promise.resolve(null),
+      admin ? api.get('/api/admin/backup/schedule').catch(() => null) : Promise.resolve(null),
       api.get('/api/me/2fa').catch(() => ({ enabled: false })),
       api.get('/api/me/passkeys').catch(() => []),
+      admin ? api.get('/api/admin/data').catch(() => null) : Promise.resolve(null),
+      admin ? api.get('/api/users').catch(() => []) : Promise.resolve([]),
     ])
-    return { sys, mons, evs, thr, alerts: alertLists.flat(), bk, t2, pks }
+    return { sys, mons, evs, thr, alerts: alertLists.flat(), bk, t2, pks, ds, users }
   },
   apply: (d) => {
     systems.value = d.sys; monitors.value = d.mons; events.value = d.evs
     thresholds.value = d.thr || {}; alerts.value = d.alerts
     backup.value = d.bk; tfa.value = d.t2 || { enabled: false }; passkeys.value = d.pks || []
+    dataStats.value = d.ds; memberCount.value = Array.isArray(d.users) ? d.users.length : null
   },
 })
 
