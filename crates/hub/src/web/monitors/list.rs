@@ -24,6 +24,9 @@ pub struct MonitorRow {
     pub uptime_24h: Option<f64>,
     /// Last ~40 heartbeats (oldest→newest) for the row's mini uptime bar.
     pub recent: Vec<bool>,
+    /// 24h trend: one slot per hour (oldest→newest, 24 slots). Some(true)=all up
+    /// that hour, Some(false)=had a down beat, None=no beats in that hour.
+    pub trend_24h: Vec<Option<bool>>,
 }
 
 /// GET /api/monitors — each monitor (scoped to the caller's namespaces) plus
@@ -114,6 +117,29 @@ pub async fn list_monitors(
         }
     }
 
+    // 24h trend — one bucket per hour for the last 24 hours. bool_and(up) marks
+    // an hour "down" if any beat in it failed; hours with no beats stay None.
+    let trend_rows: Vec<(Uuid, i32, Option<bool>)> = sqlx::query_as(
+        "SELECT monitor_id, \
+                floor(extract(epoch FROM (now() - time)) / 3600)::int AS hours_ago, \
+                bool_and(up) AS all_up \
+         FROM heartbeats WHERE monitor_id = ANY($1) AND time > now() - interval '24 hours' \
+         GROUP BY monitor_id, hours_ago",
+    )
+    .bind(&ids)
+    .fetch_all(&state.data)
+    .await
+    .map_err(internal)?;
+    let mut trend: std::collections::HashMap<Uuid, [Option<bool>; 24]> =
+        std::collections::HashMap::new();
+    for (mid, hours_ago, all_up) in trend_rows {
+        if !(0..24).contains(&hours_ago) {
+            continue;
+        }
+        // oldest (23h ago) → index 0, current hour → index 23
+        trend.entry(mid).or_insert([None; 24])[(23 - hours_ago) as usize] = all_up;
+    }
+
     let mut rows = Vec::with_capacity(monitors.len());
     for (id, name, kind, target, namespace, interval_secs, enabled, config) in monitors {
         let (last_check, up, latency_ms, message) = match latest.remove(&id) {
@@ -141,6 +167,10 @@ pub async fn list_monitors(
             message,
             uptime_24h: uptime_24h.remove(&id),
             recent: recent.remove(&id).unwrap_or_default(),
+            trend_24h: trend
+                .remove(&id)
+                .map(|a| a.to_vec())
+                .unwrap_or_else(|| vec![None; 24]),
         });
     }
     Ok(Json(rows))

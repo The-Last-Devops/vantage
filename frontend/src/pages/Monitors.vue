@@ -37,8 +37,8 @@ const nsMonitors = computed(() =>
 const shown = computed(() => (downOnly.value ? nsMonitors.value.filter((m) => m.enabled && m.up === false) : nsMonitors.value))
 // Uptime % over the last 24h, computed server-side (null if no beats in window).
 const upPct = (m) => (m.uptime_24h == null ? null : Math.round(m.uptime_24h))
-// How much wall-clock the recent-beats window covers (count × interval).
-const windowSecs = (m) => (m.recent?.length || 0) * (m.interval_secs || 60)
+// Whether the 24h trend has at least one real beat (else show "no checks").
+const hasTrend = (m) => (m.trend_24h || []).some((u) => u != null)
 
 const stats = computed(() => {
   let up = 0, down = 0, paused = 0, warn = 0
@@ -218,11 +218,13 @@ onUnmounted(() => clearInterval(timer))
             <span v-else class="font-mono text-sm text-faint">—</span>
           </template>
           <template #cell-history="{ row }">
-            <span class="flex items-center gap-2" v-tip="row.recent?.length ? `Last ${row.recent.length} checks · spans ~${fmtDur(windowSecs(row))}` : 'No checks yet'">
+            <span class="flex items-center gap-2" v-tip="'Last 24 hours · 1 bar = 1 hour'">
               <span class="flex items-end gap-px">
-                <span v-for="(u, i) in (row.recent || []).slice(-24)" :key="i" class="h-3.5 w-1 rounded-sm" :class="u ? 'bg-ok' : 'bg-down'"></span>
+                <span v-for="(u, i) in (row.trend_24h || [])" :key="i" class="h-3.5 w-1 rounded-sm"
+                  :class="u == null ? 'bg-line' : u ? 'bg-ok' : 'bg-down'"
+                  v-tip="`${23 - i}h ago: ${u == null ? 'no data' : u ? 'up' : 'down'}`"></span>
               </span>
-              <span v-if="!row.recent?.length" class="text-micro text-faint">no checks</span>
+              <span v-if="!hasTrend(row)" class="text-micro text-faint">no checks</span>
             </span>
           </template>
           <template #row-actions="{ row }">
