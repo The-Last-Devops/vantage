@@ -17,6 +17,9 @@ RUN npm run build
 # 2) cargo-chef base
 FROM rust:1-bookworm AS chef
 ENV CARGO_NET_RETRY=10
+# openssl headers for the webauthn-rs (passkey) dependency's openssl-sys crate.
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
 WORKDIR /app
 
@@ -43,7 +46,7 @@ RUN cargo build --release -p vantage-hub && cp target/release/vantage-hub /usr/l
 
 FROM debian:bookworm-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/local/bin/vantage-hub /usr/local/bin/vantage-hub
 # Migrations are read at runtime via Migrator::new("migrations/...").

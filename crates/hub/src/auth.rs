@@ -197,6 +197,9 @@ pub struct LoginReq {
     /// TOTP code (or a backup code), required only when the account has 2FA enabled.
     #[serde(default)]
     pub totp_code: Option<String>,
+    /// A WebAuthn assertion (passkey) — the navigator.credentials.get() result.
+    #[serde(default)]
+    pub passkey_credential: Option<serde_json::Value>,
 }
 
 /// Login response: either `{ twofa_required: true }` (no session minted — the SPA must
@@ -221,16 +224,40 @@ pub async fn login(
 
     // Second factor (opt-in). If enabled, require a valid TOTP / backup code before a
     // session is minted; signal the SPA to collect one when it's missing.
-    if crate::api::is_enabled(&state.config, id)
+    let totp_on = crate::api::is_enabled(&state.config, id)
         .await
-        .map_err(internal)?
-    {
-        let code = req.totp_code.as_deref().unwrap_or("").trim().to_string();
-        if code.is_empty() {
-            return Ok((jar, Json(serde_json::json!({ "twofa_required": true }))));
-        }
-        if !crate::api::verify_login(&state, id, &code).await? {
-            return Err(StatusCode::UNAUTHORIZED);
+        .map_err(internal)?;
+    let passkey_on = crate::api::has_passkeys(&state.config, id)
+        .await
+        .map_err(internal)?;
+    if totp_on || passkey_on {
+        if let Some(cred_json) = req.passkey_credential.clone() {
+            // passkey assertion
+            let cred = serde_json::from_value(cred_json).map_err(|_| StatusCode::BAD_REQUEST)?;
+            if !crate::api::finish_login(&state, id, cred).await? {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        } else if let Some(code) = req
+            .totp_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+        {
+            // TOTP / backup code
+            if !totp_on || !crate::api::verify_login(&state, id, code).await? {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        } else {
+            // no factor supplied → tell the SPA what's available (+ a passkey challenge)
+            let passkey = crate::api::start_login(&state, id).await?;
+            return Ok((
+                jar,
+                Json(serde_json::json!({
+                    "twofa_required": true,
+                    "totp": totp_on,
+                    "passkey": passkey,
+                })),
+            ));
         }
     }
 

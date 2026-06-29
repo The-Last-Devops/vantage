@@ -24,6 +24,7 @@ mod masterkey;
 mod mcp;
 mod net_guard;
 mod notify;
+mod passkey;
 mod probe;
 mod rbac;
 mod selfupdate;
@@ -53,6 +54,8 @@ pub struct AppState {
     /// Application secret(s) wrapping the outer layer of every user's master key
     /// (the "pepper"). Loaded from `EXEC_APP_SECRET`; see `exec_crypto.rs`.
     pub app_secrets: std::sync::Arc<exec_crypto::AppSecrets>,
+    /// WebAuthn/passkey relying party + ceremony state (None if disabled). See `passkey.rs`.
+    pub passkey: std::sync::Arc<Option<passkey::PasskeyState>>,
 }
 
 #[tokio::main]
@@ -108,6 +111,13 @@ async fn main() -> Result<()> {
         .route("/api/me/2fa/start", post(api::twofa_start))
         .route("/api/me/2fa/enable", post(api::twofa_enable))
         .route("/api/me/2fa/disable", post(api::twofa_disable))
+        .route("/api/me/passkeys", get(api::list_passkeys))
+        .route("/api/me/passkeys/{id}", delete(api::delete_passkey))
+        .route("/api/me/passkeys/register/start", post(api::register_start))
+        .route(
+            "/api/me/passkeys/register/finish",
+            post(api::register_finish),
+        )
         // admin user provisioning + data management
         .route("/mcp", post(mcp::handle))
         .route("/api/pats", get(api::list_pats).post(api::create_pat))

@@ -23,9 +23,14 @@ export const useAuth = defineStore('auth', {
       } catch { this.user = null }
       this.ready = true
     },
-    async login(email, password, totpCode) {
-      const r = await api.post('/api/auth/login', { email, password, totp_code: totpCode })
-      if (r && r.twofa_required) return { twofaRequired: true } // need a 2FA code; no session yet
+    async login(email, password, opts = {}) {
+      const r = await api.post('/api/auth/login', {
+        email, password,
+        totp_code: opts.totpCode,
+        passkey_credential: opts.passkeyCredential,
+      })
+      // 2FA required → relay what's available (TOTP and/or a passkey challenge); no session yet
+      if (r && r.twofa_required) return { twofaRequired: true, totp: !!r.totp, passkey: r.passkey || null }
       this.user = r
       this.needsSetup = false
       return { twofaRequired: false }

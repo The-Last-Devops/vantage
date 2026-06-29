@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../stores/auth'
 import { passwordProblem } from '../lib/password'
+import { authenticate as webauthnAuthenticate } from '../lib/webauthn'
 
 const auth = useAuth()
 const route = useRoute()
@@ -13,8 +14,10 @@ const password = ref('')
 const confirm = ref('')
 const error = ref('')
 const busy = ref(false)
-const twofa = ref(false)   // second step: the account has 2FA, collect a code
+const twofa = ref(false)   // second step: the account has 2FA
 const totpCode = ref('')
+const hasTotp = ref(false)      // account has an authenticator
+const pkChallenge = ref(null)   // passkey assertion challenge, if the account has passkeys
 
 const setup = () => auth.needsSetup
 
@@ -33,8 +36,11 @@ async function submit() {
     if (setup()) {
       await auth.createAdmin(email.value, password.value)
     } else {
-      const res = await auth.login(email.value, password.value, twofa.value ? totpCode.value : undefined)
-      if (res.twofaRequired) { twofa.value = true; busy.value = false; return } // show the code step
+      const res = await auth.login(email.value, password.value, twofa.value ? { totpCode: totpCode.value } : {})
+      if (res.twofaRequired) { // show the 2FA step (TOTP code and/or passkey)
+        twofa.value = true; hasTotp.value = res.totp; pkChallenge.value = res.passkey
+        busy.value = false; return
+      }
     }
     router.push(route.query.next || { name: 'systems' })
   } catch (e) {
@@ -42,6 +48,21 @@ async function submit() {
       ? 'Could not create admin (maybe one already exists)'
       : twofa.value ? 'Invalid or expired code'
       : e.status === 401 ? 'Invalid email or password' : 'Login failed'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function usePasskey() {
+  if (!pkChallenge.value) return
+  error.value = ''; busy.value = true
+  try {
+    const cred = await webauthnAuthenticate(pkChallenge.value)
+    const res = await auth.login(email.value, password.value, { passkeyCredential: cred })
+    if (res.twofaRequired) { error.value = 'Passkey was not accepted'; return }
+    router.push(route.query.next || { name: 'systems' })
+  } catch (e) {
+    error.value = e?.name === 'NotAllowedError' ? 'Passkey cancelled or timed out' : 'Passkey sign-in failed'
   } finally {
     busy.value = false
   }
@@ -58,15 +79,22 @@ async function submit() {
 
       <form class="space-y-4 rounded-xl border border-line bg-surface p-7 shadow-2xl" @submit.prevent="submit">
         <div>
-          <h1 class="text-base font-semibold text-fg">{{ setup() ? 'Create admin account' : twofa ? 'Two-factor code' : 'Sign in' }}</h1>
+          <h1 class="text-base font-semibold text-fg">{{ setup() ? 'Create admin account' : twofa ? 'Two-factor authentication' : 'Sign in' }}</h1>
           <p class="mt-1 text-sm text-muted">
-            {{ setup() ? 'First run — set up the administrator account.' : twofa ? 'Enter the 6-digit code from your authenticator app.' : 'Monitor your fleet & services.' }}
+            {{ setup() ? 'First run — set up the administrator account.' : twofa ? 'Confirm it\'s you with a second factor.' : 'Monitor your fleet & services.' }}
           </p>
         </div>
 
-        <!-- step 2: 2FA code -->
+        <!-- step 2: 2FA (passkey and/or TOTP) -->
         <template v-if="twofa">
-          <label class="block text-sm">
+          <button v-if="pkChallenge" type="button" @click="usePasskey" :disabled="busy"
+            class="flex w-full items-center justify-center gap-2 rounded-lg border border-accent/50 bg-accent/10 px-4 py-2.5 font-semibold text-accent transition hover:bg-accent/20 disabled:opacity-50">
+            <VIcon name="shield" :size="16" /> Use a passkey
+          </button>
+          <div v-if="pkChallenge && hasTotp" class="flex items-center gap-3 text-xs text-faint">
+            <span class="h-px flex-1 bg-line"></span>or enter a code<span class="h-px flex-1 bg-line"></span>
+          </div>
+          <label v-if="hasTotp" class="block text-sm">
             <span class="text-muted">Authentication code</span>
             <input v-model="totpCode" inputmode="numeric" autocomplete="one-time-code" autofocus placeholder="123456"
               class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-center font-mono text-lg tracking-[0.3em] text-fg outline-none transition focus:border-accent" />
@@ -99,11 +127,11 @@ async function submit() {
 
         <p v-if="error" class="text-sm text-red-500">{{ error }}</p>
 
-        <button type="submit" :disabled="busy"
+        <button v-if="!twofa || hasTotp" type="submit" :disabled="busy"
           class="w-full rounded-lg bg-accent px-4 py-2.5 font-semibold text-accentfg transition hover:opacity-90 disabled:opacity-50">
           {{ busy ? 'Working…' : setup() ? 'Create account' : twofa ? 'Verify' : 'Sign in' }}
         </button>
-        <button v-if="twofa" type="button" @click="twofa = false; totpCode = ''; error = ''"
+        <button v-if="twofa" type="button" @click="twofa = false; totpCode = ''; pkChallenge = null; hasTotp = false; error = ''"
           class="w-full text-center text-xs text-muted hover:text-fg">← Back</button>
 
         <p v-if="!setup()" class="text-center text-xs text-faint">No public registration — accounts are provisioned by an admin.</p>

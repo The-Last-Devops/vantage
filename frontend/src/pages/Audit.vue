@@ -108,24 +108,24 @@ const filtered = computed(() => !!(q.value.trim() || method.value || status.valu
       <template v-else>
         <div class="overflow-hidden rounded-xl border border-line bg-surface">
           <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead><tr class="border-b border-line text-left text-[11px] uppercase tracking-wider text-faint">
-                <th class="px-4 py-3 font-medium">When</th>
-                <th class="px-4 py-3 font-medium">User</th>
-                <th class="px-4 py-3 font-medium">Action</th>
-                <th class="px-4 py-3 font-medium">Object</th>
-                <th class="px-4 py-3 font-medium">Endpoint</th>
-                <th class="px-4 py-3 font-medium text-right">Result</th>
+            <table class="w-full table-fixed text-xs">
+              <thead><tr class="border-b border-line text-left text-[10px] uppercase tracking-wider text-faint">
+                <th class="w-[150px] px-3 py-2 font-medium">When</th>
+                <th class="w-[180px] px-3 py-2 font-medium">User</th>
+                <th class="w-[150px] px-3 py-2 font-medium">Action</th>
+                <th class="w-[160px] px-3 py-2 font-medium">Object</th>
+                <th class="px-3 py-2 font-medium">Endpoint</th>
+                <th class="w-[64px] px-3 py-2 font-medium text-right">Result</th>
               </tr></thead>
               <tbody>
-                <tr v-if="!rows.length"><td colspan="6" class="px-4 py-10 text-center text-muted">{{ filtered ? 'No actions match these filters.' : 'No actions logged yet.' }}</td></tr>
+                <tr v-if="!rows.length"><td colspan="6" class="px-3 py-10 text-center text-muted">{{ filtered ? 'No actions match these filters.' : 'No actions logged yet.' }}</td></tr>
                 <tr v-for="(r, i) in decorated" :key="i" class="border-b border-line/60 last:border-0 hover:bg-surface2/50">
-                  <td class="whitespace-nowrap px-4 py-2.5 tabular-nums text-muted">{{ fmt(r.at) }}</td>
-                  <td class="px-4 py-2.5 text-fg">{{ r.user_email || '—' }}</td>
-                  <td class="whitespace-nowrap px-4 py-2.5 font-medium" :class="methodColor(r.method)">{{ r.label }}</td>
-                  <td class="px-4 py-2.5 text-fg">{{ r.object_name || '—' }}</td>
-                  <td class="px-4 py-2.5 font-mono text-[11px] text-faint" v-tip="r.path">{{ r.path }}</td>
-                  <td class="px-4 py-2.5 text-right tabular-nums" :class="statusColor(r.status)">{{ r.status }}</td>
+                  <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted">{{ fmt(r.at) }}</td>
+                  <td class="truncate px-3 py-1.5 text-fg" v-tip="r.user_email || ''">{{ r.user_email || '—' }}</td>
+                  <td class="whitespace-nowrap px-3 py-1.5 font-medium" :class="methodColor(r.method)">{{ r.label }}</td>
+                  <td class="truncate px-3 py-1.5 text-fg" v-tip="r.object_name || ''">{{ r.object_name || '—' }}</td>
+                  <td class="truncate px-3 py-1.5 font-mono text-[11px] text-faint" v-tip="r.path">{{ r.path }}</td>
+                  <td class="px-3 py-1.5 text-right tabular-nums" :class="statusColor(r.status)">{{ r.status }}</td>
                 </tr>
               </tbody>
             </table>

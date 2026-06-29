@@ -6,6 +6,7 @@
 import { ref, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import { api } from '../lib/api'
+import { register as webauthnRegister, supported as webauthnSupported } from '../lib/webauthn'
 
 // which section is expanded ('' = all collapsed)
 const open = ref('')
@@ -87,6 +88,40 @@ async function disableTfa() {
   } catch (e) {
     tfaErr.value = e.status === 401 ? 'Wrong password.' : `Failed (${e.status || 'error'}).`
   } finally { tfaBusy.value = false }
+}
+
+// ---- passkeys (WebAuthn second factor) ----
+const passkeys = ref([])
+const pkErr = ref('')
+const pkBusy = ref(false)
+const addingPk = ref(false)
+const pkName = ref('')
+
+async function loadPasskeys() { try { passkeys.value = await api.get('/api/me/passkeys') } catch { passkeys.value = [] } }
+onMounted(loadPasskeys)
+
+async function addPasskey() {
+  pkErr.value = ''
+  const name = pkName.value.trim()
+  if (!name) { pkErr.value = 'Give the passkey a name.'; return }
+  if (!webauthnSupported()) { pkErr.value = 'This browser does not support passkeys.'; return }
+  pkBusy.value = true
+  try {
+    const opts = await api.post('/api/me/passkeys/register/start')
+    const credential = await webauthnRegister(opts)
+    await api.post('/api/me/passkeys/register/finish', { name, credential })
+    addingPk.value = false; pkName.value = ''
+    await loadPasskeys()
+  } catch (e) {
+    pkErr.value = e?.name === 'NotAllowedError' ? 'Cancelled or timed out.'
+      : e.status === 503 ? 'Passkeys are not configured on this server.'
+      : `Couldn't register (${e.status || e.name || 'error'}).`
+  } finally { pkBusy.value = false }
+}
+async function deletePasskey(id) {
+  pkErr.value = ''
+  try { await api.del(`/api/me/passkeys/${id}`); await loadPasskeys() }
+  catch (e) { pkErr.value = `Couldn't remove (${e.status || 'error'}).` }
 }
 </script>
 
@@ -197,6 +232,49 @@ async function disableTfa() {
             <button :disabled="tfaBusy || !tfaLoaded" @click="startEnroll"
               class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">Set up authenticator</button>
           </template>
+        </div>
+      </section>
+
+      <!-- PASSKEYS -->
+      <section class="overflow-hidden rounded-xl border border-line bg-surface">
+        <button @click="toggle('passkeys')" class="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-surface2">
+          <VIcon name="shield" :size="18" class="shrink-0" :class="passkeys.length ? 'text-ok' : 'text-muted'" />
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="text-h2 font-semibold text-fg">Passkeys</span>
+              <span v-if="passkeys.length" class="rounded-full bg-ok/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ok">{{ passkeys.length }}</span>
+            </div>
+            <div class="text-xs text-muted">Sign in with Touch ID / Windows Hello / a security key as a second factor.</div>
+          </div>
+          <VIcon name="chevron" :size="16" class="shrink-0 text-faint transition-transform" :class="open === 'passkeys' ? 'rotate-90' : ''" />
+        </button>
+        <div v-show="open === 'passkeys'" class="border-t border-line px-5 py-4">
+          <p v-if="pkErr" class="mb-3 text-xs text-rose-400">{{ pkErr }}</p>
+          <ul v-if="passkeys.length" class="mb-3 divide-y divide-line/60 overflow-hidden rounded-lg border border-line">
+            <li v-for="p in passkeys" :key="p.id" class="flex items-center gap-3 px-3 py-2.5">
+              <VIcon name="shield" :size="15" class="shrink-0 text-faint" />
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm text-fg">{{ p.name }}</div>
+                <div class="text-[11px] text-faint">Added {{ p.created_at?.slice(0, 10) }}</div>
+              </div>
+              <button @click="deletePasskey(p.id)" v-tip="'Remove passkey'"
+                class="grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-surface2 hover:text-rose-400"><VIcon name="trash" :size="15" /></button>
+            </li>
+          </ul>
+          <p v-else class="mb-3 text-xs text-faint">No passkeys yet.</p>
+
+          <div v-if="addingPk" class="flex max-w-sm flex-wrap items-end gap-2">
+            <label class="block flex-1">
+              <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-faint">Passkey name</span>
+              <input v-model="pkName" placeholder="MacBook Touch ID" autofocus @keyup.enter="addPasskey"
+                class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
+            </label>
+            <button :disabled="pkBusy" @click="addPasskey"
+              class="rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ pkBusy ? 'Waiting…' : 'Register' }}</button>
+            <button :disabled="pkBusy" @click="addingPk = false; pkName = ''" class="rounded-lg px-3 py-2.5 text-sm text-muted hover:text-fg">Cancel</button>
+          </div>
+          <button v-else @click="addingPk = true; pkErr = ''"
+            class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Add passkey</button>
         </div>
       </section>
 

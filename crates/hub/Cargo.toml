@@ -64,5 +64,6 @@ lettre = { version = "0.11", default-features = false, features = [
     "builder",
     "hostname",
 ] }
-webauthn_rp = { version = "0.3.0", features = ["serde_relaxed", "serializable_server_state"] }
 qrcode = { version = "0.14.1", default-features = false }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation"] }
+url = "2.5.8"

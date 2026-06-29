@@ -38,6 +38,7 @@ pub async fn connect() -> Result<AppState> {
         tunnels: crate::tunnel::TunnelRegistry::new(),
         exec_tickets: crate::console::ExecTickets::new(),
         app_secrets: std::sync::Arc::new(app_secrets),
+        passkey: std::sync::Arc::new(crate::passkey::PasskeyState::from_env()),
     })
 }
 
