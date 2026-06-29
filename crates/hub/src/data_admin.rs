@@ -341,13 +341,14 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
 
 /// Current cap config (from the config DB) + live Data-DB usage.
 pub async fn cap_status(config: &PgPool, data: &PgPool) -> CapStatus {
-    let (limit_bytes, enabled) =
-        sqlx::query_as::<_, (i64, bool)>("SELECT limit_bytes, enabled FROM data_cap WHERE id")
-            .fetch_optional(config)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or((10_737_418_240, false));
+    let (limit_bytes, enabled) = sqlx::query_as::<_, (i64, bool)>(
+        "SELECT data_cap_limit_bytes, data_cap_enabled FROM app_settings WHERE id = 1",
+    )
+    .fetch_optional(config)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or((10_737_418_240, false));
     CapStatus {
         limit_bytes,
         used_bytes: db_size_bytes(data).await,
@@ -364,12 +365,14 @@ pub async fn set_data_cap(config: &PgPool, limit_bytes: i64, enabled: bool) -> R
     if !(CAP_MIN..=CAP_MAX).contains(&limit_bytes) {
         return Err("limit out of range".into());
     }
-    sqlx::query("UPDATE data_cap SET limit_bytes = $1, enabled = $2 WHERE id")
-        .bind(limit_bytes)
-        .bind(enabled)
-        .execute(config)
-        .await
-        .map_err(|e| e.to_string())?;
+    sqlx::query(
+        "UPDATE app_settings SET data_cap_limit_bytes = $1, data_cap_enabled = $2 WHERE id = 1",
+    )
+    .bind(limit_bytes)
+    .bind(enabled)
+    .execute(config)
+    .await
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -402,13 +405,13 @@ pub fn spawn_enforce(config: PgPool, data: PgPool) {
 /// freed, or a safety floor (~50 drops) is hit. Never touches the config DB; only ever
 /// calls `drop_chunks` on the Data DB's hypertables. No-op when disabled.
 pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
-    let Some((limit, enabled)) =
-        sqlx::query_as::<_, (i64, bool)>("SELECT limit_bytes, enabled FROM data_cap WHERE id")
-            .fetch_optional(config)
-            .await
-            .ok()
-            .flatten()
-    else {
+    let Some((limit, enabled)) = sqlx::query_as::<_, (i64, bool)>(
+        "SELECT data_cap_limit_bytes, data_cap_enabled FROM app_settings WHERE id = 1",
+    )
+    .fetch_optional(config)
+    .await
+    .ok()
+    .flatten() else {
         return;
     };
     if !enabled {

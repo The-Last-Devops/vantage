@@ -1,8 +1,7 @@
 -- Optional hard cap on the Data DB size, with auto-eviction of the oldest chunks.
--- Single-row table (the CHECK + boolean PK enforce exactly one row).
-CREATE TABLE data_cap (
-    id boolean PRIMARY KEY DEFAULT true CHECK (id),
-    limit_bytes bigint NOT NULL DEFAULT 10737418240,  -- 10 GB
-    enabled boolean NOT NULL DEFAULT false
-);
-INSERT INTO data_cap (id) VALUES (true) ON CONFLICT DO NOTHING;
+-- Lives on the singleton app_settings row (id=1), alongside the other hub-wide
+-- settings (s3, backup, audit_retention_days) — no separate table needed.
+ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS data_cap_limit_bytes bigint NOT NULL DEFAULT 10737418240;  -- 10 GB
+ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS data_cap_enabled boolean NOT NULL DEFAULT false;
+-- Drop the earlier standalone table if a dev DB already ran the first version.
+DROP TABLE IF EXISTS data_cap;
