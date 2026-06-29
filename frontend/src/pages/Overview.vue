@@ -1,16 +1,13 @@
 <script setup>
-// Overview / Dashboard — attention-first landing that summarises the whole estate:
-// open incidents lead, then KPIs across infra + services + alerts, then the recent
-// event stream and the fleet CPU trend. Aggregates across all selected namespaces
-// (?ns=a,b; empty = all), like Systems.vue.
+// Overview / Dashboard (Rancher-style): basic estate info up top — summary counters,
+// capacity bars, and a "needs attention" banner — then the recent events as a paged,
+// length-capped table at the bottom. Aggregates across selected namespaces (?ns=).
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
 import IncidentList from '../components/IncidentList.vue'
-import EventStream from '../components/EventStream.vue'
-import FleetCharts from '../components/FleetCharts.vue'
-import VIcon from '../components/VIcon.vue'
+import StatePill from '../components/StatePill.vue'
 import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
 import { online, hostState, worstReason, ago, pct, DEFAULT_THR } from '../lib/triage'
@@ -20,17 +17,17 @@ const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boole
 const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
 
 const systems = ref([])
-const monitors = ref([]) // service checks
-const events = ref([]) // recent service status changes
-const thresholds = ref({}) // namespace name -> thresholds
+const monitors = ref([])
+const events = ref([])
+const thresholds = ref({})
 const namespaces = ref([])
-const alerts = ref([]) // firing alert rows across selected namespaces
-const fleet = ref(null)
+const alerts = ref([])
 let timer = null
 
 const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
 const hosts = computed(() => systems.value.filter(inNs))
 const nsMonitors = computed(() => monitors.value.filter(inNs))
+const monName = computed(() => { const m = {}; for (const x of monitors.value) m[x.id] = x.name; return m })
 function avg(arr, f) { const v = arr.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null }
 
 const summary = computed(() => {
@@ -41,41 +38,39 @@ const summary = computed(() => {
     if (st === 'down') down++
     else if (st === 'warn') warn++
   }
+  const onl = hosts.value.filter(online)
   return {
     total: hosts.value.length, up, down, warn,
-    cpu: avg(hosts.value.filter(online), (s) => s.cpu_percent),
+    cpu: avg(onl, (s) => s.cpu_percent),
+    mem: avg(onl, (s) => pct(s.mem_used, s.mem_total)),
+    disk: avg(onl, (s) => pct(s.disk_used, s.disk_total)),
   }
 })
-
-// Service summary (a check is "active" unless paused/disabled).
 const svc = computed(() => {
   let active = 0, up = 0, down = 0
-  for (const m of nsMonitors.value) {
-    if (!m.enabled) continue
-    active++
-    if (m.up === true) up++
-    else if (m.up === false) down++
-  }
+  for (const m of nsMonitors.value) { if (!m.enabled) continue; active++; if (m.up === true) up++; else if (m.up === false) down++ }
   return { active, up, down }
 })
-
 const firing = computed(() => alerts.value.filter((a) => a.enabled && a.firing === true))
 
-// Incidents = each down/warn host + each down service + each firing alert.
+// capacity bar tone by threshold (<70 ok / 70-90 warn / >90 down)
+const capTone = (v) => (v == null ? 'bg-track' : v > 90 ? 'bg-down' : v >= 70 ? 'bg-warn' : 'bg-ok')
+const capacity = computed(() => [
+  { k: 'CPU', v: summary.value.cpu },
+  { k: 'Memory', v: summary.value.mem },
+  { k: 'Disk', v: summary.value.disk },
+])
+
 const incidents = computed(() => {
   const out = []
   for (const s of hosts.value) {
     const st = hostState(s, thrOf(s))
     if (st === 'ok') continue
-    const reason = online(s)
-      ? `${worstReason(s, thrOf(s)) || 'over threshold'} · ${ago(s.last_seen)}`
-      : `offline · ${ago(s.last_seen)}`
+    const reason = online(s) ? `${worstReason(s, thrOf(s)) || 'over threshold'} · ${ago(s.last_seen)}` : `offline · ${ago(s.last_seen)}`
     out.push({ id: 'h:' + s.id, tone: st, host: s.name, reason, ns: s.namespace, systemId: s.id })
   }
   for (const m of nsMonitors.value) {
-    if (m.enabled && m.up === false) {
-      out.push({ id: 'm:' + m.id, tone: 'down', host: m.name, reason: 'service check down', ns: m.namespace, systemId: null })
-    }
+    if (m.enabled && m.up === false) out.push({ id: 'm:' + m.id, tone: 'down', host: m.name, reason: 'service check down', ns: m.namespace, systemId: null })
   }
   for (const a of firing.value) {
     const dur = a.since ? ' · ' + ago(a.since) : ''
@@ -83,7 +78,6 @@ const incidents = computed(() => {
   }
   return out.sort((x, y) => (x.tone === y.tone ? x.host.localeCompare(y.host) : x.tone === 'down' ? -1 : 1))
 })
-
 const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
 function condText(a) {
   const c = a.condition || {}
@@ -93,70 +87,41 @@ function condText(a) {
   return 'alert'
 }
 
-// ---- recent service events (reuses Monitors' shaping) ----
+// ---- events table (length-capped + paged) ----
 const shownEvents = computed(() => {
   if (!selectedNs.value.length) return events.value
   const ids = new Set(nsMonitors.value.map((m) => m.id))
   return events.value.filter((e) => ids.has(e.monitor_id))
 })
-const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-const evMessage = (e) => e.message || (e.up ? 'Recovered' : 'Down')
-const fmtDur = (s) => {
-  s = Math.max(0, Math.round(s))
-  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
-  if (d) return `${d}d ${h}h`
-  if (h) return `${h}h ${m}m`
-  if (m) return `${m}m ${sec}s`
-  return `${sec}s`
-}
-const stateDur = (i) => {
-  const list = shownEvents.value
-  const start = new Date(list[i].at).getTime()
-  for (let j = i - 1; j >= 0; j--) {
-    if (list[j].monitor_id === list[i].monitor_id)
-      return { secs: (new Date(list[j].at).getTime() - start) / 1000, ongoing: false }
-  }
-  return { secs: (Date.now() - start) / 1000, ongoing: true }
-}
-
-// ---- fleet avg CPU trend (24h) ----
-const FSPAN = 86400
-const trendCharts = computed(() => {
-  const f = fleet.value
-  if (!f || !f.t || !f.t.length) return []
-  const visible = new Set(hosts.value.map((s) => s.name))
-  const series = (f.cpu || []).filter((s) => visible.has(s.name))
-  if (!series.length) return []
-  const data = f.t.map((_, i) => {
-    const vals = series.map((s) => s.data[i]).filter((v) => v != null)
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
-  })
-  return [{ title: 'Avg CPU · last 24h', unit: '%', series: [{ name: 'fleet avg', color: 'rgb(var(--accent))', data }] }]
+const PAGE = 8
+const evPage = ref(1)
+const evPages = computed(() => Math.max(1, Math.ceil(shownEvents.value.length / PAGE)))
+const evRows = computed(() => {
+  const p = Math.min(evPage.value, evPages.value)
+  return shownEvents.value.slice((p - 1) * PAGE, p * PAGE)
 })
+watch([() => route.query.ns, evPages], () => { if (evPage.value > evPages.value) evPage.value = 1 })
+const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 
 const { loaded, reload: load } = useCached({
   key: () => 'overview:' + selectedNs.value.join(','),
   load: async () => {
     const nss = namespaces.value
     const sel = selectedNs.value.length ? nss.filter((n) => selectedNs.value.includes(n.name)) : nss
-    const [sys, mons, evs, thr, fl, alertLists] = await Promise.all([
+    const [sys, mons, evs, thr, alertLists] = await Promise.all([
       api.get('/api/systems').catch(() => []),
       api.get('/api/monitors').catch(() => []),
       api.get('/api/events?range=7d').catch(() => []),
       api.get('/api/thresholds').catch(() => []),
-      api.get('/api/fleet?range=24h').catch(() => null),
       Promise.all(sel.map((n) =>
-        api.get(`/api/namespaces/${n.id}/alerts`)
-          .then((rows) => rows.map((x) => ({ ...x, namespace: n.name })))
-          .catch(() => []),
-      )),
+        api.get(`/api/namespaces/${n.id}/alerts`).then((rows) => rows.map((x) => ({ ...x, namespace: n.name }))).catch(() => []))),
     ])
     const tm = {}; for (const x of thr) tm[x.namespace] = x
     const seen = new Set()
     const al = alertLists.flat().filter((a) => !seen.has(a.id) && seen.add(a.id))
-    return { systems: sys, monitors: mons, events: evs, thresholds: tm, alerts: al, fleet: fl }
+    return { systems: sys, monitors: mons, events: evs, thresholds: tm, alerts: al }
   },
-  apply: (d) => { systems.value = d.systems; monitors.value = d.monitors; events.value = d.events; thresholds.value = d.thresholds; alerts.value = d.alerts; fleet.value = d.fleet },
+  apply: (d) => { systems.value = d.systems; monitors.value = d.monitors; events.value = d.events; thresholds.value = d.thresholds; alerts.value = d.alerts },
 })
 watch(() => route.query.ns, load)
 onMounted(async () => {
@@ -170,48 +135,78 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <AppShell title="Overview">
     <template #title-after>
-      <span class="text-xs text-muted">
-        {{ summary.total }} hosts · {{ svc.active }} services
-        <span v-if="summary.down" class="text-down"> · {{ summary.down }} down</span>
-        <span v-if="firing.length" class="text-down"> · {{ firing.length }} firing</span>
-      </span>
+      <span class="text-xs text-muted">{{ summary.total }} hosts · {{ svc.active }} services</span>
     </template>
 
     <PageLoader v-if="!loaded" />
     <div v-else class="space-y-5">
-      <!-- 1) Needs attention FIRST -->
-      <IncidentList :incidents="incidents" />
+      <!-- needs attention (only when there's something) -->
+      <IncidentList v-if="incidents.length" :incidents="incidents" />
 
-      <!-- 2) KPI strip — infra + services + alerts -->
-      <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <!-- BASIC INFO: summary counters -->
+      <section class="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div class="rounded-xl border border-line bg-surface p-4">
-          <div class="text-xs uppercase tracking-wider text-muted">Hosts up</div>
-          <div class="mt-1 font-mono text-metric font-extrabold tabular-nums text-ok">{{ summary.up }}<span class="text-h2 text-faint">/{{ summary.total }}</span></div>
+          <div class="flex items-baseline gap-2"><span class="font-mono text-metric font-extrabold tabular-nums text-fg">{{ summary.total }}</span><span v-if="summary.down" class="rounded bg-down/15 px-1.5 text-xs font-semibold text-down">{{ summary.down }} down</span></div>
+          <div class="mt-1 text-sm text-muted">Hosts <span class="text-faint">· {{ summary.up }} up</span></div>
         </div>
         <div class="rounded-xl border border-line bg-surface p-4">
-          <div class="text-xs uppercase tracking-wider text-muted">Services up</div>
-          <div class="mt-1 font-mono text-metric font-extrabold tabular-nums" :class="svc.down ? 'text-down' : 'text-ok'">{{ svc.up }}<span class="text-h2 text-faint">/{{ svc.active }}</span></div>
+          <div class="flex items-baseline gap-2"><span class="font-mono text-metric font-extrabold tabular-nums text-fg">{{ svc.active }}</span><span v-if="svc.down" class="rounded bg-down/15 px-1.5 text-xs font-semibold text-down">{{ svc.down }} down</span></div>
+          <div class="mt-1 text-sm text-muted">Services <span class="text-faint">· {{ svc.up }} up</span></div>
         </div>
         <div class="rounded-xl border p-4" :class="firing.length ? 'border-down/38 bg-down/12' : 'border-line bg-surface'">
-          <div class="text-xs uppercase tracking-wider text-muted">Alerts firing</div>
-          <div class="mt-1 font-mono text-metric font-extrabold tabular-nums" :class="firing.length ? 'text-down' : 'text-fg'">{{ firing.length }}</div>
+          <div class="font-mono text-metric font-extrabold tabular-nums" :class="firing.length ? 'text-down' : 'text-fg'">{{ firing.length }}</div>
+          <div class="mt-1 text-sm text-muted">Alerts firing</div>
         </div>
         <div class="rounded-xl border border-line bg-surface p-4">
-          <div class="text-xs uppercase tracking-wider text-muted">Avg CPU</div>
-          <div class="mt-1 font-mono text-metric font-extrabold tabular-nums text-fg">{{ summary.cpu ?? '—' }}<span class="text-h2 text-faint">%</span></div>
+          <div class="font-mono text-metric font-extrabold tabular-nums text-fg">{{ namespaces.length }}</div>
+          <div class="mt-1 text-sm text-muted">Namespaces</div>
         </div>
       </section>
 
-      <!-- 3) Recent events + fleet trend -->
-      <section class="grid gap-5 lg:grid-cols-2">
-        <EventStream :events="shownEvents" :ev-time="evTime" :ev-message="evMessage" :state-dur="stateDur" :fmt-dur="fmtDur" class="h-fit" />
-        <div class="h-fit rounded-xl border border-line bg-surface p-4">
-          <div class="mb-2 flex items-center gap-2">
-            <VIcon name="metrics" :size="16" class="text-muted" />
-            <h2 class="text-h2 font-semibold text-fg">Fleet trend</h2>
+      <!-- BASIC INFO: capacity -->
+      <section class="rounded-xl border border-line bg-surface p-4">
+        <h2 class="mb-3 text-h2 font-semibold text-fg">Capacity</h2>
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div v-for="c in capacity" :key="c.k">
+            <div class="flex items-baseline justify-between text-sm"><span class="text-muted">{{ c.k }}</span><span class="font-mono tabular-nums text-fg">{{ c.v ?? '—' }}<span class="text-faint">%</span></span></div>
+            <div class="mt-1.5 h-2 overflow-hidden rounded bg-track"><div class="h-full rounded" :class="capTone(c.v)" :style="{ width: (c.v ?? 0) + '%' }"></div></div>
           </div>
-          <FleetCharts v-if="trendCharts.length" :charts="trendCharts" :time="fleet?.t || []" :span-seconds="FSPAN" sync-key="overview-trend" />
-          <p v-else class="py-6 text-center text-xs text-muted">No metrics yet.</p>
+        </div>
+      </section>
+
+      <!-- EVENTS: length-capped + paged table -->
+      <section class="overflow-hidden rounded-xl border border-line bg-surface">
+        <div class="flex items-center gap-2 border-b border-line2 bg-head px-4 py-2.5">
+          <h2 class="text-h2 font-semibold text-fg">Events</h2>
+          <span class="font-mono text-xs text-faint">{{ shownEvents.length }} in 7d</span>
+          <RouterLink :to="{ name: 'events', query: route.query.ns ? { ns: route.query.ns } : {} }" class="ml-auto text-sm text-accent hover:underline">Full events list →</RouterLink>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full border-collapse text-sm">
+            <thead>
+              <tr class="border-b border-line2 bg-head text-xs uppercase tracking-wide text-fg">
+                <th class="px-4 py-2 text-left font-extrabold">Status</th>
+                <th class="px-4 py-2 text-left font-extrabold">Service</th>
+                <th class="px-4 py-2 text-left font-extrabold">Message</th>
+                <th class="px-4 py-2 text-right font-extrabold">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="!shownEvents.length"><td colspan="4" class="px-4 py-10 text-center text-muted">No events.</td></tr>
+              <tr v-for="(e, i) in evRows" :key="e.id || i" class="border-b border-line last:border-0 hover:bg-hover">
+                <td class="px-4 py-2.5"><StatePill :tone="e.up ? 'ok' : 'down'" :label="e.up ? 'Up' : 'Down'" /></td>
+                <td class="px-4 py-2.5 font-mono text-accent">{{ monName[e.monitor_id] || '—' }}</td>
+                <td class="px-4 py-2.5 text-fg">{{ e.message || (e.up ? 'Recovered' : 'Down') }}</td>
+                <td class="px-4 py-2.5 text-right font-mono tabular-nums text-faint">{{ evTime(e.at) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <!-- pagination -->
+        <div v-if="evPages > 1" class="flex items-center justify-end gap-3 border-t border-line px-4 py-2.5 text-sm">
+          <span class="font-mono text-xs text-faint">Page {{ Math.min(evPage, evPages) }} / {{ evPages }}</span>
+          <button :disabled="evPage <= 1" @click="evPage = Math.max(1, evPage - 1)" class="rounded-lg border border-line2 bg-surface2 px-2.5 py-1 text-muted hover:text-fg disabled:opacity-40">Prev</button>
+          <button :disabled="evPage >= evPages" @click="evPage = Math.min(evPages, evPage + 1)" class="rounded-lg border border-line2 bg-surface2 px-2.5 py-1 text-muted hover:text-fg disabled:opacity-40">Next</button>
         </div>
       </section>
     </div>
