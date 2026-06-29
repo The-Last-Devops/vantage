@@ -148,16 +148,6 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <AppShell :title="downOnly ? 'Services — Down' : 'Services'">
     <template #title-after><span class="text-sm text-faint">{{ stats.total }} services<span v-if="stats.down" class="text-down"> · {{ stats.down }} down</span></span></template>
-    <template #actions>
-      <div class="relative">
-        <VIcon name="search" :size="15" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
-        <input v-model="q" type="search" placeholder="Search services…"
-          class="w-44 rounded-lg border border-line bg-surface2 py-1.5 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-56" />
-      </div>
-      <button @click="openCreate" class="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accentfg hover:opacity-90">
-        <VIcon name="plus" :size="16" /> Add service
-      </button>
-    </template>
     <PageLoader v-if="!loaded" />
     <div v-else class="space-y-5">
       <p v-if="err" class="rounded-lg border border-down/30 bg-down/10 px-3 py-2 text-sm text-down">{{ err }}</p>
@@ -181,6 +171,18 @@ onUnmounted(() => clearInterval(timer))
           <div class="mt-1 font-mono text-metric" :class="stats.avg == null ? 'text-faint' : stats.avg >= 99 ? 'text-ok' : stats.avg >= 90 ? 'text-warn' : 'text-down'">{{ stats.avg == null ? '—' : stats.avg + '%' }}</div>
           <div class="mt-0.5 text-micro text-faint">over recent checks</div>
         </div>
+      </div>
+
+      <!-- toolbar: search left, add right (mirrors Infrastructure) -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="relative">
+          <VIcon name="search" :size="15" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <input v-model="q" type="search" placeholder="Search services…"
+            class="w-56 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-72" />
+        </div>
+        <button @click="openCreate" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
+          <VIcon name="plus" :size="16" /> Add service
+        </button>
       </div>
 
       <!-- table + events side panel -->
