@@ -10,11 +10,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import AppShell from '../components/AppShell.vue'
 import { api } from '../lib/api'
 
 const route = useRoute()
 const router = useRouter()
 const id = computed(() => route.params.id)
+// preserve the namespace selection on the breadcrumb links
+const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
 const resolvedName = ref('') // host name looked up from /api/systems (precheck)
 const hostName = computed(() => route.query.name || resolvedName.value || `Host ${String(id.value).slice(0, 8)}…`)
 
@@ -153,7 +156,9 @@ function openSocket(ticket) {
   ensureTerm()
 
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const url = `${scheme}//${location.host}/api/systems/${id.value}/console?ticket=${encodeURIComponent(ticket)}`
+  // pass the fitted size so the PTY opens full-size (not a cramped 80x24)
+  const size = term?.cols ? `&cols=${term.cols}&rows=${term.rows}` : ''
+  const url = `${scheme}//${location.host}/api/systems/${id.value}/console?ticket=${encodeURIComponent(ticket)}${size}`
   ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
 
@@ -227,37 +232,37 @@ function back() { router.push(`/system/${id.value}`) }
 </script>
 
 <template>
-  <!-- Full-height console (h-[100dvh] per CLAUDE.md so mobile chrome doesn't hide the bottom).
-       Renders outside AppShell — a terminal wants the whole viewport. -->
-  <div class="flex h-[100dvh] flex-col bg-bg text-fg">
-    <!-- header bar -->
-    <div class="flex shrink-0 items-center gap-3 border-b border-line bg-surface px-4 py-2.5">
-      <button @click="back" class="rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" v-tip="'Back to host'">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-      </button>
-      <svg class="h-4 w-4 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 17 6-6-6-6M12 19h8"/></svg>
-      <span class="truncate text-sm font-semibold">{{ hostName }}</span>
-      <span class="text-xs text-faint">console</span>
-      <span v-if="phase === 'live'" class="flex items-center gap-1.5 text-xs text-accent"><span class="h-1.5 w-1.5 rounded-full bg-accent"></span>Connected</span>
-      <span v-else-if="phase === 'ended'" class="flex items-center gap-1.5 text-xs text-faint"><span class="h-1.5 w-1.5 rounded-full bg-faint"></span>Ended</span>
+  <!-- The console lives INSIDE the app content frame (nav/header stay visible) rather
+       than full-bleed. It's opened in a new browser tab from the host page. The panel
+       owns a bounded height so the terminal scrolls internally and htop/top fill it. -->
+  <AppShell
+    :title="hostName"
+    :breadcrumb="[
+      { label: 'Infrastructure', to: { name: 'systems', query: nsq } },
+      { label: hostName, to: { name: 'system', params: { id }, query: nsq } },
+      { label: 'Console' },
+    ]">
+    <template #header>
+      <span class="flex items-center gap-1.5 font-mono text-xs">
+        <span class="h-1.5 w-1.5 rounded-full" :class="phase === 'live' ? 'bg-accent' : 'bg-faint'"></span>
+        <span :class="phase === 'live' ? 'text-accent' : 'text-faint'">{{ phase === 'live' ? 'Connected' : phase === 'ended' ? 'Ended' : phase === 'connecting' ? 'Connecting…' : 'SSH' }}</span>
+      </span>
+    </template>
+    <template #actions>
+      <button v-if="phase === 'live'" @click="disconnect"
+        class="rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs text-muted hover:border-rose-400/50 hover:text-rose-400">Disconnect</button>
+      <button v-else-if="phase === 'ended'" @click="reconnect"
+        class="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accentfg hover:opacity-90">Reconnect</button>
+    </template>
 
-      <div class="ml-auto flex items-center gap-2">
-        <button v-if="phase === 'live'" @click="disconnect"
-          class="rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs text-muted hover:text-rose-400 hover:border-rose-400/50">Disconnect</button>
-        <button v-else-if="phase === 'ended'" @click="reconnect"
-          class="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accentfg hover:opacity-90">Reconnect</button>
-      </div>
-    </div>
-
-    <!-- body -->
-    <div class="relative min-h-0 flex-1">
+    <div class="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col overflow-hidden rounded-xl border border-line bg-bg">
       <!-- precheck loader -->
-      <div v-if="phase === 'precheck'" class="flex h-full items-center justify-center">
+      <div v-if="phase === 'precheck'" class="flex flex-1 items-center justify-center">
         <span class="text-sm text-muted">Loading…</span>
       </div>
 
       <!-- blocked states -->
-      <div v-else-if="phase === 'blocked'" class="flex h-full items-center justify-center p-6">
+      <div v-else-if="phase === 'blocked'" class="flex flex-1 items-center justify-center p-6">
         <div class="max-w-md rounded-xl border border-line bg-surface p-6 text-center">
           <p class="text-sm text-muted">{{ blockedReason }}</p>
           <button @click="back" class="mt-4 rounded-lg border border-line bg-surface2 px-4 py-2 text-sm text-fg hover:border-accent/50">Back to host</button>
@@ -265,7 +270,7 @@ function back() { router.push(`/system/${id.value}`) }
       </div>
 
       <!-- step-up auth modal: SSH user + (host password | key from library) -->
-      <div v-else-if="phase === 'auth'" class="flex h-full items-center justify-center p-6">
+      <div v-else-if="phase === 'auth'" class="flex flex-1 items-center justify-center p-6">
         <form @submit.prevent="connect" autocomplete="off" class="w-full max-w-sm rounded-xl border border-line bg-surface p-6">
           <!-- honeypot: soaks up Chrome's username+password autofill so it doesn't land
                in the SSH user / password fields below -->
@@ -322,9 +327,9 @@ function back() { router.push(`/system/${id.value}`) }
       </div>
 
       <!-- terminal (kept mounted for connecting/live/ended so xterm keeps its buffer) -->
-      <div v-show="['connecting', 'live', 'ended'].includes(phase)" class="h-full w-full bg-bg p-2">
+      <div v-show="['connecting', 'live', 'ended'].includes(phase)" class="min-h-0 flex-1 bg-bg p-2">
         <div ref="termEl" class="h-full w-full"></div>
       </div>
     </div>
-  </div>
+  </AppShell>
 </template>

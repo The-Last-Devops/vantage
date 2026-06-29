@@ -122,6 +122,21 @@ impl Handler for ConsoleHandler {
 #[derive(Deserialize)]
 pub struct ConsoleQuery {
     ticket: String,
+    /// Initial terminal size (from xterm's fit) so the PTY opens at the real size,
+    /// not a cramped 80x24. Live changes come over the socket as resize messages.
+    #[serde(default)]
+    cols: Option<u32>,
+    #[serde(default)]
+    rows: Option<u32>,
+}
+
+/// Parse a `{"resize":{"cols":C,"rows":R}}` control message into (cols, rows).
+fn parse_resize(txt: &str) -> Option<(u32, u32)> {
+    let v: serde_json::Value = serde_json::from_str(txt).ok()?;
+    let r = v.get("resize")?;
+    let c = r.get("cols")?.as_u64()? as u32;
+    let rw = r.get("rows")?.as_u64()? as u32;
+    ((20..=500).contains(&c) && (5..=300).contains(&rw)).then_some((c, rw))
 }
 
 /// `GET /api/systems/:id/console?ticket=…` — the console WebSocket. The ticket must
@@ -151,7 +166,9 @@ pub async fn console_ws(
     if rbac::require_exec(&state, &user, ns).await.is_err() {
         return StatusCode::FORBIDDEN.into_response();
     }
-    ws.on_upgrade(move |socket| run(state, ns, ticket, socket))
+    let cols = q.cols.unwrap_or(80).clamp(20, 500);
+    let rows = q.rows.unwrap_or(24).clamp(5, 300);
+    ws.on_upgrade(move |socket| run(state, ns, ticket, cols, rows, socket))
 }
 
 /// Record one transcript chunk (output only — see module docs).
@@ -167,7 +184,14 @@ async fn record(state: &AppState, session: Uuid, seq: &mut i32, data: &[u8]) {
     .await;
 }
 
-async fn run(state: AppState, ns: Uuid, t: ExecTicket, mut socket: WebSocket) {
+async fn run(
+    state: AppState,
+    ns: Uuid,
+    t: ExecTicket,
+    cols: u32,
+    rows: u32,
+    mut socket: WebSocket,
+) {
     // Open the audit session row up front (immutable record).
     let system_name: String = sqlx::query_scalar("SELECT name FROM systems WHERE id = $1")
         .bind(t.system_id)
@@ -203,7 +227,7 @@ async fn run(state: AppState, ns: Uuid, t: ExecTicket, mut socket: WebSocket) {
     };
     tracing::warn!(%system_name, user = %t.user_email, %session_id, "exec: console session opened");
 
-    let (status, err) = bridge(&state, session_id, &t, &mut socket).await;
+    let (status, err) = bridge(&state, session_id, &t, cols, rows, &mut socket).await;
     let _ = sqlx::query(
         "UPDATE exec_sessions SET ended_at = now(), status = $2, error = $3 WHERE id = $1",
     )
@@ -221,6 +245,8 @@ async fn bridge(
     state: &AppState,
     session_id: Uuid,
     t: &ExecTicket,
+    cols: u32,
+    rows: u32,
     socket: &mut WebSocket,
 ) -> (&'static str, Option<String>) {
     macro_rules! fail {
@@ -276,7 +302,7 @@ async fn bridge(
     };
     let chan_id = channel.id();
     if let Err(e) = channel
-        .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
+        .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
         .await
     {
         fail!(format!("PTY request failed: {e}"));
@@ -289,6 +315,9 @@ async fn bridge(
     // `channel` in the select is `wait()` — avoids a double-borrow.
     let mut channel = channel;
     let mut seq = 0i32;
+    // Pending PTY resize — applied just after the select so `channel` isn't borrowed by
+    // `wait()` at the same time (window_change is &self, wait is &mut self).
+    let mut pending_resize: Option<(u32, u32)> = None;
     loop {
         tokio::select! {
             from_browser = socket.recv() => match from_browser {
@@ -297,9 +326,10 @@ async fn bridge(
                         break;
                     }
                 }
-                Some(Ok(Message::Text(_txt))) => {
-                    // Live PTY resize is a follow-up; the PTY is fixed at the size
-                    // requested below. xterm still renders; wide TUIs may wrap.
+                Some(Ok(Message::Text(txt))) => {
+                    if let Some((c, r)) = parse_resize(&txt) {
+                        pending_resize = Some((c, r));
+                    }
                 }
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(_)) => {}
@@ -321,6 +351,11 @@ async fn bridge(
                 Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
                 Some(_) => {}
             },
+        }
+        // Apply a queued resize here (outside the select), so `channel` is free to take
+        // a &self borrow. A resize message wakes the select above, so this runs promptly.
+        if let Some((c, r)) = pending_resize.take() {
+            let _ = channel.window_change(c, r, 0, 0).await;
         }
     }
     let _ = handle

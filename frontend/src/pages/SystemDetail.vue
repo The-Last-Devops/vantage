@@ -216,11 +216,20 @@ async function loadMeta() { try { const all = await minLoad(api.get('/api/system
 const rules = ref([]) // alert rules covering this host (own + namespace-wide)
 const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
 async function loadRules() { try { rules.value = await api.get(`/api/systems/${id.value}/alerts`) } catch { rules.value = [] } }
-onMounted(() => { reload(); restartTimer(); loadMeta(); loadRules() })
+// shell status → drives the "Open console" button next to the status
+const shell = ref(null)
+const canConsole = computed(() => !!shell.value?.can_exec && !!shell.value?.tunnel_online)
+async function loadShell() { try { shell.value = await api.get(`/api/systems/${id.value}/shell`) } catch { shell.value = null } }
+function openConsole() {
+  // open the SSH console in a NEW browser tab (it renders inside the app frame there)
+  const href = router.resolve({ name: 'console', params: { id: id.value }, query: { ...nsq.value, name: name.value } }).href
+  window.open(href, '_blank', 'noopener')
+}
+onMounted(() => { reload(); restartTimer(); loadMeta(); loadRules(); loadShell() })
 onBeforeUnmount(() => clearInterval(timer))
 // reload only when the target or range changes — NOT when ?sel (metric selection)
 // changes, which would otherwise blank the charts and cause a flash
-watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer(); loadMeta(); loadRules() })
+watch(() => [route.params.id, type.value, range.value, name.value, parent.value].join('|'), () => { metrics.value = null; containersList.value = []; reload(); restartTimer(); loadMeta(); loadRules(); loadShell() })
 </script>
 
 <template>
@@ -228,6 +237,10 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
     <!-- status pill next to the header breadcrumb (the breadcrumb prop renders the trail) -->
     <template #header>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusDot"></span><span class="text-xs font-medium" :class="statusText">{{ statusLabel }}</span></span>
+      <button v-if="canConsole" @click="openConsole" v-tip="'Open an interactive SSH console'"
+        class="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-1 font-mono text-xs font-semibold text-accent hover:bg-accent/20">
+        <VIcon name="terminal" :size="13" /> SSH
+      </button>
     </template>
 
     <!-- first paint while metadata loads — never a blank content area -->

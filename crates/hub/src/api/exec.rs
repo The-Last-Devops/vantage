@@ -290,11 +290,10 @@ pub async fn console_ticket(
     Path(id): Path<Uuid>,
     Json(req): Json<TicketReq>,
 ) -> Result<Json<TicketResp>, StatusCode> {
-    let (ns, key_id, hostname, shell_enabled, ssh_port) = system_shell_row(&state, id).await?;
+    let (ns, key_id, hostname, _shell_enabled, ssh_port) = system_shell_row(&state, id).await?;
     rbac::require_exec(&state, &user, ns).await?;
-    if !shell_enabled {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    // (shell is always available now; access is gated by require_exec + step-up + the
+    // host's own SSH auth — the per-host enable/disable toggle was removed.)
     if !state.tunnels.has(key_id, &hostname).await {
         return Err(StatusCode::BAD_REQUEST); // agent offline
     }
