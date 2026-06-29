@@ -140,9 +140,6 @@ onUnmounted(() => clearInterval(timer))
 
     <PageLoader v-if="!loaded" />
     <div v-else class="space-y-5">
-      <!-- needs attention (only when there's something) -->
-      <IncidentList v-if="incidents.length" :incidents="incidents" />
-
       <!-- BASIC INFO: summary counters -->
       <section class="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div class="rounded-xl border border-line bg-surface p-4">
@@ -173,6 +170,9 @@ onUnmounted(() => clearInterval(timer))
           </div>
         </div>
       </section>
+
+      <!-- NEEDS ATTENTION — below the basics, height-capped so it can't take over -->
+      <IncidentList v-if="incidents.length" :incidents="incidents" scroll />
 
       <!-- EVENTS: length-capped + paged table -->
       <section class="overflow-hidden rounded-xl border border-line bg-surface">

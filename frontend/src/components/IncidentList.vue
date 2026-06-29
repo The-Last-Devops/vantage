@@ -13,6 +13,9 @@ const props = defineProps({
   incidents: { type: Array, default: () => [] }, // [{ id, tone, host, reason, ns, systemId }]
   // Hide the card chrome (header) — the parent supplies its own.
   bare: { type: Boolean, default: false },
+  // Cap the list height and scroll inside, so a long incident list can't take over
+  // the whole page (the header + count stay pinned above the scroll area).
+  scroll: { type: Boolean, default: false },
 })
 const router = useRouter()
 const count = computed(() => props.incidents.length)
@@ -40,7 +43,7 @@ function openConsole(inc) {
       <p class="text-xs text-muted">No hosts down and no alerts firing.</p>
     </div>
 
-    <ul v-else class="divide-y divide-line">
+    <ul v-else class="divide-y divide-line" :class="scroll ? 'max-h-[22rem] overflow-y-auto' : ''">
       <li v-for="inc in incidents" :key="inc.id"
         class="flex items-center gap-3 px-4 py-2.5" :class="RAIL[inc.tone] || RAIL.warn">
         <StatePill :tone="inc.tone" :label="inc.tone === 'down' ? 'Down' : 'Warn'" />
