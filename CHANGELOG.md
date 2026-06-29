@@ -9,6 +9,27 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.9] — 2026-06-29
+
+### Changed
+- **Login prioritises passkeys** — when you have a passkey registered and the browser
+  supports it, sign-in prompts the passkey automatically; the authenticator code and
+  button remain as a fallback.
+- **UI synced to the design system** — Inter is now the interface font and JetBrains
+  Mono is reserved for data (numbers, identifiers, timestamps, logs). Status colours use
+  semantic tokens so they flip correctly with the light/dark theme, and light-theme text
+  contrast is improved. No layout or spacing changes.
+- **Overview tidy-up** — slightly larger tile labels, and the Security tile now shares a
+  row with the admin system stats ("Account & system") instead of sitting alone on a
+  near-empty row.
+
+### Fixed
+- Clearer error when a passkey fails to register because `WEBAUTHN_RP_ID` /
+  `WEBAUTHN_ORIGIN` don't match the page's domain — it now tells you exactly what to set.
+- `PUBLIC_URL` is **auto-detected** from the incoming request (`X-Forwarded-Proto`/`Host`)
+  when unset, so the exposure self-check works behind a reverse proxy without manual
+  config. The relevant env vars are now wired into Docker Compose and the Helm chart.
+
 ## [2.3.8] — 2026-06-29
 
 ### Added
