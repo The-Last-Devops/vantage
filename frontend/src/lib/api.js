@@ -15,6 +15,9 @@ async function request(method, path, body) {
   if (!res.ok) {
     const err = new Error(`${method} ${path} → ${res.status}`)
     err.status = res.status
+    // Surface the server's plain-text reason (handlers may return a message body) so
+    // callers can show "Wrong password" vs "Bad key" instead of a generic error.
+    err.body = await res.text().catch(() => '')
     throw err
   }
   if (res.status === 204) return null

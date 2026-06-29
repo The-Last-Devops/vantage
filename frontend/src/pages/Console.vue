@@ -266,7 +266,11 @@ function back() { router.push(`/system/${id.value}`) }
 
       <!-- step-up auth modal: SSH user + (host password | key from library) -->
       <div v-else-if="phase === 'auth'" class="flex h-full items-center justify-center p-6">
-        <form @submit.prevent="connect" class="w-full max-w-sm rounded-xl border border-line bg-surface p-6">
+        <form @submit.prevent="connect" autocomplete="off" class="w-full max-w-sm rounded-xl border border-line bg-surface p-6">
+          <!-- honeypot: soaks up Chrome's username+password autofill so it doesn't land
+               in the SSH user / password fields below -->
+          <input type="text" name="username" autocomplete="username" class="hidden" tabindex="-1" aria-hidden="true" />
+          <input type="password" autocomplete="current-password" class="hidden" tabindex="-1" aria-hidden="true" />
           <p class="mb-1 text-sm font-semibold text-fg">Connect to {{ hostName }}</p>
           <p class="mb-4 text-xs text-muted">Choose how to authenticate this SSH session. Nothing typed here is stored.</p>
 
@@ -285,7 +289,7 @@ function back() { router.push(`/system/${id.value}`) }
           <!-- password method -->
           <label v-if="authMethod === 'password'" class="mt-3 block">
             <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-faint">SSH host password</span>
-            <input v-model="sshPassword" type="password" autocomplete="off"
+            <input v-model="sshPassword" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"
               class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
           </label>
 
@@ -302,7 +306,7 @@ function back() { router.push(`/system/${id.value}`) }
               </div>
               <label class="mt-3 block">
                 <span class="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-faint">Account password</span>
-                <input v-model="accountPassword" type="password" autocomplete="current-password"
+                <input v-model="accountPassword" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"
                   class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
                 <span class="mt-1 block text-[11px] text-faint">Unseals your chosen key — it can't be read without you.</span>
               </label>

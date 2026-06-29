@@ -26,19 +26,25 @@ const creating = ref(false)
 const err = ref('')
 const keyFile = ref(null)
 
-// Read a chosen key file into the textarea (the file never leaves the browser until
-// you submit; it's sealed under your password server-side like a pasted key).
+// Name of the uploaded key file, if any. When set we DON'T render the key text — a
+// private key shouldn't sit visible in the form; we just confirm it's loaded.
+const keyFileName = ref('')
+
+// Read a chosen key file into the (hidden) key field. The file never leaves the
+// browser until you submit; it's sealed under your password server-side.
 function onKeyFile(e) {
   const f = e.target.files?.[0]
   if (!f) return
   const r = new FileReader()
-  r.onload = () => { form.value.private_key = String(r.result || '').trim() }
+  r.onload = () => { form.value.private_key = String(r.result || '').trim(); keyFileName.value = f.name }
   r.readAsText(f)
   e.target.value = '' // allow re-picking the same file
 }
+function clearKey() { form.value.private_key = ''; keyFileName.value = '' }
 
 function openNew() {
   form.value = { name: '', private_key: '', password: '' }
+  keyFileName.value = ''
   err.value = ''
   modalOpen.value = true
 }
@@ -58,10 +64,11 @@ async function create() {
     modalOpen.value = false
     await load()
   } catch (e) {
-    err.value =
-      e.status === 409 ? 'A key with that name already exists.'
-      : e.status === 400 ? 'Invalid key, inputs, or wrong account password.'
-      : `Failed (${e.status}).`
+    // Prefer the server's specific reason (wrong password / bad key / dup name).
+    err.value = (e.body && e.body.trim())
+      || (e.status === 409 ? 'A key with that name already exists.'
+        : e.status === 400 ? 'Invalid key, inputs, or wrong account password.'
+        : `Failed (${e.status}).`)
   } finally {
     creating.value = false
   }
@@ -126,28 +133,40 @@ onMounted(load)
           <button @click="modalOpen = false" class="ml-auto rounded-lg p-1.5 text-muted hover:bg-surface2 hover:text-fg" aria-label="Close"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
 
-        <form @submit.prevent="create" class="space-y-4 p-5">
+        <form @submit.prevent="create" autocomplete="off" class="space-y-4 p-5">
+          <!-- honeypot: absorbs Chrome's "username + password" autofill so it doesn't
+               land in the real Name field (Chrome ignores autocomplete=off otherwise) -->
+          <input type="text" name="username" autocomplete="username" class="hidden" tabindex="-1" aria-hidden="true" />
+          <input type="password" autocomplete="current-password" class="hidden" tabindex="-1" aria-hidden="true" />
           <label class="block">
             <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Name</span>
-            <input v-model="form.name" placeholder="e.g. laptop-ed25519, prod-deploy"
+            <input v-model="form.name" name="key-label" placeholder="e.g. laptop-ed25519, prod-deploy"
               autocomplete="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true"
               class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
           </label>
           <div class="block">
             <div class="mb-1.5 flex items-center gap-2">
               <span class="text-[11px] font-semibold uppercase tracking-wide text-faint">Private key</span>
-              <button type="button" @click="keyFile?.click()" class="ml-auto inline-flex items-center gap-1 rounded-md border border-line2 bg-surface2 px-2 py-1 text-[11px] text-muted hover:text-fg">
+              <button v-if="!keyFileName" type="button" @click="keyFile?.click()" class="ml-auto inline-flex items-center gap-1 rounded-md border border-line2 bg-surface2 px-2 py-1 text-[11px] text-muted hover:text-fg">
                 <VIcon name="copy" :size="12" /> Upload file
               </button>
               <input ref="keyFile" type="file" class="hidden" @change="onKeyFile" />
             </div>
-            <textarea v-model="form.private_key" rows="6" spellcheck="false"
+            <!-- uploaded from a file: confirm it's loaded, but never display the key -->
+            <div v-if="keyFileName" class="flex items-center gap-2 rounded-lg border border-ok/30 bg-ok/10 px-3 py-2.5 text-sm">
+              <VIcon name="check-circle" :size="16" class="shrink-0 text-ok" />
+              <span class="min-w-0 flex-1 truncate font-mono text-fg">{{ keyFileName }}</span>
+              <span class="shrink-0 text-xs text-faint">loaded · hidden</span>
+              <button type="button" @click="clearKey" class="shrink-0 text-xs text-muted hover:text-down">Clear</button>
+            </div>
+            <!-- otherwise: paste -->
+            <textarea v-else v-model="form.private_key" rows="6" spellcheck="false"
               placeholder="Paste your private key, or use Upload file&#10;-----BEGIN OPENSSH PRIVATE KEY-----"
               class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 font-mono text-xs text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none"></textarea>
           </div>
           <label class="block">
             <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Account password</span>
-            <input v-model="form.password" type="password" autocomplete="current-password"
+            <input v-model="form.password" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"
               class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
           </label>
           <p class="text-[11px] text-faint">Your key is encrypted with your account password — it can't be read without you.</p>

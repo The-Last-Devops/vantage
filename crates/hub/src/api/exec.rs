@@ -135,26 +135,54 @@ pub async fn create_ssh_key(
     State(state): State<AppState>,
     user: CurrentUser,
     Json(req): Json<CreateKey>,
-) -> Result<Json<SshKeyRow>, StatusCode> {
+) -> Result<Json<SshKeyRow>, (StatusCode, String)> {
+    // Distinct messages so the user knows which input was wrong (the api helper now
+    // surfaces the body). `bad` = 400 with a reason.
+    let bad = |m: &str| (StatusCode::BAD_REQUEST, m.to_string());
+    let oops = |e: sqlx::Error| {
+        tracing::error!(error = %e, "ssh-key DB error");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Server error.".to_string(),
+        )
+    };
+
     let name = req.name.trim().to_string();
     if !valid_name(&name, 64) {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(bad("Give the key a name (1–64 characters)."));
     }
     if !crate::auth::verify_user_password(&state.config, user.id, &req.password)
         .await
-        .map_err(internal)?
+        .map_err(|e| {
+            tracing::error!(error = %e, "ssh-key password verify");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Server error.".to_string(),
+            )
+        })?
     {
-        return Err(StatusCode::BAD_REQUEST);
+        return Err(bad("Wrong account password."));
     }
-    let key = russh::keys::decode_secret_key(&req.private_key, None)
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let key = russh::keys::decode_secret_key(&req.private_key, None).map_err(|_| {
+        bad(
+            "Couldn't read that private key. It must be an unencrypted OpenSSH key \
+             (\"BEGIN OPENSSH PRIVATE KEY\"). Convert an old PEM/RSA key with: \
+             ssh-keygen -p -m RFC4716 -f <keyfile>, and remove any passphrase with \
+             ssh-keygen -p -N '' -f <keyfile>.",
+        )
+    })?;
     let fingerprint = key
         .clone_public_key()
         .map(|p| p.fingerprint())
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|_| bad("Couldn't derive the key's fingerprint."))?;
     let salt = exec_crypto::gen_salt();
     let key_enc =
-        exec_crypto::seal(&req.password, &salt, req.private_key.as_bytes()).map_err(internal)?;
+        exec_crypto::seal(&req.password, &salt, req.private_key.as_bytes()).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Encryption failed.".to_string(),
+            )
+        })?;
 
     let row = sqlx::query_as::<_, (Uuid, String)>(
         "INSERT INTO ssh_keys (user_id, name, key_enc, kdf_salt, key_fingerprint) \
@@ -168,14 +196,16 @@ pub async fn create_ssh_key(
     .fetch_one(&state.config)
     .await
     .map_err(|e| {
-        // Duplicate name within the user's library → 409, not a 500.
         if e.as_database_error()
             .map(|d| d.is_unique_violation())
             .unwrap_or(false)
         {
-            StatusCode::CONFLICT
+            (
+                StatusCode::CONFLICT,
+                "A key with that name already exists.".to_string(),
+            )
         } else {
-            internal(e)
+            oops(e)
         }
     })?;
 
