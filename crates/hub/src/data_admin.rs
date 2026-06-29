@@ -5,8 +5,10 @@
 //! Continuous aggregates can't be created inside a migration transaction, so we
 //! set them up at startup over the autocommit pool (idempotent, best-effort).
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
+use std::time::Duration;
 
 /// Best-effort downsampling setup. Errors (e.g. policy already exists) are logged
 /// and ignored so startup never fails on re-run.
@@ -188,11 +190,27 @@ fn unit_for(table: &str) -> &'static str {
     }
 }
 
+/// A plain relational DB's stats (used for the config DB — no hypertables/retention).
 #[derive(Serialize)]
-pub struct DataStats {
+pub struct DbStats {
+    pub db_size: String,
+    pub tables: Vec<TableStat>,
+}
+
+/// Hard-cap status for the Data DB. `used_bytes` is the live `pg_database_size`.
+#[derive(Serialize)]
+pub struct CapStatus {
+    pub limit_bytes: i64,
+    pub used_bytes: i64,
+    pub enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct DataDbStats {
     pub db_size: String,
     pub tables: Vec<TableStat>,
     pub retention: Vec<RetentionTier>,
+    pub cap: CapStatus,
 }
 
 async fn hypertable_stat(data: &PgPool, name: &str, label: &str) -> TableStat {
@@ -235,7 +253,7 @@ async fn retention_value(data: &PgPool, table: &str) -> Option<i64> {
     row.and_then(|(d,)| d)
 }
 
-pub async fn stats(data: &PgPool) -> DataStats {
+pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
     let db_size = sqlx::query_as::<_, (String,)>(
         "SELECT pg_size_pretty(pg_database_size(current_database()))",
     )
@@ -272,10 +290,181 @@ pub async fn stats(data: &PgPool) -> DataStats {
         });
     }
 
-    DataStats {
+    DataDbStats {
         db_size,
         tables,
         retention,
+        cap: cap_status(config, data).await,
+    }
+}
+
+/// Live size of the given database in bytes.
+async fn db_size_bytes(pool: &PgPool) -> i64 {
+    sqlx::query_as::<_, (i64,)>("SELECT pg_database_size(current_database())")
+        .fetch_one(pool)
+        .await
+        .map(|(n,)| n)
+        .unwrap_or(0)
+}
+
+/// Per-table stats for a plain relational DB (the config DB). Row counts are the
+/// planner's `reltuples` estimate (clamped — it's -1 before the first ANALYZE),
+/// which is plenty for a stats page and avoids a full count() per table.
+pub async fn config_stats(config: &PgPool) -> DbStats {
+    let db_size = sqlx::query_as::<_, (String,)>(
+        "SELECT pg_size_pretty(pg_database_size(current_database()))",
+    )
+    .fetch_one(config)
+    .await
+    .map(|(s,)| s)
+    .unwrap_or_else(|_| "—".into());
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid)) AS size, \
+                GREATEST(c.reltuples, 0)::bigint AS rows \
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = 'public' AND c.relkind = 'r' \
+         ORDER BY pg_total_relation_size(c.oid) DESC",
+    )
+    .fetch_all(config)
+    .await
+    .unwrap_or_default();
+    let tables = rows
+        .into_iter()
+        .map(|(name, size, r)| TableStat {
+            name,
+            size,
+            rows: r.max(0),
+        })
+        .collect();
+    DbStats { db_size, tables }
+}
+
+/// Current cap config (from the config DB) + live Data-DB usage.
+pub async fn cap_status(config: &PgPool, data: &PgPool) -> CapStatus {
+    let (limit_bytes, enabled) =
+        sqlx::query_as::<_, (i64, bool)>("SELECT limit_bytes, enabled FROM data_cap WHERE id")
+            .fetch_optional(config)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or((10_737_418_240, false));
+    CapStatus {
+        limit_bytes,
+        used_bytes: db_size_bytes(data).await,
+        enabled,
+    }
+}
+
+/// Cap bounds: 256 MiB .. 1 TiB.
+const CAP_MIN: i64 = 256 * 1024 * 1024;
+const CAP_MAX: i64 = 1024 * 1024 * 1024 * 1024;
+
+/// Update the Data-DB cap (config DB). `limit_bytes` must be within [256 MiB, 1 TiB].
+pub async fn set_data_cap(config: &PgPool, limit_bytes: i64, enabled: bool) -> Result<(), String> {
+    if !(CAP_MIN..=CAP_MAX).contains(&limit_bytes) {
+        return Err("limit out of range".into());
+    }
+    sqlx::query("UPDATE data_cap SET limit_bytes = $1, enabled = $2 WHERE id")
+        .bind(limit_bytes)
+        .bind(enabled)
+        .execute(config)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn human_bytes(n: i64) -> String {
+    const U: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < U.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    format!("{v:.1} {}", U[i])
+}
+
+/// Spawn the background cap enforcer: every 5 minutes, if the cap is enabled and the
+/// Data DB exceeds it, drop the oldest chunks until back under (or no progress).
+pub fn spawn_enforce(config: PgPool, data: PgPool) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            tick.tick().await;
+            enforce_cap(&config, &data).await;
+        }
+    });
+}
+
+/// One enforcement pass. Reads the cap from the config DB; if enabled and the Data DB
+/// is over its limit, drops the globally-oldest time chunks (every hypertable, oldest
+/// history first) until back under the limit, a chunk can't be found, no space is
+/// freed, or a safety floor (~50 drops) is hit. Never touches the config DB; only ever
+/// calls `drop_chunks` on the Data DB's hypertables. No-op when disabled.
+pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
+    let Some((limit, enabled)) =
+        sqlx::query_as::<_, (i64, bool)>("SELECT limit_bytes, enabled FROM data_cap WHERE id")
+            .fetch_optional(config)
+            .await
+            .ok()
+            .flatten()
+    else {
+        return;
+    };
+    if !enabled {
+        return;
+    }
+    let start = db_size_bytes(data).await;
+    if start <= limit {
+        return;
+    }
+    let mut used = start;
+    for _ in 0..50 {
+        if used <= limit {
+            break;
+        }
+        // Oldest chunk across ALL hypertables (oldest history first, any tier).
+        let oldest: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT hypertable_name, range_end FROM timescaledb_information.chunks \
+             ORDER BY range_end ASC LIMIT 1",
+        )
+        .fetch_optional(data)
+        .await
+        .ok()
+        .flatten();
+        let Some((ht, range_end)) = oldest else {
+            break; // nothing left to drop
+        };
+        if let Err(e) = sqlx::query("SELECT drop_chunks(format('%I', $1), older_than => $2)")
+            .bind(&ht)
+            .bind(range_end)
+            .execute(data)
+            .await
+        {
+            tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
+            break;
+        }
+        let after = db_size_bytes(data).await;
+        if after >= used {
+            break; // no progress (chunk freed nothing reclaimable yet) — avoid a tight loop
+        }
+        used = after;
+    }
+    if used < start {
+        let msg = format!(
+            "data cap eviction: freed {}, now {} / limit {}",
+            human_bytes(start - used),
+            human_bytes(used),
+            human_bytes(limit)
+        );
+        tracing::warn!("{msg}");
+        let _ = sqlx::query(
+            "INSERT INTO audit_log (user_email, method, path, status, object_name) \
+             VALUES ('system', 'EVICT', '/api/admin/data-cap', 200, $1)",
+        )
+        .bind(&msg)
+        .execute(config)
+        .await;
     }
 }
 

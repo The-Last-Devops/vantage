@@ -87,6 +87,7 @@ async fn main() -> Result<()> {
     probe::spawn(state.clone());
     alert::spawn(state.clone());
     backup::spawn(state.clone());
+    data_admin::spawn_enforce(state.config.clone(), state.data.clone()); // Data-DB cap eviction
     selfupdate::spawn(); // no-op unless on the :auto-update channel under k8s
 
     use axum::routing::{delete, patch, post, put};
@@ -136,6 +137,7 @@ async fn main() -> Result<()> {
         .route("/api/users/{id}/memberships", get(api::user_memberships))
         .route("/api/admin/data", get(api::data_stats))
         .route("/api/admin/retention", post(api::set_retention))
+        .route("/api/admin/data-cap", post(api::set_data_cap))
         // backup / restore (admin)
         .route("/api/admin/backup", get(backup::download))
         .route(

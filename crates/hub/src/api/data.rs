@@ -1,14 +1,45 @@
 use super::*;
 
-/// GET /api/admin/data — DB size, per-table size/rows, retention tiers.
+#[derive(Serialize)]
+pub struct DataPage {
+    data: crate::data_admin::DataDbStats,
+    config: crate::data_admin::DbStats,
+}
+
+/// GET /api/admin/data — both databases: the Data DB (hypertables + retention + cap)
+/// and the config DB (relational tables, read-only).
 pub async fn data_stats(
     State(state): State<AppState>,
     user: CurrentUser,
-) -> Result<Json<crate::data_admin::DataStats>, StatusCode> {
+) -> Result<Json<DataPage>, StatusCode> {
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    Ok(Json(crate::data_admin::stats(&state.data).await))
+    Ok(Json(DataPage {
+        data: crate::data_admin::data_stats(&state.config, &state.data).await,
+        config: crate::data_admin::config_stats(&state.config).await,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct SetCap {
+    pub limit_bytes: i64,
+    pub enabled: bool,
+}
+
+/// POST /api/admin/data-cap — set the Data DB size cap + auto-evict toggle.
+pub async fn set_data_cap(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(req): Json<SetCap>,
+) -> Result<StatusCode, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    crate::data_admin::set_data_cap(&state.config, req.limit_bytes, req.enabled)
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
