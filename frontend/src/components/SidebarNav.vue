@@ -31,7 +31,7 @@ const groups = computed(() =>
       // so it stays highlighted + expanded when you're on them.
       owns: ['system'],
       children: [
-        { label: 'All', name: 'systems', icon: 'server', owns: ['system'] },
+        { label: 'All', name: 'systems', icon: 'fleet', owns: ['system'] },
         { label: 'Issues', name: 'attention', icon: 'alert-triangle' },
       ],
     },
@@ -44,11 +44,11 @@ const groups = computed(() =>
       ],
     },
     {
-      key: 'alert', label: 'Alert', icon: 'alert-triangle',
+      key: 'alert', label: 'Alert', icon: 'flame',
       owns: ['alert-new', 'alert-edit', 'channel'],
       children: [
-        { label: 'Events', name: 'events', icon: 'logs' },
-        { label: 'Rules', name: 'alerts', icon: 'alert-triangle', owns: ['alert-new', 'alert-edit'] },
+        { label: 'Events', name: 'events', icon: 'pulse' },
+        { label: 'Rules', name: 'alerts', icon: 'sliders', owns: ['alert-new', 'alert-edit'] },
         { label: 'Notify channel', name: 'notifications', icon: 'bell', owns: ['channel'] },
       ],
     },
@@ -60,11 +60,11 @@ const groups = computed(() =>
         { label: 'Members', name: 'members', icon: 'user', admin: true },
         { label: 'Audit', name: 'audit', icon: 'logs', admin: true },
         { label: 'Data & retention', name: 'data', icon: 'disk', admin: true },
-        { label: 'Backup', name: 'backup', icon: 'refresh', admin: true },
+        { label: 'Backup', name: 'backup', icon: 'archive', admin: true },
         { label: 'Security', name: 'security', icon: 'shield' },
-        { label: 'API tokens', name: 'tokens', icon: 'command' },
+        { label: 'API tokens', name: 'tokens', icon: 'key' },
         { label: 'SSH keys', name: 'ssh-keys', icon: 'ssh' },
-        { label: 'About', name: 'about', icon: 'pulse' },
+        { label: 'About', name: 'about', icon: 'info' },
       ],
     },
   ].map((g) => ({ ...g, children: g.children.filter((c) => !c.admin || isAdmin.value) })),
