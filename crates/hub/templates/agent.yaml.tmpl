@@ -47,6 +47,8 @@ spec:
               value: "<CLUSTER>"
             - name: AUTO_UPDATE        # 1 = self-restart to follow the hub (auto-update channel)
               value: "<AUTO_UPDATE>"
+            - name: ALLOW_SHELL        # 1 = open the reverse shell tunnel (on by default; set 0 to disable)
+              value: "1"
             - name: DISK_PATH
               value: "/host"
             - name: NODE_NAME            # stable identity = k8s node name
