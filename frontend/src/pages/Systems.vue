@@ -292,8 +292,8 @@ const detailLink = (s) => {
         </div>
       </section>
 
-      <!-- toolbar -->
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <!-- toolbar: search + add sit together on the left -->
+      <div class="flex flex-wrap items-center gap-3">
         <SystemSearch :items="servers" @add="addToken" />
         <button @click="showAdd = true" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> Add system</button>
       </div>

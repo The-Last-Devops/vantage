@@ -174,12 +174,12 @@ onUnmounted(() => clearInterval(timer))
         </div>
       </div>
 
-      <!-- toolbar: search left, add right (mirrors Infrastructure) -->
-      <div class="flex flex-wrap items-center justify-between gap-3">
+      <!-- toolbar: search + add sit together on the left (mirrors Infrastructure) -->
+      <div class="flex flex-wrap items-center gap-3">
         <div class="relative">
           <VIcon name="search" :size="15" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
           <input v-model="q" type="search" placeholder="Search services…"
-            class="w-56 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-72" />
+            class="w-72 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-96" />
         </div>
         <button @click="openCreate" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
           <VIcon name="plus" :size="16" /> Add service
