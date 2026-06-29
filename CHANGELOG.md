@@ -9,6 +9,34 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.5] — 2026-06-29
+
+### Security
+- **SSH private keys are now envelope-encrypted.** Each user has one master key that
+  seals their keys; it's wrapped inner by their password and outer by an application
+  secret `EXEC_APP_SECRET` (env/KMS, never in the DB). A database leak alone can't
+  unwrap anything, changing a password no longer orphans keys, and the app secret is
+  rotatable without any passwords (`vantage-hub rotate-app-secret`). See the README.
+- **Change your own password** from the new **Settings → Security** page — your SSH
+  keys keep working (they're re-secured under the new password). Two-factor auth is
+  on the way (the TOTP verification core has landed).
+
+### Fixed
+- **The SSH console no longer says "Shell is disabled for this host."** The leftover
+  per-host enable/disable flag is gone — every host is SSH-capable, gated only by your
+  namespace `can_exec` permission and a live agent tunnel.
+
+### Changed
+- A reachable host that's over a **critical** threshold (e.g. disk 93%) now reads as
+  **Critical** (orange), not **Down** — "Down" is reserved for hosts that are actually
+  unreachable.
+- New **Settings → Security** page; the account menu links to it instead of a modal.
+- Every sidebar submenu item now has an icon. The host's SSH port moved into a small
+  gear (rarely changed). Service **Down history** is capped at ~2/3 of the screen, with
+  scroll and pagination.
+- Open a long-lived tab through a deploy and a **"new version available — Reload"**
+  banner now appears instead of silently running stale code.
+
 ## [2.3.4] — 2026-06-29
 
 ### Changed
