@@ -3,7 +3,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../stores/auth'
 import { passwordProblem } from '../lib/password'
-import { authenticate as webauthnAuthenticate } from '../lib/webauthn'
+import { authenticate as webauthnAuthenticate, supported as webauthnSupported } from '../lib/webauthn'
 
 const auth = useAuth()
 const route = useRoute()
@@ -57,7 +57,11 @@ async function submit() {
       const res = await auth.login(email.value, password.value, twofa.value ? { totpCode: totpCode.value } : {})
       if (res.twofaRequired) { // show the 2FA step (TOTP code and/or passkey)
         twofa.value = true; hasTotp.value = res.totp; pkChallenge.value = res.passkey
-        busy.value = false; return
+        busy.value = false
+        // prioritise passkey: prompt for it immediately when available + supported
+        // (the TOTP field / "Use a passkey" button stay as a fallback if cancelled)
+        if (res.passkey && webauthnSupported()) usePasskey()
+        return
       }
     }
     router.push(route.query.next || { name: 'systems' })
