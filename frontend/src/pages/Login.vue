@@ -24,6 +24,24 @@ const setup = () => auth.needsSetup
 // Live policy hint while creating the admin (empty once the password is acceptable).
 const pwHint = computed(() => (setup() && password.value ? passwordProblem(password.value) : ''))
 
+// Detailed failure reason — this is an internal console, so be explicit (API down,
+// timeout, 5xx, and the server's own message body).
+function describeErr(e) {
+  if (e && e.status != null) {
+    const body = (e.body || '').toString().trim().slice(0, 240)
+    const base = {
+      400: 'bad request (400)', 403: 'forbidden (403)', 429: 'rate limited (429)',
+      500: 'server error (500)', 502: 'bad gateway (502)',
+      503: 'service unavailable (503) — server starting or a dependency (DB) is down',
+      504: 'gateway timeout (504)',
+    }[e.status] || `HTTP ${e.status}`
+    return body ? `${base} — ${body}` : base
+  }
+  const m = (e && e.message) || ''
+  if (/abort|timeout/i.test(m)) return 'request timed out'
+  return `cannot reach the server (API down?) — ${m || 'network error'}`
+}
+
 async function submit() {
   error.value = ''
   if (setup()) {
@@ -45,9 +63,11 @@ async function submit() {
     router.push(route.query.next || { name: 'systems' })
   } catch (e) {
     error.value = setup()
-      ? 'Could not create admin (maybe one already exists)'
-      : twofa.value ? 'Invalid or expired code'
-      : e.status === 401 ? 'Invalid email or password' : 'Login failed'
+      ? (e.status === 403 ? 'An admin already exists.' : `Could not create admin — ${describeErr(e)}`)
+      : twofa.value
+        ? (e.status === 401 ? 'Invalid or expired code' : `Verification failed — ${describeErr(e)}`)
+        : e.status === 401 ? 'Invalid email or password'
+        : `Sign-in failed — ${describeErr(e)}`
   } finally {
     busy.value = false
   }
@@ -62,7 +82,7 @@ async function usePasskey() {
     if (res.twofaRequired) { error.value = 'Passkey was not accepted'; return }
     router.push(route.query.next || { name: 'systems' })
   } catch (e) {
-    error.value = e?.name === 'NotAllowedError' ? 'Passkey cancelled or timed out' : 'Passkey sign-in failed'
+    error.value = e?.name === 'NotAllowedError' ? 'Passkey cancelled or timed out' : `Passkey sign-in failed — ${describeErr(e)}`
   } finally {
     busy.value = false
   }
@@ -73,7 +93,12 @@ async function usePasskey() {
   <div class="flex min-h-screen items-center justify-center px-6">
     <div class="w-full max-w-sm">
       <div class="mb-8 flex items-center justify-center gap-2.5">
-        <span class="vantage-logo inline-block h-7 w-7 rounded-md"></span>
+        <span class="vantage-logo grid h-9 w-9 place-items-center rounded-lg">
+          <svg viewBox="0 0 64 64" class="h-[22px] w-[22px]" fill="none" stroke="#08231F" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M7 43 L21 21 L35 43" />
+            <rect x="42" y="37.5" width="14" height="6" rx="1.8" fill="#08231F" stroke="none" />
+          </svg>
+        </span>
         <span class="text-xl font-semibold tracking-tight text-fg">Vantage</span>
       </div>
 
