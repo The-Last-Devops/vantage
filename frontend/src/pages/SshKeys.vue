@@ -21,7 +21,7 @@ const { loaded, reload: load } = useCached({
 
 // ---- add ----
 const modalOpen = ref(false)
-const form = ref({ name: '', private_key: '', password: '' })
+const form = ref({ name: '', private_key: '', password: '', passphrase: '' })
 const creating = ref(false)
 const err = ref('')
 const keyFile = ref(null)
@@ -43,7 +43,7 @@ function onKeyFile(e) {
 function clearKey() { form.value.private_key = ''; keyFileName.value = '' }
 
 function openNew() {
-  form.value = { name: '', private_key: '', password: '' }
+  form.value = { name: '', private_key: '', password: '', passphrase: '' }
   keyFileName.value = ''
   err.value = ''
   modalOpen.value = true
@@ -60,6 +60,7 @@ async function create() {
       name: form.value.name.trim(),
       private_key: form.value.private_key,
       password: form.value.password,
+      passphrase: form.value.passphrase || undefined,
     })
     modalOpen.value = false
     await load()
@@ -164,6 +165,12 @@ onMounted(load)
               placeholder="Paste your private key, or use Upload file&#10;-----BEGIN OPENSSH PRIVATE KEY-----"
               class="w-full rounded-lg border border-line bg-surface2 px-3 py-2 font-mono text-xs text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none"></textarea>
           </div>
+          <label class="block">
+            <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Key passphrase <span class="text-faint">(only if the key is encrypted)</span></span>
+            <input v-model="form.passphrase" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"
+              placeholder="leave blank for an unencrypted key"
+              class="w-full rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
+          </label>
           <label class="block">
             <span class="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-faint">Account password</span>
             <input v-model="form.password" type="password" autocomplete="new-password" data-1p-ignore data-lpignore="true"

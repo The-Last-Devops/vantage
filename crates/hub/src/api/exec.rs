@@ -128,6 +128,19 @@ pub struct CreateKey {
     /// The caller's account password — the KEK is derived from it (step-up to unseal
     /// later uses the same password).
     password: String,
+    /// Optional passphrase if the private key itself is encrypted.
+    #[serde(default)]
+    passphrase: Option<String>,
+}
+
+/// What we actually seal under the account-password KEK: the key PEM plus its own
+/// passphrase (if encrypted), so the key works at connect regardless of format. JSON
+/// so it stays forward-compatible; unseal falls back to treating bytes as a raw PEM.
+#[derive(Serialize, Deserialize)]
+struct SealedKey {
+    pem: String,
+    #[serde(default)]
+    passphrase: Option<String>,
 }
 
 /// POST /api/ssh-keys — add a key to the caller's library, sealed under their password.
@@ -163,25 +176,43 @@ pub async fn create_ssh_key(
     {
         return Err(bad("Wrong account password."));
     }
-    let key = russh::keys::decode_secret_key(&req.private_key, None).map_err(|_| {
-        bad(
-            "Couldn't read that private key. It must be an unencrypted OpenSSH key \
-             (\"BEGIN OPENSSH PRIVATE KEY\"). Convert an old PEM/RSA key (and drop any \
-             passphrase) with:  ssh-keygen -p -N \"\" -f <keyfile>  — then paste the new file.",
-        )
+    // Accept any format russh reads: OpenSSH, PEM RSA (PKCS#1), PKCS#8 — encrypted or not.
+    let passphrase = req.passphrase.as_deref().filter(|s| !s.is_empty());
+    let key = russh::keys::decode_secret_key(&req.private_key, passphrase).map_err(|_| {
+        if passphrase.is_none() {
+            bad(
+                "Couldn't read that private key. Supported: OpenSSH, PEM RSA, or PKCS#8. \
+                 If the key is encrypted, also enter its passphrase.",
+            )
+        } else {
+            bad(
+                "Couldn't unlock that key — check the key passphrase (and that it's a \
+                 supported format: OpenSSH, PEM RSA, or PKCS#8).",
+            )
+        }
     })?;
     let fingerprint = key
         .clone_public_key()
         .map(|p| p.fingerprint())
         .map_err(|_| bad("Couldn't derive the key's fingerprint."))?;
+    // Seal the PEM + its passphrase so it works at connect regardless of format.
+    let sealed = serde_json::to_vec(&SealedKey {
+        pem: req.private_key.clone(),
+        passphrase: passphrase.map(|s| s.to_string()),
+    })
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Encode failed.".to_string(),
+        )
+    })?;
     let salt = exec_crypto::gen_salt();
-    let key_enc =
-        exec_crypto::seal(&req.password, &salt, req.private_key.as_bytes()).map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Encryption failed.".to_string(),
-            )
-        })?;
+    let key_enc = exec_crypto::seal(&req.password, &salt, &sealed).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Encryption failed.".to_string(),
+        )
+    })?;
 
     let row = sqlx::query_as::<_, (Uuid, String)>(
         "INSERT INTO ssh_keys (user_id, name, key_enc, kdf_salt, key_fingerprint) \
@@ -306,10 +337,19 @@ pub async fn console_ticket(
             .await
             .map_err(internal)?
             .ok_or(StatusCode::BAD_REQUEST)?; // no such key for this user
-            let pem = exec_crypto::open(&account_password, &kdf_salt, &key_enc)
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
+            let raw = exec_crypto::open(&account_password, &kdf_salt, &key_enc)
                 .map_err(|_| StatusCode::BAD_REQUEST)?;
-            ExecAuth::Key(pem)
+            // New keys seal a JSON {pem, passphrase}; older ones sealed the raw PEM.
+            match serde_json::from_slice::<SealedKey>(&raw) {
+                Ok(sk) => ExecAuth::Key {
+                    pem: sk.pem,
+                    passphrase: sk.passphrase,
+                },
+                Err(_) => ExecAuth::Key {
+                    pem: String::from_utf8_lossy(&raw).into_owned(),
+                    passphrase: None,
+                },
+            }
         }
         _ => return Err(StatusCode::BAD_REQUEST),
     };

@@ -40,8 +40,12 @@ use crate::{rbac, AppState};
 pub enum ExecAuth {
     /// SSH password auth — the host password the user typed at connect.
     Password(String),
-    /// SSH publickey auth — the user's private key, already unsealed (PEM).
-    Key(String),
+    /// SSH publickey auth — the user's private key (unsealed PEM/OpenSSH) + its
+    /// passphrase if the key itself is encrypted.
+    Key {
+        pem: String,
+        passphrase: Option<String>,
+    },
 }
 
 /// A step-up ticket: holds the connection target + chosen auth for one console
@@ -246,14 +250,16 @@ async fn bridge(
     };
     let authed = match &t.auth {
         ExecAuth::Password(pw) => handle.authenticate_password(&t.ssh_user, pw.clone()).await,
-        ExecAuth::Key(pem) => match russh::keys::decode_secret_key(pem, None) {
-            Ok(k) => {
-                handle
-                    .authenticate_publickey(&t.ssh_user, Arc::new(k))
-                    .await
+        ExecAuth::Key { pem, passphrase } => {
+            match russh::keys::decode_secret_key(pem, passphrase.as_deref()) {
+                Ok(k) => {
+                    handle
+                        .authenticate_publickey(&t.ssh_user, Arc::new(k))
+                        .await
+                }
+                Err(e) => fail!(format!("Could not load your SSH key: {e}")),
             }
-            Err(e) => fail!(format!("Could not load your SSH key: {e}")),
-        },
+        }
     };
     match authed {
         Ok(true) => {}
