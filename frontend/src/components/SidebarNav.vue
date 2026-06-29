@@ -17,11 +17,11 @@ const router = useRouter()
 // current route stays expanded so you always see where you are.
 const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
 const isAdmin = computed(() => !!auth.user?.is_admin)
-// Flat top-level nav (no children) — the new attention-first landing + war-room.
+// Flat top-level nav (no children). Fleet + Metrics are temporarily hidden from the
+// nav (routes/code kept, reachable by URL) — they overlapped and read as noise on
+// small fleets; revisit once there's a clear, data-rich need. Overview is the dashboard.
 const topLinks = [
   { name: 'overview', label: 'Overview', icon: 'dashboard' },
-  { name: 'fleet', label: 'Fleet', icon: 'fleet' },
-  { name: 'metrics', label: 'Metrics', icon: 'metrics' },
 ]
 const groups = computed(() =>
   [
