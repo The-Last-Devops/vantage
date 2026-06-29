@@ -35,7 +35,7 @@ watch(() => props.events, () => { if (page.value > pages.value) page.value = 1 }
     </div>
     <p v-if="!events.length" class="px-4 py-8 text-center text-sm text-muted">No status changes recorded recently.</p>
     <template v-else>
-      <ul class="max-h-[430px] divide-y divide-line overflow-y-auto">
+      <ul class="max-h-[min(430px,calc(100vh-15rem))] divide-y divide-line overflow-y-auto">
         <li v-for="(e, i) in shown" :key="start + i" class="flex items-start gap-3 px-4 py-2.5 hover:bg-hover">
           <StatePill :tone="e.up ? 'ok' : 'down'" :label="e.up ? 'Up' : 'Down'" class="mt-0.5 shrink-0" />
           <div class="min-w-0 flex-1">
