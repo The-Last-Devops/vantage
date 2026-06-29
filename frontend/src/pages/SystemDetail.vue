@@ -224,7 +224,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
 </script>
 
 <template>
-  <AppShell :title="name" hide-title>
+  <AppShell :title="name" :breadcrumb="[{ label: 'Infrastructure', to: { name: 'systems', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: name }]">
     <!-- breadcrumb sits in the top bar (left); status on the right -->
     <template #title-after>
       <nav class="flex items-center gap-1.5 text-base font-semibold">
