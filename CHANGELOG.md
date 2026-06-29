@@ -9,6 +9,24 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.8] — 2026-06-29
+
+### Added
+- **Overview redesigned** as a single, uniform grid of clickable status tiles — Hosts
+  (total/up · down · critical · warning), Services (total/up · down · avg uptime),
+  Operations (alerts firing · events 24h · agent updates · backup) and Security
+  (two-factor) plus, for admins, a System row (database size · namespaces · members).
+  Each tile links to its page, **turns green when healthy** and red/amber when it needs
+  attention. The scattered event feed / incident list / capacity charts are gone.
+- **Public-exposure self-check** (**Settings → Security**, admin) — the hub probes its own
+  `PUBLIC_URL` at an unauthenticated marker outside `/pub`; if it's reachable with no auth
+  gate it warns you to front the hub with nginx basic-auth / Cloudflare Zero Trust (allowing
+  `/pub/*` through) and links the docs.
+
+### Docs
+- README gains a full **environment-variable reference** (hub + agent) and a consolidated
+  **Security** section; new [docs/exposure.md](docs/exposure.md) covers gating a public hub.
+
 ## [2.3.7] — 2026-06-29
 
 ### Security
