@@ -20,10 +20,10 @@ should require passing the gate.
 
 ## The exposure self-check
 
-Set `PUBLIC_URL` to the hub's externally-reachable base URL (e.g.
-`https://vantage.example.com`). Then **Settings → Security → Public exposure → Check now**.
-The hub fetches `PUBLIC_URL/exposure-check` (a marker endpoint that is **not** under
-`/pub`) with no credentials:
+Go to **Settings → Security → Public exposure → Check now**. The hub works out its public
+URL automatically from the request (`X-Forwarded-Proto`/`-Host`, or `Host`) — set
+`PUBLIC_URL` only to override. It then fetches `<public-url>/exposure-check` (a marker
+endpoint that is **not** under `/pub`) with no credentials:
 
 - **Blocked (302/401/403)** → a gate is protecting the app. ✅
 - **200 + marker** → the app is open to the internet with no gate. ⚠️ Configure one below.

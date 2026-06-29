@@ -31,6 +31,10 @@ timescaledb:
 
 hub:
   replicas: 1
+  # App secret that encrypts SSH-key master keys at rest. Set a stable high-entropy value
+  # in production (e.g. `openssl rand -base64 32`) and BACK IT UP — losing it makes stored
+  # SSH keys unrecoverable. Empty = password-only protection (the hub logs a warning).
+  appSecret: ""
   # Used only when timescaledb.enabled=false:
   configDatabaseUrl: ""
   dataDatabaseUrl: ""

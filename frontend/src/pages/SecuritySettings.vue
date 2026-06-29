@@ -128,8 +128,9 @@ async function addPasskey() {
     await loadPasskeys()
   } catch (e) {
     pkErr.value = e?.name === 'NotAllowedError' ? 'Cancelled or timed out.'
+      : e?.name === 'SecurityError' ? `This page's domain doesn't match the server's passkey settings — an admin must set WEBAUTHN_RP_ID to this domain and WEBAUTHN_ORIGIN to ${location.origin}. (${e.message || 'SecurityError'})`
       : e.status === 503 ? 'Passkeys are not configured on this server.'
-      : `Couldn't register (${e.status || e.name || 'error'}).`
+      : `Couldn't register (${e?.message || e?.status || e?.name || 'error'}).`
   } finally { pkBusy.value = false }
 }
 async function deletePasskey(id) {

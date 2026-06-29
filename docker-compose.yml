@@ -46,6 +46,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
       # Auto-provisions the bundled agent's server + token.
       LOCAL_API_KEY: ${LOCAL_API_KEY:-local-dev-token}
+      # Passkeys + public-exposure check: MUST match the URL the browser uses. For a real
+      # domain set WEBAUTHN_RP_ID=mon.example.com and the *_ORIGIN/PUBLIC_URL to https://….
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_ORIGIN: ${WEBAUTHN_ORIGIN:-http://localhost:8080}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      # App secret wrapping SSH-key master keys (set a stable high-entropy value in prod).
+      EXEC_APP_SECRET: ${EXEC_APP_SECRET:-}
     ports:
       - "8080:8080"
     # Needed for ICMP "ping" monitors (raw sockets).

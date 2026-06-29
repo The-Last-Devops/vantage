@@ -28,6 +28,17 @@ spec:
             - name: ADMIN_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ include "vantage.name" . }}, key: admin-password } }
             {{- end }}
+            {{- if .Values.hub.ingress.host }}
+            # Passkeys (WebAuthn) require RP id/origin to match the served domain.
+            - { name: WEBAUTHN_RP_ID, value: {{ .Values.hub.ingress.host | quote }} }
+            - { name: WEBAUTHN_ORIGIN, value: {{ printf "https://%s" .Values.hub.ingress.host | quote }} }
+            - { name: PUBLIC_URL, value: {{ printf "https://%s" .Values.hub.ingress.host | quote }} }
+            {{- end }}
+            {{- if .Values.hub.appSecret }}
+            # Encrypts SSH-key master keys at rest (back it up — losing it = keys unrecoverable).
+            - name: EXEC_APP_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "vantage.name" . }}, key: app-secret } }
+            {{- end }}
           ports: [{ containerPort: 8080 }]
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }

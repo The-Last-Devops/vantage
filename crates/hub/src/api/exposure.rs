@@ -6,6 +6,7 @@
 //! gate-less request → "protected". See docs/exposure.md.
 
 use super::*;
+use axum::http::HeaderMap;
 use std::time::Duration;
 
 /// Marker returned by the unauthenticated, non-`/pub` probe endpoint.
@@ -18,8 +19,8 @@ pub async fn exposure_marker() -> &'static str {
     MARKER
 }
 
-/// The hub's public base URL (env `PUBLIC_URL`, else the first `WEBAUTHN_ORIGIN`).
-fn public_url() -> Option<String> {
+/// The hub's public base URL from env (`PUBLIC_URL`, else the first `WEBAUTHN_ORIGIN`).
+fn public_url_env() -> Option<String> {
     let pick = |v: String| {
         v.split(',')
             .next()
@@ -30,6 +31,26 @@ fn public_url() -> Option<String> {
         .ok()
         .and_then(pick)
         .or_else(|| std::env::var("WEBAUTHN_ORIGIN").ok().and_then(pick))
+}
+
+/// Derive the public base URL dynamically from the request the admin just made — it
+/// arrived via the same proxy/gate, so its `X-Forwarded-Proto`/`-Host` (or `Host`)
+/// reflect the real external URL. No env needed. Returns e.g. `https://mon.example.com`.
+fn public_url_from_req(h: &HeaderMap) -> Option<String> {
+    let first = |v: &str| v.split(',').next().unwrap_or(v).trim().to_string();
+    let host = h
+        .get("x-forwarded-host")
+        .or_else(|| h.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .map(first)
+        .filter(|s| !s.is_empty())?;
+    let proto = h
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .map(first)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "http".to_string());
+    Some(format!("{proto}://{host}"))
 }
 
 #[derive(Serialize)]
@@ -46,11 +67,13 @@ pub struct ExposureResult {
 pub async fn exposure_check(
     State(_state): State<AppState>,
     user: CurrentUser,
+    headers: HeaderMap,
 ) -> Result<Json<ExposureResult>, StatusCode> {
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    let Some(base) = public_url() else {
+    // Prefer the URL the browser actually used (dynamic); fall back to env.
+    let Some(base) = public_url_from_req(&headers).or_else(public_url_env) else {
         return Ok(Json(ExposureResult {
             configured: false,
             public_url: None,

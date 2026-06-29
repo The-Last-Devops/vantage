@@ -203,7 +203,7 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | — | Bootstrap the first admin on startup if that user doesn't exist. After first login, provision users in the UI. |
 | `EXEC_APP_SECRET` | — (prod: yes) | — | Application secret that wraps the **outer** layer of every user's SSH-key master key. **Set a high-entropy value in production** and back it up. Omitted → password-only protection + a startup warning. See [Security](#security). |
 | `EXEC_APP_SECRET_OLD` | — | — | The previous `EXEC_APP_SECRET`, set **only during a rotation** so old rows can be re-wrapped (`vantage-hub rotate-app-secret`). |
-| `PUBLIC_URL` | — | `WEBAUTHN_ORIGIN`'s first value | The hub's externally-reachable base URL (e.g. `https://vantage.example.com`). Used by the public-exposure self-check. |
+| `PUBLIC_URL` | — | auto-detected from the request | The hub's externally-reachable base URL (e.g. `https://vantage.example.com`), used by the public-exposure self-check. Normally **auto-detected** from the request's `X-Forwarded-Proto`/`-Host` (or `Host`); set this only to override. |
 | `WEBAUTHN_RP_ID` | — | `localhost` | Passkey relying-party ID — the **registrable domain** (e.g. `vantage.example.com`). Must match the served domain or passkeys won't verify. |
 | `WEBAUTHN_ORIGIN` | — | `http://localhost:8080` | Passkey origin(s) — full scheme+host the SPA is served from. Comma-separate to allow several (e.g. dev `http://localhost:5173,http://localhost:8080`). |
 | `BIND_ADDR` | — | `0.0.0.0:8080` | Listen address. |
