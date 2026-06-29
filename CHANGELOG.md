@@ -9,6 +9,22 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.7] — 2026-06-29
+
+### Security
+- **Login brute-force throttle.** After 5 failed attempts an account is locked out for an
+  escalating cooldown (HTTP 429) — this covers password *and* TOTP / backup-code guessing,
+  so 2FA can't be brute-forced online. Cleared on a successful sign-in.
+- **TOTP codes are single-use within their time window** — a code (or backup code) accepted
+  once can't be replayed.
+- **Email (SMTP) notify channels go through the SSRF guard** like every other channel, so a
+  channel can't be pointed at loopback/link-local/internal hosts to probe the network.
+
+### Fixed
+- **Backups now include PATs, SSH keys and passkeys** (and app settings) — restoring a backup
+  no longer silently destroys API tokens, stored SSH keys and registered passkeys.
+- Concurrent first-time console step-ups can no longer race and orphan a user's SSH keys.
+
 ## [2.3.6] — 2026-06-29
 
 ### Added
