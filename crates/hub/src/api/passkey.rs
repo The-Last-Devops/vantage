@@ -5,14 +5,33 @@
 
 use super::*;
 use crate::passkey::PasskeyState;
-use webauthn_rs::prelude::{Passkey, PublicKeyCredential, RegisterPublicKeyCredential};
+use axum::http::HeaderMap;
+use webauthn_rs::prelude::{Passkey, PublicKeyCredential, RegisterPublicKeyCredential, Webauthn};
 
-/// The configured passkey RP, or 503 if WebAuthn is disabled/misconfigured.
+/// The passkey ceremony state, or 503 if WebAuthn is disabled.
 fn rp(state: &AppState) -> Result<&PasskeyState, StatusCode> {
     state
         .passkey
         .as_ref()
         .as_ref()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)
+}
+
+/// Pull the `Origin` (preferred — browser-set) and `Host` headers as owned strings.
+fn req_origin_host(headers: &HeaderMap) -> (Option<String>, Option<String>) {
+    let g = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    (g("origin"), g("host"))
+}
+
+/// Build the relying party for this request, or 503 if no usable origin is available.
+fn webauthn_for(pk: &PasskeyState, headers: &HeaderMap) -> Result<Webauthn, StatusCode> {
+    let (origin, host) = req_origin_host(headers);
+    pk.build(origin.as_deref(), host.as_deref())
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)
 }
 
@@ -98,16 +117,17 @@ pub async fn delete_passkey(
 pub async fn register_start(
     State(state): State<AppState>,
     user: CurrentUser,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pk = rp(&state)?;
+    let webauthn = webauthn_for(pk, &headers)?;
     let exclude = user_passkeys(&state.config, user.id)
         .await
         .map_err(internal)?
         .into_iter()
         .map(|(_, p)| p.cred_id().clone())
         .collect::<Vec<_>>();
-    let (challenge, reg_state) = pk
-        .webauthn
+    let (challenge, reg_state) = webauthn
         .start_passkey_registration(user.id, &user.email, &user.email, Some(exclude))
         .map_err(|e| {
             tracing::error!(error = %e, "passkey register start");
@@ -127,16 +147,17 @@ pub struct RegisterFinish {
 pub async fn register_finish(
     State(state): State<AppState>,
     user: CurrentUser,
+    headers: HeaderMap,
     Json(req): Json<RegisterFinish>,
 ) -> Result<StatusCode, StatusCode> {
     let pk = rp(&state)?;
+    let webauthn = webauthn_for(pk, &headers)?;
     let name = req.name.trim();
     if !valid_name(name, 64) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let reg_state = pk.take_reg(user.id).ok_or(StatusCode::BAD_REQUEST)?; // expired / no ceremony
-    let passkey = pk
-        .webauthn
+    let passkey = webauthn
         .finish_passkey_registration(&req.credential, &reg_state)
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     let cred_id = passkey.cred_id().as_ref().to_vec();
@@ -162,6 +183,7 @@ pub async fn register_finish(
 pub async fn start_login(
     state: &AppState,
     user_id: Uuid,
+    headers: &HeaderMap,
 ) -> Result<Option<serde_json::Value>, StatusCode> {
     let Some(pk) = state.passkey.as_ref().as_ref() else {
         return Ok(None);
@@ -175,13 +197,11 @@ pub async fn start_login(
     if creds.is_empty() {
         return Ok(None);
     }
-    let (challenge, auth_state) =
-        pk.webauthn
-            .start_passkey_authentication(&creds)
-            .map_err(|e| {
-                tracing::error!(error = %e, "passkey auth start");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let webauthn = webauthn_for(pk, headers)?;
+    let (challenge, auth_state) = webauthn.start_passkey_authentication(&creds).map_err(|e| {
+        tracing::error!(error = %e, "passkey auth start");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     pk.put_auth(user_id, auth_state);
     Ok(Some(serde_json::to_value(challenge).map_err(internal)?))
 }
@@ -192,6 +212,7 @@ pub async fn finish_login(
     state: &AppState,
     user_id: Uuid,
     cred: PublicKeyCredential,
+    headers: &HeaderMap,
 ) -> Result<bool, StatusCode> {
     let Some(pk) = state.passkey.as_ref().as_ref() else {
         return Ok(false);
@@ -199,10 +220,10 @@ pub async fn finish_login(
     let Some(auth_state) = pk.take_auth(user_id) else {
         return Ok(false); // no/expired ceremony
     };
-    let result = match pk
-        .webauthn
-        .finish_passkey_authentication(&cred, &auth_state)
-    {
+    let Ok(webauthn) = webauthn_for(pk, headers) else {
+        return Ok(false);
+    };
+    let result = match webauthn.finish_passkey_authentication(&cred, &auth_state) {
         Ok(r) => r,
         Err(_) => return Ok(false),
     };

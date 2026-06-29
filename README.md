@@ -204,8 +204,8 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | `EXEC_APP_SECRET` | — (prod: yes) | — | Application secret that wraps the **outer** layer of every user's SSH-key master key. **Set a high-entropy value in production** and back it up. Omitted → password-only protection + a startup warning. See [Security](#security). |
 | `EXEC_APP_SECRET_OLD` | — | — | The previous `EXEC_APP_SECRET`, set **only during a rotation** so old rows can be re-wrapped (`vantage-hub rotate-app-secret`). |
 | `PUBLIC_URL` | — | auto-detected from the request | The hub's externally-reachable base URL (e.g. `https://vantage.example.com`), used by the public-exposure self-check. Normally **auto-detected** from the request's `X-Forwarded-Proto`/`-Host` (or `Host`); set this only to override. |
-| `WEBAUTHN_RP_ID` | — | `localhost` | Passkey relying-party ID — the **registrable domain** (e.g. `vantage.example.com`). Must match the served domain or passkeys won't verify. |
-| `WEBAUTHN_ORIGIN` | — | `http://localhost:8080` | Passkey origin(s) — full scheme+host the SPA is served from. Comma-separate to allow several (e.g. dev `http://localhost:5173,http://localhost:8080`). |
+| `WEBAUTHN_RP_ID` | — | derived from request `Origin` | Passkey relying-party ID — the **registrable domain** (e.g. `vantage.example.com`). **Optional**: left unset, it's derived per request from the browser's `Origin`, so passkeys work on whatever domain serves the hub. Set it (with `WEBAUTHN_ORIGIN`) only to pin one canonical RP. |
+| `WEBAUTHN_ORIGIN` | — | derived from request `Origin` | Passkey origin(s) — full scheme+host the SPA is served from. **Optional** (see `WEBAUTHN_RP_ID`). Comma-separate to allow several (e.g. dev `http://localhost:5173,http://localhost:8080`). |
 | `BIND_ADDR` | — | `0.0.0.0:8080` | Listen address. |
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` flag on the session cookie (local **http** dev only). |
 | `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918/ULA) outbound targets for probes / notify / backup (SSRF hardening). |

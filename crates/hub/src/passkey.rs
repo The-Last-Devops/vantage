@@ -1,9 +1,12 @@
-//! Passkey (WebAuthn) second factor, backed by webauthn-rs. This holds the relying-
-//! party `Webauthn` instance plus short-lived in-memory ceremony state (registration
-//! and authentication challenges). HTTP endpoints live in `api/passkey.rs`; the login
-//! integration is in `auth.rs`. Credentials persist as serde JSON in the
-//! `webauthn_credentials` table. RP id / origin come from env (WEBAUTHN_RP_ID /
-//! WEBAUTHN_ORIGIN) and MUST match the served domain.
+//! Passkey (WebAuthn) second factor, backed by webauthn-rs. This holds short-lived
+//! in-memory ceremony state (registration and authentication challenges) plus the
+//! relying-party config. The `Webauthn` relying party is built per request: by default
+//! the RP id / origin are derived from the request's `Origin`/`Host` header so passkeys
+//! work on whatever domain serves the hub with no extra config. Setting WEBAUTHN_RP_ID
+//! and/or WEBAUTHN_ORIGIN pins them instead (e.g. when the hub is reachable on several
+//! hosts and you want one canonical RP). HTTP endpoints live in `api/passkey.rs`; the
+//! login integration is in `auth.rs`. Credentials persist as serde JSON in the
+//! `webauthn_credentials` table.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -15,61 +18,82 @@ use webauthn_rs::prelude::*;
 const CEREMONY_TTL: Duration = Duration::from_secs(300);
 
 pub struct PasskeyState {
-    pub webauthn: Webauthn,
+    /// Pinned RP from env (rp_id, origins). When set, every ceremony uses it and the
+    /// request `Origin` is ignored. When `None`, the RP is derived per request from the
+    /// browser-supplied `Origin` (falling back to `Host`) — the zero-config default.
+    pinned: Option<(String, Vec<Url>)>,
     reg: Mutex<HashMap<Uuid, (PasskeyRegistration, Instant)>>,
     auth: Mutex<HashMap<Uuid, (PasskeyAuthentication, Instant)>>,
 }
 
 impl PasskeyState {
-    /// Build from env. Returns `None` (with a warning) if WEBAUTHN_ORIGIN/RP_ID are
-    /// invalid — passkey endpoints then report unavailable, but the rest of the hub runs.
+    /// Always available. Reads WEBAUTHN_RP_ID / WEBAUTHN_ORIGIN: if either is set it
+    /// pins the RP from env (legacy behaviour); if both are unset the RP is derived per
+    /// request from the `Origin` header (no env needed).
     pub fn from_env() -> Option<Self> {
-        let rp_id = std::env::var("WEBAUTHN_RP_ID").unwrap_or_else(|_| "localhost".into());
-        // WEBAUTHN_ORIGIN may be a comma-separated list (e.g. dev :5173 + :8080); the
-        // first is the primary, the rest are appended as allowed origins.
-        let origin_env =
-            std::env::var("WEBAUTHN_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".into());
-        let origins: Vec<Url> = origin_env
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| match Url::parse(s) {
-                Ok(u) => Some(u),
-                Err(e) => {
-                    tracing::warn!(error = %e, origin = %s, "skipping invalid WEBAUTHN_ORIGIN");
-                    None
-                }
-            })
-            .collect();
-        let Some((primary, extra)) = origins.split_first() else {
-            tracing::warn!("no valid WEBAUTHN_ORIGIN — passkeys disabled");
-            return None;
+        // Treat empty/whitespace as unset (compose passes `${WEBAUTHN_RP_ID:-}` through
+        // as "" when the operator didn't set it — that must still mean "auto-derive").
+        let nonempty = |k: &str| {
+            std::env::var(k)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
         };
-        let builder = match WebauthnBuilder::new(&rp_id, primary) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(error = %e, "WebAuthn builder failed — passkeys disabled");
-                return None;
-            }
-        };
-        let builder = extra
-            .iter()
-            .fold(builder, |b, o| b.append_allowed_origin(o))
-            .rp_name("Vantage");
-        match builder.build() {
-            Ok(webauthn) => {
-                tracing::info!(%rp_id, origins = %origin_env, "passkeys enabled");
-                Some(Self {
-                    webauthn,
-                    reg: Mutex::new(HashMap::new()),
-                    auth: Mutex::new(HashMap::new()),
+        let rp_id_env = nonempty("WEBAUTHN_RP_ID");
+        let origin_env = nonempty("WEBAUTHN_ORIGIN");
+        let pinned = if rp_id_env.is_none() && origin_env.is_none() {
+            tracing::info!("passkeys enabled (RP derived from request Origin — no WEBAUTHN_* env)");
+            None
+        } else {
+            // WEBAUTHN_ORIGIN may be a comma-separated list (e.g. dev :5173 + :8080).
+            let rp_id = rp_id_env.unwrap_or_else(|| "localhost".into());
+            let origin_str = origin_env.unwrap_or_else(|| "http://localhost:8080".into());
+            let origins: Vec<Url> = origin_str
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .filter_map(|s| match Url::parse(s) {
+                    Ok(u) => Some(u),
+                    Err(e) => {
+                        tracing::warn!(error = %e, origin = %s, "skipping invalid WEBAUTHN_ORIGIN");
+                        None
+                    }
                 })
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "WebAuthn build failed — passkeys disabled");
+                .collect();
+            if origins.is_empty() {
+                tracing::warn!("no valid WEBAUTHN_ORIGIN — falling back to per-request Origin");
                 None
+            } else {
+                tracing::info!(%rp_id, origins = %origin_str, "passkeys enabled (pinned RP from env)");
+                Some((rp_id, origins))
             }
+        };
+        Some(Self {
+            pinned,
+            reg: Mutex::new(HashMap::new()),
+            auth: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Build the relying party for one ceremony. Uses the pinned env RP when configured,
+    /// else derives it from the request `origin` header (falling back to `host` with an
+    /// assumed https scheme). Returns `None` if neither yields a usable origin.
+    pub fn build(&self, origin: Option<&str>, host: Option<&str>) -> Option<Webauthn> {
+        let (rp_id, origins) = match &self.pinned {
+            Some((id, o)) => (id.clone(), o.clone()),
+            None => {
+                let url = origin
+                    .and_then(|o| Url::parse(o).ok())
+                    .or_else(|| host.and_then(|h| Url::parse(&format!("https://{h}")).ok()))?;
+                (url.host_str()?.to_string(), vec![url])
+            }
+        };
+        let (primary, extra) = origins.split_first()?;
+        let mut builder = WebauthnBuilder::new(&rp_id, primary).ok()?;
+        for o in extra {
+            builder = builder.append_allowed_origin(o);
         }
+        builder.rp_name("Vantage").build().ok()
     }
 
     pub fn put_reg(&self, user: Uuid, st: PasskeyRegistration) {

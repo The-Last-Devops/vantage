@@ -266,6 +266,7 @@ pub struct LoginReq {
 pub async fn login(
     State(state): State<AppState>,
     jar: CookieJar,
+    headers: axum::http::HeaderMap,
     Json(req): Json<LoginReq>,
 ) -> Result<(CookieJar, Json<serde_json::Value>), StatusCode> {
     // Brute-force throttle (per-account, in-memory). Blocks online guessing of the
@@ -303,7 +304,7 @@ pub async fn login(
         if let Some(cred_json) = req.passkey_credential.clone() {
             // passkey assertion
             let cred = serde_json::from_value(cred_json).map_err(|_| StatusCode::BAD_REQUEST)?;
-            if !crate::api::finish_login(&state, id, cred).await? {
+            if !crate::api::finish_login(&state, id, cred, &headers).await? {
                 state.login_throttle.fail(&key);
                 return Err(StatusCode::UNAUTHORIZED);
             }
@@ -320,7 +321,7 @@ pub async fn login(
             }
         } else {
             // no factor supplied → tell the SPA what's available (+ a passkey challenge)
-            let passkey = crate::api::start_login(&state, id).await?;
+            let passkey = crate::api::start_login(&state, id, &headers).await?;
             return Ok((
                 jar,
                 Json(serde_json::json!({
