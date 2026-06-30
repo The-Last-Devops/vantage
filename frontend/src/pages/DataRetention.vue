@@ -75,6 +75,12 @@ const tierGroups = computed(() => {
   const r = data.value?.retention || []
   return GROUPS.map((g) => ({ label: g.label, tiers: r.filter(g.match) })).filter((g) => g.tiers.length)
 })
+// Lay the tier groups out in two columns (left: System metrics; right: the rest).
+const tierColumns = computed(() => {
+  const g = tierGroups.value
+  const mid = Math.max(1, Math.floor(g.length / 2))
+  return [g.slice(0, mid), g.slice(mid)]
+})
 
 async function save(tier) {
   msg.value = ''
@@ -129,36 +135,38 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
             <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />Eviction drops the oldest time chunks first — shrinking how far back history reaches. Raw &amp; rollup tiers are evicted oldest-first regardless of their per-tier window above.</p>
           </div>
 
-          <!-- tier table (grouped) -->
-          <div class="overflow-hidden rounded-xl border border-line bg-surface">
-            <table class="w-full text-sm">
-              <thead><tr class="text-left">
-                <th :class="TH">Tier</th>
-                <th :class="TH" class="text-right">Rows</th>
-                <th :class="TH" class="text-right">Size</th>
-                <th :class="TH">Keep for</th>
-                <th :class="TH"></th>
-              </tr></thead>
-              <tbody>
-                <template v-for="g in tierGroups" :key="g.label">
-                  <tr class="bg-surface2/40"><td colspan="5" class="px-4 py-1.5 text-micro font-bold uppercase tracking-wider text-faint">{{ g.label }}</td></tr>
-                  <tr v-for="t in g.tiers" :key="t.table" class="border-b border-line/60 last:border-0">
-                    <td class="px-4 py-2.5 text-fg">{{ t.label }}<span class="ml-2 font-mono text-xs text-faint">{{ t.table }}</span></td>
-                    <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
-                    <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ sizeByLabel[t.label]?.size ?? '—' }}</td>
-                    <td class="px-4 py-2.5">
-                      <div class="flex items-center gap-1.5">
-                        <input v-model.number="draft[t.table]" type="number" min="1" class="w-20 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
-                        <span class="text-xs text-muted">{{ t.unit }}</span>
-                      </div>
-                    </td>
-                    <td class="px-4 py-2.5 text-right">
-                      <button @click="save(t)" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Save</button>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+          <!-- tier tables (grouped, two columns) -->
+          <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div v-for="(col, ci) in tierColumns" :key="ci" class="overflow-hidden rounded-xl border border-line bg-surface">
+              <table class="w-full text-sm">
+                <thead><tr class="text-left">
+                  <th :class="TH">Tier</th>
+                  <th :class="TH" class="text-right">Rows</th>
+                  <th :class="TH" class="text-right">Size</th>
+                  <th :class="TH">Keep for</th>
+                  <th :class="TH"></th>
+                </tr></thead>
+                <tbody>
+                  <template v-for="g in col" :key="g.label">
+                    <tr class="bg-surface2/40"><td colspan="5" class="px-4 py-1.5 text-micro font-bold uppercase tracking-wider text-faint">{{ g.label }}</td></tr>
+                    <tr v-for="t in g.tiers" :key="t.table" class="border-b border-line/60 last:border-0">
+                      <td class="px-4 py-2.5 text-fg">{{ t.label }}<span class="ml-2 font-mono text-xs text-faint">{{ t.table }}</span></td>
+                      <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
+                      <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ sizeByLabel[t.label]?.size ?? '—' }}</td>
+                      <td class="px-4 py-2.5">
+                        <div class="flex items-center gap-1.5">
+                          <input v-model.number="draft[t.table]" type="number" min="1" class="w-20 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
+                          <span class="text-xs text-muted">{{ t.unit }}</span>
+                        </div>
+                      </td>
+                      <td class="px-4 py-2.5 text-right">
+                        <button @click="save(t)" class="rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Save</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
           </div>
           <p v-if="msg" class="text-xs" :class="msg.startsWith('✓') ? 'text-accent' : 'text-down'">{{ msg }}</p>
         </section>
