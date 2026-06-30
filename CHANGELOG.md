@@ -9,6 +9,8 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.11] — 2026-06-30
+
 ### Added
 - **Configurable cleanup for the config database's log tables** — Data & retention now
   lets admins set how long the growing log tables are kept (defaults: SSH session
@@ -16,6 +18,9 @@ Each released version's section is used verbatim as the GitHub Release notes
   background job prunes older rows. Each config table also shows what it's for.
 
 ### Changed
+- **Data & retention** now shows both databases laid out in balanced two-column tables;
+  config-DB tables report exact row counts (was a planner estimate that read 0 for
+  rarely-written tables) and a one-line purpose for each.
 - Hub-wide settings moved from one-column-per-setting to a key→value `settings` table, so
   adding a setting no longer needs a schema migration (existing settings migrated in place).
 
