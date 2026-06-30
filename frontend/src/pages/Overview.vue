@@ -28,7 +28,7 @@ const alerts = ref([])
 const backup = ref(null) // { enabled, last_backup_at } (admin only)
 const tfa = ref({ enabled: false })
 const passkeys = ref([])
-const dataStats = ref(null) // { db_size, ... } (admin only)
+const dataStats = ref(null) // { data: { db_size, … }, config } from /api/admin/data (admin only)
 const memberCount = ref(null) // user count (admin only)
 let timer = null
 
@@ -141,7 +141,7 @@ const sections = computed(() => [
       { label: 'Two-factor', value: secured.value ? 'On' : 'Off', sub: securedSub.value, icon: 'shield', to: { name: 'security' }, bad: !secured.value, color: 'warn', good: secured.value },
       ...(isAdmin.value
         ? [
-            { label: 'Database', value: dataStats.value?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
+            { label: 'Database', value: dataStats.value?.data?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
             { label: 'Namespaces', value: namespaces.value.length, icon: 'globe', to: { name: 'namespaces' } },
             { label: 'Members', value: memberCount.value ?? '—', icon: 'user', to: { name: 'members' } },
           ]
