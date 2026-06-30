@@ -39,6 +39,11 @@ onMounted(() => { if (isAdmin.value) load() })
 
 // Config-DB log tables that have an auto-cleanup window (editable).
 const configLogTables = computed(() => (config.value?.tables || []).filter((t) => t.retention_days != null))
+const configLogHalves = computed(() => {
+  const t = configLogTables.value
+  const mid = Math.ceil(t.length / 2)
+  return [t.slice(0, mid), t.slice(mid)]
+})
 async function saveCfg(t) {
   msg.value = ''
   const days = Number(cfgDraft.value[t.name])
@@ -200,24 +205,26 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
               <VIcon name="clock" :size="14" class="text-faint" />
               <span class="text-xs font-extrabold uppercase tracking-wide text-fg">Log cleanup</span>
             </div>
-            <table class="w-full text-sm">
-              <tbody>
-                <tr v-for="t in configLogTables" :key="t.name" class="border-b border-line/60 last:border-0 align-top">
-                  <td class="px-4 py-2.5">
-                    <div class="font-mono text-fg">{{ t.name }}</div>
-                    <div v-if="t.note" class="mt-0.5 text-xs text-faint">{{ t.note }}</div>
-                  </td>
-                  <td class="px-4 py-2.5 text-right">
-                    <div class="inline-flex items-center gap-1.5">
-                      <span class="text-xs text-muted">Keep</span>
-                      <input v-model.number="cfgDraft[t.name]" type="number" min="1" class="w-20 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
-                      <span class="text-xs text-muted">days</span>
-                      <button @click="saveCfg(t)" class="ml-1 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Save</button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-line">
+              <table v-for="(half, i) in configLogHalves" :key="i" class="w-full text-sm">
+                <tbody>
+                  <tr v-for="t in half" :key="t.name" class="border-b border-line/60 last:border-0 align-top">
+                    <td class="px-4 py-2.5">
+                      <div class="font-mono text-fg">{{ t.name }}</div>
+                      <div v-if="t.note" class="mt-0.5 text-xs text-faint">{{ t.note }}</div>
+                    </td>
+                    <td class="px-4 py-2.5 text-right">
+                      <div class="inline-flex items-center gap-1.5">
+                        <span class="text-xs text-muted">Keep</span>
+                        <input v-model.number="cfgDraft[t.name]" type="number" min="1" class="w-16 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
+                        <span class="text-xs text-muted">days</span>
+                        <button @click="saveCfg(t)" class="ml-1 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Save</button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <p v-if="msg" class="text-xs" :class="msg.startsWith('✓') ? 'text-accent' : 'text-down'">{{ msg }}</p>
 
