@@ -168,8 +168,11 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                 <tbody>
                   <template v-for="g in col" :key="g.label">
                     <tr class="bg-surface2/40"><td colspan="5" class="px-4 py-1.5 text-micro font-bold uppercase tracking-wider text-faint">{{ g.label }}</td></tr>
-                    <tr v-for="t in g.tiers" :key="t.table" class="border-b border-line/60 last:border-0">
-                      <td class="px-4 py-2.5 text-fg">{{ t.label }}<span class="ml-2 font-mono text-xs text-faint">{{ t.table }}</span></td>
+                    <tr v-for="t in g.tiers" :key="t.table" class="border-b border-line/60 last:border-0 align-top">
+                      <td class="px-4 py-2.5">
+                        <div class="whitespace-nowrap font-mono text-fg">{{ t.table }}</div>
+                        <div class="whitespace-nowrap text-xs text-faint">{{ t.label }}</div>
+                      </td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ sizeByLabel[t.label]?.size ?? '—' }}</td>
                       <td class="px-4 py-2.5">
