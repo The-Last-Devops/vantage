@@ -1,0 +1,38 @@
+# Zero-downtime auto-update for a raw (non-Helm) hub Deployment.
+# Grants the hub's ServiceAccount the narrowest rights it needs to trigger its own
+# rolling redeploy: get/patch on ONLY the lm-hub Deployment. Nothing else.
+#
+#   kubectl apply -f deploy/autoupdate-rbac.yaml
+#
+# Values below match Deployment "lm-hub" in namespace "last-monitor" — change both
+# if yours differ.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lm-hub
+  namespace: last-monitor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lm-hub-selfupdate
+  namespace: last-monitor
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["lm-hub"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lm-hub-selfupdate
+  namespace: last-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lm-hub-selfupdate
+subjects:
+  - kind: ServiceAccount
+    name: lm-hub
+    namespace: last-monitor
