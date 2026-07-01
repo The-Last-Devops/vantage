@@ -148,6 +148,16 @@ const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
 const openNew = () => router.push({ name: 'alert-new', query: nsq.value })
 const openEdit = (a) => router.push({ name: 'alert-edit', params: { id: a.id }, query: nsq.value })
 
+// Toolbar search (client-side), replacing the DataTable's built-in filter so the
+// search box + New button sit together like Infrastructure / Services.
+const q = ref('')
+const filteredRows = computed(() => {
+  const s = q.value.trim().toLowerCase()
+  if (!s) return tableRows.value
+  const keys = ['target_name', 'namespace', 'cond', 'state']
+  return tableRows.value.filter((r) => keys.some((k) => (r[k] ?? '').toString().toLowerCase().includes(s)))
+})
+
 onMounted(async () => {
   try { types.value = await api.get('/api/channel-types') } catch {}
   try { namespaces.value = await api.get('/api/namespaces') } catch {}
@@ -160,16 +170,22 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <AppShell title="Alert rules">
     <template #title-after><span class="text-sm text-faint">{{ alerts.length }} rules<span v-if="firingCount" class="text-down"> · {{ firingCount }} firing</span></span></template>
-    <template #actions>
-      <button @click="openNew" class="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-accentfg hover:opacity-90">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg> New rule
-      </button>
-    </template>
     <div class="space-y-4">
       <PageLoader v-if="!loaded" />
-      <DataTable v-else v-model:selected="selectedIds" :columns="columns" :rows="tableRows" :row-key="(r) => r.id"
-        selectable clickable @row-click="openEdit"
-        :filter-keys="['target_name', 'namespace', 'cond', 'state']" filter-placeholder="Filter rules…"
+      <template v-else>
+      <!-- toolbar: search + New sit together on the left (mirrors Infrastructure) -->
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="relative">
+          <VIcon name="search" :size="15" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <input v-model="q" type="search" placeholder="Search rules…"
+            class="w-72 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-96" />
+        </div>
+        <button @click="openNew" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
+          <VIcon name="plus" :size="16" /> New rule
+        </button>
+      </div>
+      <DataTable v-model:selected="selectedIds" :columns="columns" :rows="filteredRows" :row-key="(r) => r.id"
+        selectable clickable @row-click="openEdit" :filterable="false"
         empty="No alert rules yet. Click New rule to wire one up.">
         <template #bulk="{ selected, disabled }">
           <button :disabled="disabled" @click="bulkEnable(selected, true)" class="rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-xs font-medium text-fg hover:border-accent/50 disabled:cursor-not-allowed disabled:opacity-40">Enable</button>
@@ -225,6 +241,7 @@ onUnmounted(() => clearInterval(timer))
           </div>
         </template>
       </DataTable>
+      </template>
     </div>
   </AppShell>
 </template>

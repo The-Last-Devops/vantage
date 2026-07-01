@@ -141,6 +141,15 @@ async function removeChannel(c) {
 
 // ---- table ----
 const channelRows = computed(() => channels.value.map((c) => ({ ...c, typeLabel: byKind(c.kind)?.name || c.kind })))
+// Toolbar search for the channel list (separate from `search`, which drives the
+// type picker). Replaces the DataTable's built-in filter → search + New together.
+const listQ = ref('')
+const filteredChannelRows = computed(() => {
+  const s = listQ.value.trim().toLowerCase()
+  if (!s) return channelRows.value
+  const keys = ['name', 'typeLabel', 'namespace']
+  return channelRows.value.filter((r) => keys.some((k) => (r[k] ?? '').toString().toLowerCase().includes(s)))
+})
 const chanColumns = [
   { key: 'name', label: 'Name', sortable: true, nowrap: false },
   { key: 'typeLabel', label: 'Type', sortable: true },
@@ -168,13 +177,7 @@ onMounted(async () => {
 <template>
   <AppShell title="Notify channels">
     <div class="space-y-5">
-      <div class="flex items-start gap-3">
-        <p class="text-xs text-faint">Where alerts get delivered. Create a channel once, send a test, then attach it to rules under <b>Alert › Rules</b>.</p>
-        <button @click="openNew" class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-accentfg hover:opacity-90">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
-          New channel
-        </button>
-      </div>
+      <p class="text-xs text-faint">Where alerts get delivered. Create a channel once, send a test, then attach it to rules under <b>Alert › Rules</b>.</p>
 
       <!-- list -->
       <PageLoader v-if="!loaded" />
@@ -191,8 +194,20 @@ onMounted(async () => {
           <span v-for="p in types.slice(0, 6)" :key="p.kind" class="grid h-9 w-9 place-items-center rounded-xl" :style="{ background: p.color, color: p.fg }" v-html="iconSvg(p.icon, 18)"></span>
         </div>
       </div>
-      <DataTable v-else v-model:selected="selectedChannelIds" :columns="chanColumns" :rows="channelRows" :row-key="(r) => r.id"
-        selectable clickable @row-click="openChannel" :filter-keys="['name', 'typeLabel', 'namespace']" filter-placeholder="Filter channels…">
+      <template v-else>
+      <!-- toolbar: search + New channel sit together on the left (mirrors Infrastructure) -->
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="relative">
+          <VIcon name="search" :size="15" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
+          <input v-model="listQ" type="search" placeholder="Search channels…"
+            class="w-72 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-96" />
+        </div>
+        <button @click="openNew" class="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
+          <VIcon name="plus" :size="16" /> New channel
+        </button>
+      </div>
+      <DataTable v-model:selected="selectedChannelIds" :columns="chanColumns" :rows="filteredChannelRows" :row-key="(r) => r.id"
+        selectable clickable @row-click="openChannel" :filterable="false">
         <template #bulk="{ selected, disabled }">
           <button :disabled="disabled" @click="bulkDeleteChannels(selected)" class="rounded-lg border border-down/35 px-2.5 py-1.5 text-xs font-medium text-down hover:bg-down/10 disabled:cursor-not-allowed disabled:opacity-40">Delete</button>
         </template>
@@ -214,6 +229,7 @@ onMounted(async () => {
           </div>
         </template>
       </DataTable>
+      </template>
     </div>
 
     <!-- modal -->
