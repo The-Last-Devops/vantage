@@ -21,7 +21,9 @@ const SYS_AGG: &str = "avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_use
      max(net_rx) AS net_rx, max(net_tx) AS net_tx, max(disk_read) AS disk_read, max(disk_write) AS disk_write, \
      avg(load1) AS load1, avg(load5) AS load5, avg(load15) AS load15, \
      avg(cpu_user) AS cpu_user, avg(cpu_system) AS cpu_system, avg(cpu_iowait) AS cpu_iowait, \
-     avg(cpu_steal) AS cpu_steal, avg(disk_util) AS disk_util";
+     avg(cpu_steal) AS cpu_steal, avg(disk_util) AS disk_util, \
+     avg(mem_available) AS mem_available, avg(mem_buffers) AS mem_buffers, \
+     avg(mem_cached) AS mem_cached, avg(mem_free) AS mem_free";
 const CTR_AGG: &str = "avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_used, \
      max(net_rx) AS net_rx, max(net_tx) AS net_tx";
 
@@ -67,7 +69,7 @@ pub async fn setup(data: &PgPool) {
     // so it's recreated with the full column set + hierarchical sources, and reset
     // retention so the new defaults apply. After this _5m exists → block is skipped,
     // leaving any admin retention edits intact.
-    let migrated = sqlx::query_as::<_, (Option<String>,)>(
+    let has_5m = sqlx::query_as::<_, (Option<String>,)>(
         "SELECT to_regclass('public.system_metrics_5m')::text",
     )
     .fetch_one(data)
@@ -75,6 +77,19 @@ pub async fn setup(data: &PgPool) {
     .ok()
     .and_then(|(v,)| v)
     .is_some();
+    // Also recreate the ladder when the rollups predate a new raw column (e.g. the
+    // memory breakdown) — continuous aggregates can't be ALTERed, so a column added to
+    // SYS_AGG only lands by dropping + rebuilding. Detect via the 1m view's columns.
+    let has_mem_cols = sqlx::query_as::<_, (Option<i32>,)>(
+        "SELECT 1 FROM information_schema.columns \
+         WHERE table_name = 'system_metrics_1m' AND column_name = 'mem_available'",
+    )
+    .fetch_optional(data)
+    .await
+    .ok()
+    .flatten()
+    .is_some();
+    let migrated = has_5m && has_mem_cols;
     if !migrated {
         let mut reset = vec![
             "DROP MATERIALIZED VIEW IF EXISTS system_metrics_1h CASCADE".to_string(),

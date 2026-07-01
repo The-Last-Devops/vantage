@@ -87,7 +87,7 @@ const online = (s) => !!s.last_seen && Date.now() - new Date(s.last_seen).getTim
 const gappedMetrics = computed(() => {
   const m = metrics.value
   if (!m || !m.t || m.t.length < 3) return m
-  const keys = ['cpu', 'mem_pct', 'disk_pct', 'net_rx', 'net_tx', 'dr', 'dw', 'load1', 'load5', 'load15', 'cpu_user', 'cpu_system', 'cpu_iowait', 'cpu_steal', 'disk_util'].filter((k) => Array.isArray(m[k]))
+  const keys = ['cpu', 'mem_pct', 'disk_pct', 'net_rx', 'net_tx', 'dr', 'dw', 'load1', 'load5', 'load15', 'cpu_user', 'cpu_system', 'cpu_iowait', 'cpu_steal', 'disk_util', 'mem_used', 'mem_available', 'mem_buffers', 'mem_cached', 'mem_free', 'swap_used', 'swap_total'].filter((k) => Array.isArray(m[k]))
   const { t, arrays } = insertGaps(m.t, keys.map((k) => m[k]))
   const out = { ...m, t }
   keys.forEach((k, i) => { out[k] = arrays[i] })
@@ -128,6 +128,24 @@ const hostCharts = computed(() => {
     { title: 'Disk utilization', sub: 'busiest disk % busy', unit: '%', series: [{ name: 'util', color: C.purple, data: m.disk_util || [] }] },
     { title: 'Network', sub: 'rx / tx', unit: 'B/s', series: [{ name: 'rx', color: C.teal, data: m.net_rx }, { name: 'tx', color: C.blue, data: m.net_tx }] },
   )
+  // Memory breakdown (free -m style) — only when the agent reports it (Linux).
+  const hasMemBreak = ['mem_cached', 'mem_buffers', 'mem_free'].some((k) => m[k] && m[k].some((v) => v > 0))
+  if (hasMemBreak) {
+    charts.push({
+      title: 'Memory breakdown', sub: 'used / cached / buffers / available', unit: 'B',
+      series: [
+        { name: 'used', color: C.blue, data: m.mem_used },
+        { name: 'cached', color: C.purple, data: m.mem_cached },
+        { name: 'buffers', color: C.amber, data: m.mem_buffers },
+        { name: 'available', color: C.teal, data: m.mem_available },
+      ],
+    })
+  }
+  // Swap — only when the host has swap configured.
+  if (m.swap_total && m.swap_total.some((v) => v > 0)) {
+    const swapPct = m.swap_used.map((u, i) => { const tot = m.swap_total[i]; return u == null || !tot ? null : (u / tot) * 100 })
+    charts.push({ title: 'Swap', sub: 'used %', unit: '%', series: [{ name: 'Swap', color: '#e06c9f', data: swapPct }] })
+  }
   return charts
 })
 const snapshot = computed(() => {

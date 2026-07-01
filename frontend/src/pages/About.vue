@@ -76,7 +76,7 @@ onMounted(async () => {
           </div>
           <a :href="`https://github.com/${REPO}/releases`" target="_blank" rel="noopener" class="shrink-0 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Releases ↗</a>
         </div>
-        <pre v-if="latest?.body && isNewer" class="mt-3 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs leading-relaxed text-muted">{{ latest.body }}</pre>
+        <pre v-if="latest?.body && isNewer" class="mt-3 max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs leading-relaxed text-muted">{{ latest.body }}</pre>
       </div>
 
       <p class="text-xs text-faint">Changelog &amp; source: <a :href="`https://github.com/${REPO}`" target="_blank" rel="noopener" class="text-accent hover:underline">github.com/{{ REPO }}</a></p>

@@ -24,6 +24,20 @@ pub struct MetricsReport {
     pub swap_used: u64,
     /// Total swap in bytes.
     pub swap_total: u64,
+    /// Available memory in bytes — Linux MemAvailable (what apps can allocate without
+    /// swapping, i.e. free + reclaimable cache). 0 where unavailable. `mem_used` already
+    /// excludes reclaimable cache, so `mem_used + mem_available ≈ mem_total`.
+    #[serde(default)]
+    pub mem_available: u64,
+    /// Buffer cache in bytes (Linux /proc/meminfo `Buffers`). 0 elsewhere.
+    #[serde(default)]
+    pub mem_buffers: u64,
+    /// Page cache in bytes (Linux `Cached` + `SReclaimable`). 0 elsewhere.
+    #[serde(default)]
+    pub mem_cached: u64,
+    /// Free (untouched) memory in bytes (Linux `MemFree`). 0 elsewhere.
+    #[serde(default)]
+    pub mem_free: u64,
     /// Aggregate used disk in bytes across mounted filesystems.
     pub disk_used: u64,
     /// Aggregate total disk in bytes across mounted filesystems.

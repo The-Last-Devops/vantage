@@ -9,6 +9,15 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+### Added
+- **Memory breakdown + Swap charts on the host page** — the agent now reports the Linux
+  `free`-style memory split (available / buffers / cached / free) from `/proc/meminfo`, and
+  the node detail view adds a "Memory breakdown" chart and a "Swap" chart (shown when the
+  host has swap). Existing "Memory used %" is unchanged.
+
+### Fixed
+- About page no longer scrolls a short changelog inside a tiny box (cap raised to 70vh).
+
 ## [2.3.11] — 2026-06-30
 
 ### Added

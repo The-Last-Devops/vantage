@@ -17,6 +17,16 @@ pub struct MetricsHistory {
     pub mem_pct: Vec<f64>,
     /// Raw used memory in bytes (for byte-unit overlays alongside container stats).
     pub mem_used: Vec<f64>,
+    /// Memory breakdown in bytes (free -m style): total / available / buffers /
+    /// cached / free. buffers/cached/free are 0 on non-Linux agents.
+    pub mem_total: Vec<f64>,
+    pub mem_available: Vec<f64>,
+    pub mem_buffers: Vec<f64>,
+    pub mem_cached: Vec<f64>,
+    pub mem_free: Vec<f64>,
+    /// Swap used / total in bytes.
+    pub swap_used: Vec<f64>,
+    pub swap_total: Vec<f64>,
     pub disk_pct: Vec<f64>,
     pub net_rx: Vec<f64>,
     pub net_tx: Vec<f64>,
@@ -60,7 +70,11 @@ pub async fn system_metrics_series(
                 avg(load1)::float8 AS l1, avg(COALESCE(load5,0))::float8 AS l5, avg(COALESCE(load15,0))::float8 AS l15, \
                 avg(COALESCE(cpu_user,0))::float8 AS cu, avg(COALESCE(cpu_system,0))::float8 AS cs, \
                 avg(COALESCE(cpu_iowait,0))::float8 AS cio, avg(COALESCE(cpu_steal,0))::float8 AS cst, \
-                avg(mem_used)::float8 AS mu, avg(COALESCE(disk_util,0))::float8 AS disk_util \
+                avg(mem_used)::float8 AS mu, avg(mem_total)::float8 AS mtot, \
+                avg(COALESCE(mem_available,0))::float8 AS mav, avg(COALESCE(mem_buffers,0))::float8 AS mbuf, \
+                avg(COALESCE(mem_cached,0))::float8 AS mcac, avg(COALESCE(mem_free,0))::float8 AS mfre, \
+                avg(swap_used)::float8 AS swu, avg(swap_total)::float8 AS swt, \
+                avg(COALESCE(disk_util,0))::float8 AS disk_util \
          FROM system_metrics{suffix} WHERE system_id = $1 AND {timecol} > now() - interval '{interval}' \
          GROUP BY 1 ORDER BY 1 LIMIT 4000"
     );
@@ -83,6 +97,13 @@ pub async fn system_metrics_series(
         cio: f64,
         cst: f64,
         mu: f64,
+        mtot: f64,
+        mav: f64,
+        mbuf: f64,
+        mcac: f64,
+        mfre: f64,
+        swu: f64,
+        swt: f64,
         disk_util: f64,
     }
     let rows: Vec<Sample> = sqlx::query_as(&sql)
@@ -96,6 +117,13 @@ pub async fn system_metrics_series(
         cpu: Vec::new(),
         mem_pct: Vec::new(),
         mem_used: Vec::new(),
+        mem_total: Vec::new(),
+        mem_available: Vec::new(),
+        mem_buffers: Vec::new(),
+        mem_cached: Vec::new(),
+        mem_free: Vec::new(),
+        swap_used: Vec::new(),
+        swap_total: Vec::new(),
         disk_pct: Vec::new(),
         net_rx: Vec::new(),
         net_tx: Vec::new(),
@@ -130,6 +158,13 @@ pub async fn system_metrics_series(
             cio,
             cst,
             mu,
+            mtot,
+            mav,
+            mbuf,
+            mcac,
+            mfre,
+            swu,
+            swt,
             disk_util,
         } = row;
         let ts = time.timestamp();
@@ -137,6 +172,13 @@ pub async fn system_metrics_series(
         h.cpu.push(cpu);
         h.mem_pct.push(mem_pct);
         h.mem_used.push(mu);
+        h.mem_total.push(mtot);
+        h.mem_available.push(mav);
+        h.mem_buffers.push(mbuf);
+        h.mem_cached.push(mcac);
+        h.mem_free.push(mfre);
+        h.swap_used.push(swu);
+        h.swap_total.push(swt);
         h.disk_pct.push(disk_pct);
         h.load1.push(l1);
         h.load5.push(l5);

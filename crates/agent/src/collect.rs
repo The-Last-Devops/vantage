@@ -58,6 +58,7 @@ pub fn collect(
         .collect();
 
     let (disk_read, disk_write) = disk_io();
+    let (mem_available, mem_buffers, mem_cached, mem_free) = mem_detail(sys);
 
     let load = System::load_average();
     MetricsReport {
@@ -68,6 +69,10 @@ pub fn collect(
         mem_total: sys.total_memory(),
         swap_used: sys.used_swap(),
         swap_total: sys.total_swap(),
+        mem_available,
+        mem_buffers,
+        mem_cached,
+        mem_free,
         disk_used,
         disk_total,
         net_rx,
@@ -98,6 +103,42 @@ pub fn collect(
         containers: Vec::new(),
         gpus: Vec::new(),
     }
+}
+
+/// Memory breakdown (available, buffers, cached, free) in bytes. On Linux this parses
+/// `/proc/meminfo` (kB → bytes; `cached` = Cached + SReclaimable). Elsewhere only
+/// `available` is known (from sysinfo) and the rest are 0.
+#[cfg(target_os = "linux")]
+fn mem_detail(_sys: &System) -> (u64, u64, u64, u64) {
+    let Ok(content) = std::fs::read_to_string("/proc/meminfo") else {
+        return (0, 0, 0, 0);
+    };
+    let (mut avail, mut buffers, mut cached, mut sreclaim, mut free) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    for line in content.lines() {
+        let mut it = line.split_whitespace();
+        let key = it.next().unwrap_or("");
+        let val: u64 = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        match key {
+            "MemAvailable:" => avail = val,
+            "MemFree:" => free = val,
+            "Buffers:" => buffers = val,
+            "Cached:" => cached = val,
+            "SReclaimable:" => sreclaim = val,
+            _ => {}
+        }
+    }
+    (
+        avail * 1024,
+        buffers * 1024,
+        (cached + sreclaim) * 1024,
+        free * 1024,
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn mem_detail(sys: &System) -> (u64, u64, u64, u64) {
+    (sys.available_memory(), 0, 0, 0)
 }
 
 /// Per whole-disk cumulative "time spent doing I/O" in ms (/proc/diskstats field
