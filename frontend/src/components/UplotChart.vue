@@ -120,7 +120,7 @@ function opts() {
     ],
     axes: [
       { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace' },
-      { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: 58, values: (_u, vals) => vals.map(fmt) },
+      { stroke: axis, grid: { stroke: grid, width: 1 }, ticks: { stroke: grid }, font: '11px ui-monospace, monospace', size: /B/.test(props.unit) ? 72 : 52, values: (_u, vals) => vals.map(fmt) },
     ],
     hooks: {
       setCursor: [(up) => {
