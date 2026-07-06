@@ -171,6 +171,24 @@ pub async fn setup(data: &PgPool) {
     );
     stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
 
+    // Kubernetes cluster-state series: modest volume (one push/min per cluster), so
+    // keep raw a year with daily chunks + compression, no rollup ladder for now.
+    for tbl in ["kube_namespace_stats", "kube_deployment_stats"] {
+        stmts.push(format!(
+            "SELECT set_chunk_time_interval('{tbl}', INTERVAL '1 day')"
+        ));
+        stmts.push(format!(
+            "SELECT add_retention_policy('{tbl}', INTERVAL '365 days')"
+        ));
+        stmts.push(format!(
+            "ALTER TABLE {tbl} SET (timescaledb.compress, \
+                timescaledb.compress_segmentby = 'system_id', timescaledb.compress_orderby = 'time DESC')"
+        ));
+        stmts.push(format!(
+            "SELECT add_compression_policy('{tbl}', INTERVAL '7 days')"
+        ));
+    }
+
     for s in &stmts {
         if let Err(e) = sqlx::query(s).execute(data).await {
             tracing::debug!(error = %e, "downsampling setup (ignored)");
@@ -299,6 +317,8 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
         ("container_metrics_15m", "Container 15-minute"),
         ("container_metrics_1h", "Container 1-hour"),
         ("heartbeats", "Heartbeats"),
+        ("kube_namespace_stats", "K8s namespaces"),
+        ("kube_deployment_stats", "K8s deployments"),
     ];
     let mut tables = Vec::with_capacity(tiers.len());
     for (table, label) in tiers {
@@ -602,6 +622,8 @@ const RETENTION_TABLES: &[&str] = &[
     "container_metrics_15m",
     "container_metrics_1h",
     "heartbeats",
+    "kube_namespace_stats",
+    "kube_deployment_stats",
 ];
 
 /// `value` is interpreted in the tier's unit (hours for the raw tier, days else).

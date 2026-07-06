@@ -99,6 +99,7 @@ async fn main() -> Result<()> {
         // Cloudflare Access "bypass" rule on /pub covers them all. They self-auth:
         // ingest by api-key; install assets only echo caller-supplied values.
         .route("/pub/ingest", post(ingest::ingest))
+        .route("/pub/kube", post(ingest::ingest_kube))
         .route("/pub/push/{token}", get(ingest::push).post(ingest::push))
         .route("/pub/agent.yaml", get(install::k8s_agent_yaml))
         .route("/pub/install.sh", get(install::install_sh))

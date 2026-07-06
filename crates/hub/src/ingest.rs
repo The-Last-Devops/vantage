@@ -10,32 +10,36 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use shared::{IngestAck, MetricsReport, API_KEY_HEADER};
+use shared::{IngestAck, KubeReport, MetricsReport, API_KEY_HEADER};
 use uuid::Uuid;
 
 use crate::AppState;
+
+/// Resolve the `x-api-key` header to `(key_id, workspace_id)`. Reusable keys enroll
+/// many systems, so this is the single auth check every push path starts with.
+async fn resolve_key(state: &AppState, headers: &HeaderMap) -> Result<(Uuid, Uuid), StatusCode> {
+    let key = headers
+        .get(API_KEY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let row: (Uuid, Uuid) = sqlx::query_as("SELECT id, workspace_id FROM api_keys WHERE key = $1")
+        .bind(key)
+        .fetch_optional(&state.config)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "config DB error resolving api key");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(row)
+}
 
 pub async fn ingest(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(report): Json<MetricsReport>,
 ) -> Result<Json<IngestAck>, StatusCode> {
-    let key = headers
-        .get(API_KEY_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Resolve the (reusable) API key -> its workspace.
-    let row: (Uuid, Uuid) = sqlx::query_as("SELECT id, workspace_id FROM api_keys WHERE key = $1")
-        .bind(key)
-        .fetch_optional(&state.config)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "config DB error during ingest");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let (key_id, workspace_id) = row;
+    let (key_id, workspace_id) = resolve_key(&state, &headers).await?;
 
     let hostname = if report.hostname.is_empty() {
         "unknown".to_string()
@@ -150,6 +154,100 @@ pub async fn ingest(
         ok: true,
         next_interval_secs: 0, // 0 => agent keeps its current interval
         // Advertise the hub's build so `auto`-channel agents can follow it.
+        hub_build: Some(env!("GIT_SHA").to_string()),
+    }))
+}
+
+/// `POST /pub/kube` — cluster-state ingest from the cluster-scoped agent
+/// (`AGENT_KIND=k8s-cluster`). Authenticates the same way as host ingest, upserts a
+/// `systems` row of kind `k8s-cluster` (one per cluster, keyed by cluster name), then
+/// writes the per-namespace and per-deployment rows into the data DB.
+pub async fn ingest_kube(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(report): Json<KubeReport>,
+) -> Result<Json<IngestAck>, StatusCode> {
+    let (key_id, workspace_id) = resolve_key(&state, &headers).await?;
+
+    // The cluster name is the cluster's stable identity (its hostname in `systems`).
+    let cluster = if report.cluster.is_empty() {
+        "default"
+    } else {
+        report.cluster.as_str()
+    };
+
+    // Auto-register / update the cluster as a system of kind 'k8s-cluster'.
+    let system: (Uuid,) = sqlx::query_as(
+        "INSERT INTO systems (workspace_id, key_id, name, hostname, kind, cluster, agent_version, last_seen) \
+         VALUES ($1, $2, $3, $3, 'k8s-cluster', $3, $4, now()) \
+         ON CONFLICT (key_id, hostname) DO UPDATE SET \
+            last_seen = now(), kind = 'k8s-cluster', cluster = $3, agent_version = $4 \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(key_id)
+    .bind(cluster)
+    .bind(&report.agent_version)
+    .fetch_one(&state.config)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "cluster upsert during kube ingest");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    let system_id = system.0;
+    let ts = chrono::DateTime::from_timestamp(report.ts, 0).unwrap_or_else(chrono::Utc::now);
+
+    // Per-namespace tallies.
+    for n in &report.namespaces {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO kube_namespace_stats \
+             (time, system_id, namespace, phase, pods_total, pods_running, pods_pending, pods_failed, pods_succeeded, restarts) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        )
+        .bind(ts)
+        .bind(system_id)
+        .bind(&n.name)
+        .bind(&n.phase)
+        .bind(n.pods_total as i32)
+        .bind(n.pods_running as i32)
+        .bind(n.pods_pending as i32)
+        .bind(n.pods_failed as i32)
+        .bind(n.pods_succeeded as i32)
+        .bind(n.restarts as i32)
+        .execute(&state.data)
+        .await
+        {
+            tracing::error!(error = %e, "kube namespace insert");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // Per-deployment replica health.
+    for d in &report.deployments {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO kube_deployment_stats \
+             (time, system_id, namespace, name, desired, ready, available, updated) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        )
+        .bind(ts)
+        .bind(system_id)
+        .bind(&d.namespace)
+        .bind(&d.name)
+        .bind(d.desired as i32)
+        .bind(d.ready as i32)
+        .bind(d.available as i32)
+        .bind(d.updated as i32)
+        .execute(&state.data)
+        .await
+        {
+            tracing::error!(error = %e, "kube deployment insert");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    Ok(Json(IngestAck {
+        ok: true,
+        next_interval_secs: 0,
         hub_build: Some(env!("GIT_SHA").to_string()),
     }))
 }
