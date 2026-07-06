@@ -346,7 +346,7 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
     // Table name + exact on-disk size from the catalog, biggest first.
     let metas: Vec<(String, String)> = sqlx::query_as(
         "SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid)) \
-         FROM pg_class c JOIN pg_workspace n ON n.oid = c.relworkspace \
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
          WHERE n.nspname = 'public' AND c.relkind = 'r' \
          ORDER BY pg_total_relation_size(c.oid) DESC",
     )
