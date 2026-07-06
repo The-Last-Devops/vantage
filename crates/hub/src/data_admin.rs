@@ -333,7 +333,7 @@ async fn db_size_bytes(pool: &PgPool) -> i64 {
 
 /// Per-table stats for a plain relational DB (the config DB). The config DB is small,
 /// so we run an exact `COUNT(*)` per table — the planner's `reltuples` estimate reads 0
-/// for any table not yet ANALYZEd (e.g. users/namespaces with low write volume), which
+/// for any table not yet ANALYZEd (e.g. users/workspaces with low write volume), which
 /// looks like the table is empty when it isn't.
 pub async fn config_stats(config: &PgPool) -> DbStats {
     let db_size = sqlx::query_as::<_, (String,)>(
@@ -346,7 +346,7 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
     // Table name + exact on-disk size from the catalog, biggest first.
     let metas: Vec<(String, String)> = sqlx::query_as(
         "SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid)) \
-         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+         FROM pg_class c JOIN pg_workspace n ON n.oid = c.relworkspace \
          WHERE n.nspname = 'public' AND c.relkind = 'r' \
          ORDER BY pg_total_relation_size(c.oid) DESC",
     )
@@ -396,9 +396,9 @@ fn config_table_note(name: &str) -> Option<&'static str> {
         "alert_state" => "Current firing state per alert rule",
         "systems" => "Monitored hosts/servers and their agent + shell config",
         "monitors" => "Service checks (HTTP, TCP, ping, DNS, …)",
-        "namespaces" => "Tenancy boundaries that RBAC is scoped to",
+        "workspaces" => "Tenancy boundaries that RBAC is scoped to",
         "users" => "User accounts (argon2 password hashes, admin flag)",
-        "memberships" => "User × namespace role (owner/editor/viewer, can_exec)",
+        "memberships" => "User × workspace role (owner/editor/viewer, can_exec)",
         "channels" => "Notification channels (Slack, webhook, email, …)",
         "alerts" => "Alert rules — conditions and what they notify",
         "alert_channels" => "Which channels each alert rule notifies",

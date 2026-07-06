@@ -26,17 +26,17 @@ curl -fsS -c "$JAR" -X POST "$BASE/api/auth/login" \
 say "GET /api/about"
 curl -fsS -b "$JAR" "$BASE/api/about"; echo
 
-say "GET /api/namespaces"
-NS=$(curl -fsS -b "$JAR" "$BASE/api/namespaces")
-echo "$NS"
-NS_ID=$(printf '%s' "$NS" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
+say "GET /api/workspaces"
+WS=$(curl -fsS -b "$JAR" "$BASE/api/workspaces")
+echo "$WS"
+WS_ID=$(printf '%s' "$WS" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
 
 say "GET /api/audit (admin)"
 curl -fsS -b "$JAR" "$BASE/api/audit" | head -c 600; echo
 
-if [ -n "${NS_ID:-}" ]; then
-  say "GET /api/namespaces/$NS_ID/alerts (expects condition field)"
-  curl -fsS -b "$JAR" "$BASE/api/namespaces/$NS_ID/alerts"; echo
+if [ -n "${WS_ID:-}" ]; then
+  say "GET /api/workspaces/$WS_ID/alerts (expects condition field)"
+  curl -fsS -b "$JAR" "$BASE/api/workspaces/$WS_ID/alerts"; echo
 fi
 
 echo

@@ -17,7 +17,7 @@ const FIELDS = [
   { insert: 'disk', label: 'disk', desc: 'disk %' },
   { insert: 'status:', label: 'status:', desc: 'online | offline' },
   { insert: 'kind:', label: 'kind:', desc: 'node | docker | k8s' },
-  { insert: 'ns:', label: 'ns:', desc: 'namespace' },
+  { insert: 'ws:', label: 'ws:', desc: 'workspace' },
   { insert: 'agent:', label: 'agent:', desc: 'agent version' },
 ]
 const OPS = ['=', '>', '<', '>=', '<=']
@@ -34,14 +34,14 @@ const suggestions = computed(() => {
     const f = nf[1].toLowerCase()
     return OPS.map((op) => ({ insert: `${f}${op}`, label: `${f} ${op}`, desc: 'compare' }))
   }
-  const kv = tok.match(/^(status|kind|ns|agent):(.*)$/i)
+  const kv = tok.match(/^(status|kind|ws|agent):(.*)$/i)
   if (kv) {
     const key = kv[1].toLowerCase()
     const val = (kv[2] || '').toLowerCase()
     let vals = []
     if (key === 'status') vals = ['online', 'offline']
     else if (key === 'kind') vals = ['node', 'docker', 'k8s']
-    else if (key === 'ns') vals = uniq((s) => s.namespace)
+    else if (key === 'ws') vals = uniq((s) => s.workspace)
     else if (key === 'agent') vals = uniq((s) => s.agent_version)
     return vals.filter((v) => v.toLowerCase().startsWith(val)).map((v) => ({ insert: `${key}:${v}`, label: `${key}:${v}`, desc: '' }))
   }
@@ -81,7 +81,7 @@ function onKey(e) {
   <div class="relative">
     <svg class="absolute left-2.5 top-2.5 h-4 w-4 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
     <input v-model="text" @focus="onFocus" @blur="open = false" @keydown="onKey"
-      placeholder="Filter…  cpu>50  ns:prod  web*  — Enter to add"
+      placeholder="Filter…  cpu>50  ws:prod  web*  — Enter to add"
       class="w-72 rounded-lg border border-line bg-surface2 py-2 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none sm:w-96" />
     <div v-if="open && suggestions.length" class="absolute left-0 right-0 z-30 mt-1 max-h-72 overflow-auto rounded-lg border border-line bg-surface2 py-1 shadow-xl">
       <button v-for="(s, i) in suggestions" :key="s.label" @mousedown.prevent="pick(s)"

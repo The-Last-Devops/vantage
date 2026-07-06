@@ -12,19 +12,19 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuth()
 const isAdmin = computed(() => !!auth.user?.is_admin)
-const nsId = computed(() => route.params.id)
+const wsId = computed(() => route.params.id)
 
 const loaded = ref(false)
-const ns = ref(null) // { id, name, role, system_count, member_count }
+const ws = ref(null) // { id, name, role, system_count, member_count }
 const members = ref([])
 const rules = ref([])
 const services = ref([])
 const keys = ref([])
 const thr = ref(null)
 
-const canManage = computed(() => ns.value && (ns.value.role === 'owner' || isAdmin.value))
-const canEdit = computed(() => ns.value && (['owner', 'editor', 'admin'].includes(ns.value.role) || isAdmin.value))
-const isDefault = computed(() => ns.value?.name === 'default')
+const canManage = computed(() => ws.value && (ws.value.role === 'owner' || isAdmin.value))
+const canEdit = computed(() => ws.value && (['owner', 'editor', 'admin'].includes(ws.value.role) || isAdmin.value))
+const isDefault = computed(() => ws.value?.name === 'default')
 
 const roleClass = (r) => ({ owner: 'text-accent', editor: 'text-warn', viewer: 'text-muted', admin: 'text-accent' }[r] || 'text-muted')
 const initials = (e) => (e || '?').slice(0, 2).toUpperCase()
@@ -46,23 +46,23 @@ function ruleCond(a) {
 }
 
 // ---- members ----
-const NS_ROLES = ['viewer', 'editor', 'owner']
+const WS_ROLES = ['viewer', 'editor', 'owner']
 const addEmail = ref('') // selected candidate's email
 const addRole = ref('viewer')
 const memErr = ref('')
-const candidates = ref([]) // existing users not yet in this namespace
+const candidates = ref([]) // existing users not yet in this workspace
 async function loadMembers() {
-  try { members.value = await api.get(`/api/namespaces/${nsId.value}/members`) } catch { members.value = [] }
+  try { members.value = await api.get(`/api/workspaces/${wsId.value}/members`) } catch { members.value = [] }
 }
 async function loadCandidates() {
-  try { candidates.value = await api.get(`/api/namespaces/${nsId.value}/member-candidates`) } catch { candidates.value = [] }
+  try { candidates.value = await api.get(`/api/workspaces/${wsId.value}/member-candidates`) } catch { candidates.value = [] }
 }
 async function addMember() {
   memErr.value = ''
   const email = addEmail.value
   if (!email) { memErr.value = 'Pick a user to add.'; return }
   try {
-    await api.post(`/api/namespaces/${nsId.value}/members`, { email, role: addRole.value })
+    await api.post(`/api/workspaces/${wsId.value}/members`, { email, role: addRole.value })
     addEmail.value = ''
     await Promise.all([loadMembers(), loadCandidates()])
   } catch (e) {
@@ -71,13 +71,13 @@ async function addMember() {
 }
 async function setRole(m, role) {
   memErr.value = ''
-  try { await api.post(`/api/namespaces/${nsId.value}/members`, { email: m.email, role }); m.role = role }
+  try { await api.post(`/api/workspaces/${wsId.value}/members`, { email: m.email, role }); m.role = role }
   catch (e) { memErr.value = `Failed (${e.status}).`; await loadMembers() }
 }
 async function removeMember(m) {
-  if (m.user_id === auth.user?.id && !(await confirm({ title: 'Remove your own access?', message: `You will lose ${ns.value.role} access to ${ns.value.name}.`, danger: true, confirmText: 'Remove' }))) return
-  if (!(await confirm({ title: 'Remove member?', message: `${m.email} will lose access to ${ns.value.name}. You can add them back later.`, danger: true, confirmText: 'Remove' }))) return
-  try { await api.del(`/api/namespaces/${nsId.value}/members/${m.user_id}`); await Promise.all([loadMembers(), loadCandidates()]) }
+  if (m.user_id === auth.user?.id && !(await confirm({ title: 'Remove your own access?', message: `You will lose ${ws.value.role} access to ${ws.value.name}.`, danger: true, confirmText: 'Remove' }))) return
+  if (!(await confirm({ title: 'Remove member?', message: `${m.email} will lose access to ${ws.value.name}. You can add them back later.`, danger: true, confirmText: 'Remove' }))) return
+  try { await api.del(`/api/workspaces/${wsId.value}/members/${m.user_id}`); await Promise.all([loadMembers(), loadCandidates()]) }
   catch (e) { memErr.value = `Failed (${e.status}).` }
 }
 
@@ -98,34 +98,34 @@ async function saveThr() {
   }
   try {
     const body = {}; for (const k in DEFAULT_THR) body[k] = Number(thrForm.value[k])
-    await api.put(`/api/namespaces/${nsId.value}/thresholds`, body)
+    await api.put(`/api/workspaces/${wsId.value}/thresholds`, body)
     thr.value = { ...body }; thrErr.value = '✓ Saved.'
   } catch (e) { thrErr.value = e.status === 403 ? 'Editor access required.' : `Failed (${e.status}).` }
 }
 
-async function removeNs() {
+async function removeWs() {
   if (isDefault.value) return
-  if (ns.value.system_count > 0) { alert(`"${ns.value.name}" still has ${ns.value.system_count} system(s). Move or delete them first.`); return }
-  if (!(await confirm({ title: 'Delete namespace?', message: `"${ns.value.name}" — this cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
-  try { await api.del(`/api/namespaces/${nsId.value}`); router.push({ name: 'namespaces' }) }
-  catch (e) { alert(e.status === 409 ? 'Namespace still has systems attached.' : `Failed (${e.status}).`) }
+  if (ws.value.system_count > 0) { alert(`"${ws.value.name}" still has ${ws.value.system_count} system(s). Move or delete them first.`); return }
+  if (!(await confirm({ title: 'Delete workspace?', message: `"${ws.value.name}" — this cannot be undone.`, danger: true, confirmText: 'Delete' }))) return
+  try { await api.del(`/api/workspaces/${wsId.value}`); router.push({ name: 'workspaces' }) }
+  catch (e) { alert(e.status === 409 ? 'Workspace still has systems attached.' : `Failed (${e.status}).`) }
 }
 
 onMounted(async () => {
   const work = (async () => {
-    const list = await api.get('/api/namespaces').catch(() => [])
-    ns.value = list.find((n) => n.id === nsId.value) || null
-    if (!ns.value) return
+    const list = await api.get('/api/workspaces').catch(() => [])
+    ws.value = list.find((n) => n.id === wsId.value) || null
+    if (!ws.value) return
     const [als, mons, ks, thrs] = await Promise.all([
-      api.get(`/api/namespaces/${nsId.value}/alerts`).catch(() => []),
+      api.get(`/api/workspaces/${wsId.value}/alerts`).catch(() => []),
       api.get('/api/monitors').catch(() => []),
-      api.get(`/api/namespaces/${nsId.value}/keys`).catch(() => []),
+      api.get(`/api/workspaces/${wsId.value}/keys`).catch(() => []),
       api.get('/api/thresholds').catch(() => []),
     ])
     rules.value = als
-    services.value = mons.filter((m) => m.namespace === ns.value.name)
+    services.value = mons.filter((m) => m.workspace === ws.value.name)
     keys.value = ks
-    thr.value = thrs.find((x) => x.namespace === ns.value.name) || null
+    thr.value = thrs.find((x) => x.workspace === ws.value.name) || null
     resetThrForm()
     if (canManage.value) await Promise.all([loadMembers(), loadCandidates()])
   })()
@@ -135,18 +135,18 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell :breadcrumb="[{ label: 'Namespaces', to: { name: 'namespaces' } }, { label: ns?.name || 'Namespace' }]">
+  <AppShell :breadcrumb="[{ label: 'Workspaces', to: { name: 'workspaces' } }, { label: ws?.name || 'Workspace' }]">
     <PageLoader v-if="!loaded" />
-    <template v-else-if="!ns">
-      <p class="rounded-2xl border border-line bg-surface/50 p-10 text-center text-sm text-muted">Namespace not found, or you don't have access.</p>
+    <template v-else-if="!ws">
+      <p class="rounded-2xl border border-line bg-surface/50 p-10 text-center text-sm text-muted">Workspace not found, or you don't have access.</p>
     </template>
     <template v-else>
       <div class="mb-5 flex flex-wrap items-center gap-3">
         <span class="h-3 w-3 rounded-full bg-accent"></span>
-        <h1 class="text-xl font-bold text-fg">{{ ns.name }}</h1>
+        <h1 class="text-xl font-bold text-fg">{{ ws.name }}</h1>
         <span v-if="isDefault" class="rounded bg-surface2 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-faint">default</span>
-        <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize" :class="ns.role === 'owner' || ns.role === 'admin' ? 'bg-accent/12 text-accent' : ns.role === 'editor' ? 'bg-warn/12 text-warn' : 'bg-surface2 text-muted'">● {{ ns.role }}</span>
-        <button v-if="canManage && !isDefault" @click="removeNs" class="ml-auto rounded-lg border border-down/35 px-3 py-1.5 text-xs font-medium text-down hover:bg-down/10">Delete namespace</button>
+        <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize" :class="ws.role === 'owner' || ws.role === 'admin' ? 'bg-accent/12 text-accent' : ws.role === 'editor' ? 'bg-warn/12 text-warn' : 'bg-surface2 text-muted'">● {{ ws.role }}</span>
+        <button v-if="canManage && !isDefault" @click="removeWs" class="ml-auto rounded-lg border border-down/35 px-3 py-1.5 text-xs font-medium text-down hover:bg-down/10">Delete workspace</button>
       </div>
 
       <div class="grid items-start gap-4 lg:grid-cols-[1fr_320px]">
@@ -155,12 +155,12 @@ onMounted(async () => {
           <!-- members -->
           <div class="rounded-2xl border border-line bg-surface p-5">
             <div class="mb-3.5 flex items-center justify-between">
-              <h2 class="text-[11px] font-semibold uppercase tracking-wider text-faint">Members · {{ ns.member_count }}</h2>
+              <h2 class="text-[11px] font-semibold uppercase tracking-wider text-faint">Members · {{ ws.member_count }}</h2>
             </div>
             <template v-if="canManage">
               <div class="mb-3 flex flex-wrap gap-2">
                 <UiSelect v-model="addEmail" block class="min-w-[220px] flex-1" :placeholder="candidates.length ? 'Select a user…' : 'All users are already members'" :options="candidates.map((c) => ({ value: c.email, label: c.email }))" />
-                <UiSelect v-model="addRole" :options="NS_ROLES.map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))" />
+                <UiSelect v-model="addRole" :options="WS_ROLES.map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))" />
                 <button @click="addMember" :disabled="!addEmail" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40">Add</button>
               </div>
               <p v-if="memErr" class="mb-2 text-xs" :class="memErr.startsWith('✓') ? 'text-accent' : 'text-down'">{{ memErr }}</p>
@@ -169,26 +169,26 @@ onMounted(async () => {
                 <div v-for="m in members" :key="m.user_id" class="flex items-center gap-3 py-2.5">
                   <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border text-[11px] font-semibold" :class="m.role === 'owner' ? 'border-accent/25 bg-accent/12 text-accent' : 'border-line bg-surface2 text-muted'">{{ initials(m.email) }}</span>
                   <span class="min-w-0 flex-1 truncate text-sm text-fg">{{ m.email }}<span v-if="m.user_id === auth.user?.id" class="ml-2 rounded border border-accent/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent">you</span></span>
-                  <UiSelect :model-value="m.role" @update:model-value="(v) => setRole(m, v)" class="shrink-0" :options="NS_ROLES.map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))" />
+                  <UiSelect :model-value="m.role" @update:model-value="(v) => setRole(m, v)" class="shrink-0" :options="WS_ROLES.map((r) => ({ value: r, label: r[0].toUpperCase() + r.slice(1) }))" />
                   <button @click="removeMember(m)" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface2 hover:text-down" v-tip="`Remove`">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
                   </button>
                 </div>
               </div>
-              <p class="mt-3 text-xs text-faint">Roles apply only inside <b class="text-muted">{{ ns.name }}</b>. System admins always have full access and aren't listed. Pick an existing user, then a role.</p>
+              <p class="mt-3 text-xs text-faint">Roles apply only inside <b class="text-muted">{{ ws.name }}</b>. System admins always have full access and aren't listed. Pick an existing user, then a role.</p>
             </template>
-            <p v-else class="rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">Only owners of this namespace (and system admins) can view and manage members. You have <b class="text-fg capitalize">{{ ns.role }}</b> access.</p>
+            <p v-else class="rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">Only owners of this workspace (and system admins) can view and manage members. You have <b class="text-fg capitalize">{{ ws.role }}</b> access.</p>
           </div>
 
           <!-- alert rules -->
           <div class="rounded-2xl border border-line bg-surface p-5">
             <div class="mb-3 flex items-center justify-between">
               <h2 class="text-[11px] font-semibold uppercase tracking-wider text-faint">Alert rules · {{ rules.length }}</h2>
-              <RouterLink v-if="canEdit" :to="{ name: 'alert-new', query: { ns: ns.name } }" class="text-xs text-accent hover:underline">New rule ›</RouterLink>
+              <RouterLink v-if="canEdit" :to="{ name: 'alert-new', query: { ws: ws.name } }" class="text-xs text-accent hover:underline">New rule ›</RouterLink>
             </div>
-            <p v-if="!rules.length" class="text-xs text-faint">No alert rules in this namespace.</p>
+            <p v-if="!rules.length" class="text-xs text-faint">No alert rules in this workspace.</p>
             <div v-else>
-              <RouterLink v-for="a in rules" :key="a.id" :to="{ name: 'alerts', query: { ns: ns.name, rule: a.id } }" class="flex items-center gap-2.5 border-t border-line/60 py-2.5 first:border-t-0 hover:opacity-80">
+              <RouterLink v-for="a in rules" :key="a.id" :to="{ name: 'alerts', query: { ws: ws.name, rule: a.id } }" class="flex items-center gap-2.5 border-t border-line/60 py-2.5 first:border-t-0 hover:opacity-80">
                 <span class="h-2 w-2 shrink-0 rounded-full" :class="ruleState(a).dot"></span>
                 <span class="min-w-0 flex-1 truncate text-sm text-fg"><b>{{ a.target_name }}</b> <span class="text-muted">· {{ ruleCond(a) }}</span></span>
                 <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="ruleState(a).cls">{{ ruleState(a).label }}</span>
@@ -203,8 +203,8 @@ onMounted(async () => {
           <div class="rounded-2xl border border-line bg-surface p-4">
             <h2 class="mb-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Contents</h2>
             <div class="flex flex-col gap-0.5 text-sm">
-              <RouterLink :to="{ name: 'systems', query: { ns: ns.name } }" class="flex items-center justify-between rounded-lg px-2.5 py-2 text-fg hover:bg-surface2"><span>Systems</span><b class="font-mono tabular-nums">{{ ns.system_count }}</b></RouterLink>
-              <RouterLink :to="{ name: 'monitors', query: { ns: ns.name } }" class="flex items-center justify-between rounded-lg px-2.5 py-2 text-fg hover:bg-surface2"><span>Services</span><b class="font-mono tabular-nums">{{ services.length }}</b></RouterLink>
+              <RouterLink :to="{ name: 'systems', query: { ws: ws.name } }" class="flex items-center justify-between rounded-lg px-2.5 py-2 text-fg hover:bg-surface2"><span>Systems</span><b class="font-mono tabular-nums">{{ ws.system_count }}</b></RouterLink>
+              <RouterLink :to="{ name: 'monitors', query: { ws: ws.name } }" class="flex items-center justify-between rounded-lg px-2.5 py-2 text-fg hover:bg-surface2"><span>Services</span><b class="font-mono tabular-nums">{{ services.length }}</b></RouterLink>
               <div class="flex items-center justify-between rounded-lg px-2.5 py-2 text-fg"><span>API keys</span><b class="font-mono tabular-nums">{{ keys.length }}</b></div>
             </div>
           </div>

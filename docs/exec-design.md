@@ -73,9 +73,9 @@ scoped ServiceAccount. Not host-exec.
 ## RBAC — separate `exec` capability (least privilege)
 
 Exec is **not** folded into "edit config". A user may open a shell only if they are
-`owner` of the host's namespace **and** hold a dedicated `can_exec` capability
+`owner` of the host's workspace **and** hold a dedicated `can_exec` capability
 (system admin bypasses). So "can edit alert rules" ≠ "can shell into prod".
-New gate `rbac::require_exec(state, user, namespace_id)` is the single place this
+New gate `rbac::require_exec(state, user, workspace_id)` is the single place this
 rule lives.
 
 ## A hub compromise alone cannot exec
@@ -106,7 +106,7 @@ those bytes (store a `‹masked›` marker, not the keystrokes).
 ## Non-negotiable invariants
 
 - **Step-up auth** before opening a shell (re-enter password / 2FA), like sudo.
-- **Immutable audit:** every session records who / system / namespace / start / end /
+- **Immutable audit:** every session records who / system / workspace / start / end /
   client IP / status **and the full PTY transcript**, append-only, surfaced in an
   Audit UI. No transcript → no shell.
 - **No root by default:** Tier 1 runs as the user's own SSH account; Tier 2 (root) is a

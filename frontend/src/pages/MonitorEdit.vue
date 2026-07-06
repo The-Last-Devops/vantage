@@ -10,7 +10,7 @@ const route = useRoute()
 const router = useRouter()
 const editId = computed(() => route.params.id || null)
 
-const namespaces = ref([])
+const workspaces = ref([])
 const loaded = ref(false)
 const formErr = ref('')
 const saving = ref(false)
@@ -33,7 +33,7 @@ const isHttp = (k) => k === 'http' || k === 'keyword'
 const isEdit = computed(() => editId.value != null)
 
 const blank = () => ({
-  id: null, name: '', kind: 'http', target: '', nsId: '', interval_secs: 60, timeout_secs: 15, retries: 1, upside_down: false,
+  id: null, name: '', kind: 'http', target: '', wsId: '', interval_secs: 60, timeout_secs: 15, retries: 1, upside_down: false,
   method: 'GET', accepted_status: '', max_redirects: 10, ignore_tls: false, headersText: '', body: '',
   authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false,
   password: '', expected_ip: '', cert_warn_days: 14, tags: '', description: '',
@@ -65,7 +65,7 @@ function buildConfig() {
   return cfg
 }
 
-function back() { router.push({ name: 'monitors', query: route.query.ns ? { ns: route.query.ns } : {} }) }
+function back() { router.push({ name: 'monitors', query: route.query.ws ? { ws: route.query.ws } : {} }) }
 
 async function submit() {
   formErr.value = ''
@@ -80,17 +80,17 @@ async function submit() {
     if (isEdit.value) {
       await api.patch(`/api/monitors/${v.id}`, { name: v.name.trim(), target, interval_secs: Number(v.interval_secs) || 60, config })
     } else {
-      if (!v.nsId) { formErr.value = 'Pick a namespace.'; saving.value = false; return }
-      await api.post(`/api/namespaces/${v.nsId}/monitors`, { name: v.name.trim(), kind: v.kind, target, interval_secs: Number(v.interval_secs) || 60, config })
+      if (!v.wsId) { formErr.value = 'Pick a workspace.'; saving.value = false; return }
+      await api.post(`/api/workspaces/${v.wsId}/monitors`, { name: v.name.trim(), kind: v.kind, target, interval_secs: Number(v.interval_secs) || 60, config })
     }
     back()
-  } catch (e) { formErr.value = e.status === 403 ? 'You need editor access to that namespace.' : `Failed (${e.status}).` }
+  } catch (e) { formErr.value = e.status === 403 ? 'You need editor access to that workspace.' : `Failed (${e.status}).` }
   finally { saving.value = false }
 }
 
 onMounted(async () => {
   const work = (async () => {
-    namespaces.value = await api.get('/api/namespaces').catch(() => [])
+    workspaces.value = await api.get('/api/workspaces').catch(() => [])
     if (editId.value) {
       const all = await api.get('/api/monitors').catch(() => [])
       const m = all.find((x) => x.id === editId.value)
@@ -98,7 +98,7 @@ onMounted(async () => {
         const c = m.config || {}
         const auth = c.auth || {}
         f.value = {
-          id: m.id, name: m.name, kind: m.kind, target: m.target, nsId: '', interval_secs: m.interval_secs,
+          id: m.id, name: m.name, kind: m.kind, target: m.target, wsId: '', interval_secs: m.interval_secs,
           timeout_secs: c.timeout_secs ?? 15, retries: c.retries ?? 0, upside_down: !!c.upside_down,
           method: c.method || 'GET', accepted_status: c.accepted_status || '', max_redirects: c.max_redirects ?? 10, ignore_tls: !!c.ignore_tls,
           headersText: c.headers ? Object.entries(c.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '', body: c.body || '',
@@ -108,9 +108,9 @@ onMounted(async () => {
         }
       }
     } else {
-      const pre = (route.query.ns || '').split(',').filter(Boolean)
-      const match = namespaces.value.find((n) => n.name === pre[0])
-      f.value.nsId = (match || namespaces.value[0])?.id || ''
+      const pre = (route.query.ws || '').split(',').filter(Boolean)
+      const match = workspaces.value.find((n) => n.name === pre[0])
+      f.value.wsId = (match || workspaces.value[0])?.id || ''
     }
   })()
   await minLoad(work)
@@ -119,17 +119,17 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: isEdit ? f.name : 'New service' }]">
+  <AppShell :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: isEdit ? f.name : 'New service' }]">
     <PageLoader v-if="!loaded" />
     <template v-else>
       <form @submit.prevent="submit" class="mx-auto w-full max-w-[720px] space-y-6 rounded-2xl border border-line bg-surface p-6">
-        <!-- Basics: name is the headline field, then type/namespace, then target -->
+        <!-- Basics: name is the headline field, then type/workspace, then target -->
         <section class="space-y-3">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="service" :size="13" />Basics</div>
           <label class="block text-xs text-muted">Name<input v-model="f.name" placeholder="My service" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-3 text-base font-medium text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label class="block text-xs text-muted">Type<UiSelect v-model="f.kind" block :disabled="isEdit" class="mt-1" :options="KINDS.map((k) => ({ value: k.v, label: k.label }))" /></label>
-            <label v-if="!isEdit" class="block text-xs text-muted">Namespace<UiSelect v-model="f.nsId" block class="mt-1" :options="namespaces.map((n) => ({ value: n.id, label: n.name }))" /></label>
+            <label v-if="!isEdit" class="block text-xs text-muted">Workspace<UiSelect v-model="f.wsId" block class="mt-1" :options="workspaces.map((n) => ({ value: n.id, label: n.name }))" /></label>
           </div>
           <label v-if="f.kind !== 'push'" class="block text-xs text-muted">Target<input v-model="f.target" :placeholder="KINDS.find((k) => k.v === f.kind)?.ph" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
           <p v-else class="rounded-lg border border-line2 bg-surface2/40 px-3 py-2 text-xs text-muted">Passive check — a push URL is generated after you create it. Have your job call it on schedule; if no call arrives within the interval, it goes Down.</p>

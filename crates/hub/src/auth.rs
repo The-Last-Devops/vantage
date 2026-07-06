@@ -96,12 +96,12 @@ pub struct CurrentUser {
     pub id: Uuid,
     pub email: String,
     pub is_admin: bool,
-    /// System-level read-only ("admin read"): may view every namespace.
+    /// System-level read-only ("admin read"): may view every workspace.
     pub read_all: bool,
 }
 
 impl CurrentUser {
-    /// May this user read across all namespaces? (full admin or read-only admin)
+    /// May this user read across all workspaces? (full admin or read-only admin)
     pub fn can_read_all(&self) -> bool {
         self.is_admin || self.read_all
     }

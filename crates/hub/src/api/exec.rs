@@ -15,7 +15,7 @@ async fn system_shell_row(
     id: Uuid,
 ) -> Result<(Uuid, Uuid, String, i32), StatusCode> {
     sqlx::query_as::<_, (Uuid, Uuid, String, i32)>(
-        "SELECT namespace_id, key_id, hostname, ssh_port FROM systems WHERE id = $1",
+        "SELECT workspace_id, key_id, hostname, ssh_port FROM systems WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(&state.config)
@@ -33,15 +33,15 @@ pub struct ShellStatus {
     has_keys: bool,
 }
 
-/// GET /api/systems/:id/shell — status for the calling user (any namespace member).
+/// GET /api/systems/:id/shell — status for the calling user (any workspace member).
 pub async fn get_shell(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<ShellStatus>, StatusCode> {
-    let (ns, key_id, hostname, ssh_port) = system_shell_row(&state, id).await?;
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
-    let can_exec = rbac::require_exec(&state, &user, ns).await.is_ok();
+    let (ws, key_id, hostname, ssh_port) = system_shell_row(&state, id).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
+    let can_exec = rbac::require_exec(&state, &user, ws).await.is_ok();
     let tunnel_online = state.tunnels.has(key_id, &hostname).await;
     let (key_count,): (i64,) = sqlx::query_as("SELECT count(*) FROM ssh_keys WHERE user_id = $1")
         .bind(user.id)
@@ -69,8 +69,8 @@ pub async fn put_shell(
     Path(id): Path<Uuid>,
     Json(req): Json<PutShell>,
 ) -> Result<StatusCode, StatusCode> {
-    let (ns, ..) = system_shell_row(&state, id).await?;
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
+    let (ws, ..) = system_shell_row(&state, id).await?;
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
     if !(1..=65535).contains(&req.ssh_port) {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -296,8 +296,8 @@ pub async fn console_ticket(
     Path(id): Path<Uuid>,
     Json(req): Json<TicketReq>,
 ) -> Result<Json<TicketResp>, StatusCode> {
-    let (ns, key_id, hostname, ssh_port) = system_shell_row(&state, id).await?;
-    rbac::require_exec(&state, &user, ns).await?;
+    let (ws, key_id, hostname, ssh_port) = system_shell_row(&state, id).await?;
+    rbac::require_exec(&state, &user, ws).await?;
     // (shell is always available; access is gated by require_exec + step-up + the
     // host's own SSH auth — the per-host enable/disable toggle was removed in 0021.)
     if !state.tunnels.has(key_id, &hostname).await {

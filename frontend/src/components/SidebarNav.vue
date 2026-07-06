@@ -15,7 +15,7 @@ const router = useRouter()
 // Parent groups: clicking the parent jumps to its first child; hovering a
 // parent reveals its children. When nothing is hovered, the group owning the
 // current route stays expanded so you always see where you are.
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 const isAdmin = computed(() => !!auth.user?.is_admin)
 // Flat top-level nav (no children). Fleet + Metrics are temporarily hidden from the
 // nav (routes/code kept, reachable by URL) — they overlapped and read as noise on
@@ -54,9 +54,9 @@ const groups = computed(() =>
     },
     {
       key: 'settings', label: 'Settings', icon: 'settings',
-      owns: ['namespace'],
+      owns: ['workspace'],
       children: [
-        { label: 'Namespace', name: 'namespaces', icon: 'globe', owns: ['namespace'] },
+        { label: 'Workspace', name: 'workspaces', icon: 'globe', owns: ['workspace'] },
         { label: 'Members', name: 'members', icon: 'user', admin: true },
         { label: 'Audit', name: 'audit', icon: 'logs', admin: true },
         { label: 'Data & retention', name: 'data', icon: 'disk', admin: true },
@@ -69,7 +69,7 @@ const groups = computed(() =>
     },
   ].map((g) => ({ ...g, children: g.children.filter((c) => !c.admin || isAdmin.value) })),
 )
-// Carry the namespace selection (?ns) onto every nav link so it never drops.
+// Carry the workspace selection (?ws) onto every nav link so it never drops.
 const childTo = (c) => {
   const query = { ...nsq.value }
   if (c.down) query.status = 'down'

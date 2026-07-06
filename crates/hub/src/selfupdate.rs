@@ -101,7 +101,7 @@ async fn trigger_rollout(digest: &str) -> Option<()> {
         );
         return None;
     };
-    let ns = std::fs::read_to_string(format!("{SA_DIR}/namespace")).ok()?;
+    let ws = std::fs::read_to_string(format!("{SA_DIR}/workspace")).ok()?;
     let token = std::fs::read_to_string(format!("{SA_DIR}/token")).ok()?;
     let ca = std::fs::read(format!("{SA_DIR}/ca.crt")).ok()?;
     let client = reqwest::Client::builder()
@@ -110,8 +110,8 @@ async fn trigger_rollout(digest: &str) -> Option<()> {
         .build()
         .ok()?;
     let url = format!(
-        "https://{host}:{port}/apis/apps/v1/namespaces/{}/deployments/{deployment}",
-        ns.trim()
+        "https://{host}:{port}/apis/apps/v1/workspaces/{}/deployments/{deployment}",
+        ws.trim()
     );
     let body = serde_json::json!({
         "spec": { "template": { "metadata": { "annotations": { DIGEST_ANNOTATION: digest } } } }

@@ -14,9 +14,9 @@ const router = useRouter()
 const openChannel = (c) => router.push({ name: 'channel', params: { id: c.id } })
 
 // Channels are a shared resource: everyone sees every channel (global list); only
-// an editor of a channel's own namespace may edit/delete it (the API marks each
+// an editor of a channel's own workspace may edit/delete it (the API marks each
 // row with `can_edit` and masks secrets for everyone else).
-const namespaces = ref([]) // for the "create in namespace" picker
+const workspaces = ref([]) // for the "create in workspace" picker
 const channels = ref([])
 
 // Provider manifest comes from the backend (GET /api/channel-types), so adding a
@@ -59,10 +59,10 @@ const step = ref('pick') // 'pick' | 'form'
 const cur = ref(null) // current provider meta
 const editId = ref(null)
 const search = ref('')
-const form = ref({ name: '', config: {}, nsId: '' })
+const form = ref({ name: '', config: {}, wsId: '' })
 const err = ref('')
 const modalTest = ref('') // '' | 'run' | 'ok' | 'fail'
-const readOnly = ref(false) // viewing a channel you can't edit (other namespace)
+const readOnly = ref(false) // viewing a channel you can't edit (other workspace)
 const usedBy = ref([]) // alert rules that notify through the open channel
 
 const filtered = computed(() => {
@@ -79,14 +79,14 @@ const filtered = computed(() => {
 
 function openNew() {
   editId.value = null; cur.value = null; step.value = 'pick'; readOnly.value = false
-  search.value = ''; form.value = { name: '', config: {}, nsId: namespaces.value[0]?.id || '' }
+  search.value = ''; form.value = { name: '', config: {}, wsId: workspaces.value[0]?.id || '' }
   usedBy.value = []; err.value = ''; modalTest.value = ''; modalOpen.value = true
 }
 function pickType(p) {
   cur.value = p
   const cfg = {}
   for (const f of p.fields) if (f.default != null) cfg[f.key] = f.default
-  form.value = { name: form.value.name, config: cfg, nsId: form.value.nsId }
+  form.value = { name: form.value.name, config: cfg, wsId: form.value.wsId }
   err.value = ''; modalTest.value = ''
   step.value = 'form'
 }
@@ -104,24 +104,24 @@ function validate() {
 }
 async function save() {
   if (!validate()) return
-  if (!editId.value && !form.value.nsId) { err.value = 'Pick a namespace to create the channel in.'; return }
+  if (!editId.value && !form.value.wsId) { err.value = 'Pick a workspace to create the channel in.'; return }
   const payload = { name: form.value.name.trim(), config: form.value.config }
   try {
-    const newId = await api.post(`/api/namespaces/${form.value.nsId}/channels`, { ...payload, kind: cur.value.kind })
+    const newId = await api.post(`/api/workspaces/${form.value.wsId}/channels`, { ...payload, kind: cur.value.kind })
     modalOpen.value = false
     // Land on the new channel's page so the user can send a test straight away.
     router.push({ name: 'channel', params: { id: newId } })
   } catch (e) {
-    err.value = e.status === 403 ? 'You need editor access to this namespace.' : `Failed (${e.status}).`
+    err.value = e.status === 403 ? 'You need editor access to this workspace.' : `Failed (${e.status}).`
   }
 }
 async function modalSendTest() {
-  // Test the typed config BEFORE saving — scoped to the chosen namespace.
-  if (!form.value.nsId) { err.value = 'Pick a namespace first.'; return }
+  // Test the typed config BEFORE saving — scoped to the chosen workspace.
+  if (!form.value.wsId) { err.value = 'Pick a workspace first.'; return }
   if (!validate()) return
   modalTest.value = 'run'
   try {
-    await api.post(`/api/namespaces/${form.value.nsId}/channels/test`, { kind: cur.value.kind, config: form.value.config })
+    await api.post(`/api/workspaces/${form.value.wsId}/channels/test`, { kind: cur.value.kind, config: form.value.config })
     modalTest.value = 'ok'
   } catch { modalTest.value = 'fail' }
 }
@@ -147,13 +147,13 @@ const listQ = ref('')
 const filteredChannelRows = computed(() => {
   const s = listQ.value.trim().toLowerCase()
   if (!s) return channelRows.value
-  const keys = ['name', 'typeLabel', 'namespace']
+  const keys = ['name', 'typeLabel', 'workspace']
   return channelRows.value.filter((r) => keys.some((k) => (r[k] ?? '').toString().toLowerCase().includes(s)))
 })
 const chanColumns = [
   { key: 'name', label: 'Name', sortable: true, nowrap: false },
   { key: 'typeLabel', label: 'Type', sortable: true },
-  { key: 'namespace', label: 'Namespace', sortable: true },
+  { key: 'workspace', label: 'Workspace', sortable: true },
   { key: 'access', label: '', width: '92px' },
   { key: 'actions', label: '', align: 'right', width: '132px' },
 ]
@@ -169,7 +169,7 @@ async function bulkDeleteChannels(rows) {
 
 onMounted(async () => {
   try { types.value = await api.get('/api/channel-types') } catch { types.value = [] }
-  try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
+  try { workspaces.value = await api.get('/api/workspaces') } catch { workspaces.value = [] }
   await loadChannels()
 })
 </script>
@@ -215,7 +215,7 @@ onMounted(async () => {
           <ChannelCard :name="row.name" :icon-html="iconSvg(byKind(row.kind)?.icon || 'chat', 16)"
             :icon-color="byKind(row.kind)?.color || 'rgb(var(--surface2))'" :icon-fg="byKind(row.kind)?.fg || 'rgb(var(--fg))'" />
         </template>
-        <template #cell-namespace="{ row }"><span class="text-muted">{{ row.namespace }}</span></template>
+        <template #cell-workspace="{ row }"><span class="text-muted">{{ row.workspace }}</span></template>
         <template #cell-access="{ row }">
           <StatePill v-if="!row.can_edit" tone="muted" label="view only" :dot="false" />
         </template>
@@ -269,19 +269,19 @@ onMounted(async () => {
 
         <!-- STEP 2: configure -->
         <template v-else>
-          <ChannelForm :cur="cur" :config="form.config" :namespaces="namespaces" :edit-id="editId" :read-only="readOnly"
-            v-model:name="form.name" v-model:ns-id="form.nsId" />
+          <ChannelForm :cur="cur" :config="form.config" :workspaces="workspaces" :edit-id="editId" :read-only="readOnly"
+            v-model:name="form.name" v-model:ws-id="form.wsId" />
 
           <!-- which alert rules notify through this channel -->
           <div v-if="editId" class="border-t border-line px-5 py-4">
             <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Used by {{ usedBy.length }} alert rule{{ usedBy.length === 1 ? '' : 's' }}</div>
             <p v-if="!usedBy.length" class="text-xs text-faint">No alert rules notify through this channel yet.</p>
             <div v-else class="flex max-h-32 flex-col gap-1.5 overflow-y-auto">
-              <RouterLink v-for="r in usedBy" :key="r.id" :to="{ name: 'alerts', query: { ns: r.namespace, rule: r.id } }"
+              <RouterLink v-for="r in usedBy" :key="r.id" :to="{ name: 'alerts', query: { ws: r.workspace, rule: r.id } }"
                 class="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-xs hover:border-accent/50">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="r.enabled ? 'bg-accent' : 'bg-faint'"></span>
                 <span class="truncate text-fg">{{ r.target }}</span>
-                <span class="shrink-0 text-faint">· {{ r.namespace }}</span>
+                <span class="shrink-0 text-faint">· {{ r.workspace }}</span>
                 <span v-if="!r.enabled" class="ml-auto shrink-0 text-faint">disabled</span>
               </RouterLink>
             </div>

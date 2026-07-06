@@ -14,8 +14,8 @@ import Systems from '../pages/Systems.vue'
 import SystemDetail from '../pages/SystemDetail.vue'
 import Console from '../pages/Console.vue'
 import SecuritySettings from '../pages/SecuritySettings.vue'
-import Namespaces from '../pages/Namespaces.vue'
-import NamespaceDetail from '../pages/NamespaceDetail.vue'
+import Workspaces from '../pages/Workspaces.vue'
+import WorkspaceDetail from '../pages/WorkspaceDetail.vue'
 import Members from '../pages/Members.vue'
 import Monitors from '../pages/Monitors.vue'
 import MonitorDetail from '../pages/MonitorDetail.vue'
@@ -43,8 +43,8 @@ const routes = [
   { path: '/attention', name: 'attention', component: Systems, meta: { title: 'Issues' } },
   { path: '/system/:id', name: 'system', component: SystemDetail, meta: { title: 'Host' } },
   { path: '/systems/:id/console', name: 'console', component: Console, meta: { title: 'Console' } },
-  { path: '/namespaces', name: 'namespaces', component: Namespaces, meta: { title: 'Namespaces' } },
-  { path: '/namespace/:id', name: 'namespace', component: NamespaceDetail, meta: { title: 'Namespace' } },
+  { path: '/workspaces', name: 'workspaces', component: Workspaces, meta: { title: 'Workspaces' } },
+  { path: '/workspace/:id', name: 'workspace', component: WorkspaceDetail, meta: { title: 'Workspace' } },
   { path: '/members', name: 'members', component: Members, meta: { title: 'Members' } },
   { path: '/settings/security', name: 'security', component: SecuritySettings, meta: { title: 'Security' } },
   { path: '/monitors', name: 'monitors', component: Monitors, meta: { title: 'Services' } },
@@ -75,11 +75,11 @@ router.beforeEach(async (to, from) => {
   if (!auth.ready) await auth.bootstrap()
   if (!to.meta.public && !auth.isAuthed) return { name: 'login', query: { next: to.fullPath } }
   if (to.name === 'login' && auth.isAuthed) return { name: 'systems' }
-  // Keep the namespace selection in the URL across navigation — never drop ?ns
+  // Keep the workspace selection in the URL across navigation — never drop ?ws
   // when moving to another page. (Same-page changes are respected, so clearing
-  // the selector to "all namespaces" still works.)
-  if (to.path !== from.path && to.query.ns == null && from.query.ns != null) {
-    return { path: to.path, query: { ...to.query, ns: from.query.ns }, hash: to.hash }
+  // the selector to "all workspaces" still works.)
+  if (to.path !== from.path && to.query.ws == null && from.query.ws != null) {
+    return { path: to.path, query: { ...to.query, ws: from.query.ws }, hash: to.hash }
   }
 })
 

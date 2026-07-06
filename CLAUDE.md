@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `vantage` is a self-hosted **centralized DevOps control plane** written in Rust: one
 place to manage and watch servers, clusters, services, and cloud — monitor, alert, and
-operate (incl. SSH/shell exec) from a single console. Multi-user with namespace-scoped
+operate (incl. SSH/shell exec) from a single console. Multi-user with workspace-scoped
 RBAC and public status pages. (Grew out of Beszel-style host metrics + Uptime-Kuma-style
 service checks; the ambition is broader — see Guiding principles.)
 
@@ -52,7 +52,7 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   with a per-server enrollment token in the `x-agent-token` header. This is what lets agents
   sit behind NAT/firewalls. The hub never connects back to agents.
 - **Two separate PostgreSQL databases, two `PgPool`s in the hub:**
-  - `config` DB — plain Postgres: users, namespaces, RBAC/membership, server & monitor
+  - `config` DB — plain Postgres: users, workspaces, RBAC/membership, server & monitor
     config, alert rules, status pages.
   - `data` DB — Postgres **+ TimescaleDB extension**: metrics & heartbeat hypertables.
   - **Never JOIN across the two.** They relate only by IDs at the application layer
@@ -69,9 +69,9 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   `vite` on :5173 (proxies `/api`). Still a single binary — keep it that way; don't add a
   separate server for the UI. (Migrated from the original Rust SSR + HTMX; see `frontend/PLAN.md`.)
   - **Never paint a blank/black screen while loading** — see the "Frontend" convention below.
-- **RBAC is namespace-scoped.** Permissions live in a `memberships` table (user × namespace ×
+- **RBAC is workspace-scoped.** Permissions live in a `memberships` table (user × workspace ×
   role: `owner` / `editor` / `viewer`), plus a system-level `admin` (bypasses to owner
-  everywhere). Authorize at the namespace boundary — every namespaced route funnels through
+  everywhere). Authorize at the workspace boundary — every workspaced route funnels through
   `rbac::require_role`, the single place permission rules live.
 - **Auth = opaque DB-backed sessions, not JWT** (revocable: logout/admin-revoke work without a
   blocklist). Random token in the `sessions` table, delivered as an httpOnly cookie; passwords
@@ -86,7 +86,7 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   user's RBAC — scope a token by issuing it to a limited service-account user. PATs live in
   `api_pats` (sha256-hashed, revocable), distinct from agent enrollment keys (`api_keys`).
 - **MCP server is embedded in the hub** at `POST /mcp` (JSON-RPC 2.0, PAT-authed) — see `mcp.rs`.
-  Tools run with the caller's RBAC: reads scoped to their namespaces, writes via `require_role`.
+  Tools run with the caller's RBAC: reads scoped to their workspaces, writes via `require_role`.
   Adding a tool = one arm in `call_tool` + an entry in `tool_defs`; it must enforce RBAC itself.
 - **sqlx with runtime queries** (`sqlx::query` / `query_as`), not the compile-time `query!`
   macros, so the workspace builds without a live database / `DATABASE_URL` at compile time.
@@ -130,7 +130,7 @@ docker compose up -d
   The Vue SPA can be bypassed, so each create/patch handler must reject bad input with
   `400` *before* the INSERT/UPDATE, and store the trimmed value. Reuse the shared validators
   in `crates/hub/src/api/mod.rs`: `valid_name(s, max)` for display names (channel / monitor /
-  system / status-page title), `valid_ns_name` for slugs & identifiers (lowercase, hyphen,
+  system / status-page title), `valid_ws_name` for slugs & identifiers (lowercase, hyphen,
   no spaces — it's in URLs), `valid_email` for emails (ASCII, no whitespace). Mirror the same
   rule in the Vue form for instant feedback (e.g. the email regex in `Members.vue`). When you
   add or change a handler that accepts input, validate its fields in the **same** change — a
@@ -149,7 +149,7 @@ docker compose up -d
     nothing until it lands — that gap is the blank flash. Keep new pages eager-imported.
   - Every page that fetches data owns a loading flag initialised to its "still loading" value
     (`const loading = ref(true)` / `const loaded = ref(false)`) and renders `Loading…` until the
-    first fetch settles — clear it in a `finally`, and also on the no-namespace early-return so it
+    first fetch settles — clear it in a `finally`, and also on the no-workspace early-return so it
     can't spin forever. Polling reloads must NOT re-flash the loader (gate the loader on the
     first-load flag, not on every fetch). Show the empty-state only *after* loading completes
     (`v-if="loading" … v-else-if="!items.length"`).
@@ -157,30 +157,30 @@ docker compose up -d
     sets its data *before* `minLoad`'s minimum time elapses, an ungated list renders *under* the
     spinner and then jumps when the loader hides. Wrap the list/empty-state in `<template v-else>`
     of the `v-if="!loaded"` loader so they never show together.
-- **Namespace-scoped data: aggregate across the selection AND show the namespace.** The sidebar
-  selector is a multi-select in the URL (`?ns=a,b`; empty = all). A page listing namespaced data
+- **Workspace-scoped data: aggregate across the selection AND show the workspace.** The sidebar
+  selector is a multi-select in the URL (`?ws=a,b`; empty = all). A page listing workspaced data
   (alerts, events, channels-in-use, services, hosts) must show the union of **all** selected
-  namespaces — never collapse to one. The bug pattern to avoid: `selectedNsName()` returning a
-  name only when exactly one is picked and falling back to `namespaces[0]`; instead derive an
-  `activeNs` set and fetch/merge per namespace (or filter a global list client-side, like
-  Systems). Every row of merged data must be **labelled with its namespace** so it's clear which
-  one it belongs to. The create/edit flow derives the target namespace from the chosen object,
+  workspaces — never collapse to one. The bug pattern to avoid: `selectedWsName()` returning a
+  name only when exactly one is picked and falling back to `workspaces[0]`; instead derive an
+  `activeWs` set and fetch/merge per workspace (or filter a global list client-side, like
+  Systems). Every row of merged data must be **labelled with its workspace** so it's clear which
+  one it belongs to. The create/edit flow derives the target workspace from the chosen object,
   not from a single global selection.
 - **List order must be stable across reloads — a mutation must never reorder rows.** Toggling a
   rule's `enabled` once looked like it toggled a *different* rule because the backend sorted
   `enabled DESC`, so the row jumped on reload. Sort lists client-side by a key independent of the
-  mutated field (e.g. namespace → name → id), and dedupe by id defensively after a multi-source merge.
+  mutated field (e.g. workspace → name → id), and dedupe by id defensively after a multi-source merge.
 - **Secrets are shown only to those who can edit the owning resource.** Channel configs (tokens,
   passwords, webhook URLs), push-monitor tokens, and user-supplied request headers are credentials.
   List/detail endpoints must redact them (`notify::redact_secrets`, strip `push_token`, mask
-  `Authorization`/`Cookie`/`x-api-key`) unless the caller is editor+ of the resource's namespace;
+  `Authorization`/`Cookie`/`x-api-key`) unless the caller is editor+ of the resource's workspace;
   never log them. When adding a field that can hold a secret, redact it in every read path.
 - **Long-running binaries shut down gracefully.** The hub serves with
   `axum::serve(...).with_graceful_shutdown(shutdown_signal())` and the agent's loop `select!`s the
   interval against the same signal — both drain/stop on SIGTERM **and** Ctrl-C. Keep new
   background loops cancellable the same way so Docker/k8s stop them cleanly.
 - **Mobile/responsive is not optional.** Use `h-[100dvh]` (not `h-screen`) for full-height
-  panels so mobile browser chrome doesn't hide the bottom (it hid the namespace selector + logout).
+  panels so mobile browser chrome doesn't hide the bottom (it hid the workspace selector + logout).
   Multi-pane layouts stack on small screens (`flex-col md:flex-row`, `w-full md:w-[...]`); stat
   grids get breakpoints (`grid-cols-2 sm:grid-cols-4`); wide tables get an `overflow-x-auto` wrapper.
 - **Clickable cards: the whole card opens the view; inner action buttons use `@click.stop`.**

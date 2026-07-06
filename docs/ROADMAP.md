@@ -4,7 +4,7 @@ Planned features not yet built. See CLAUDE.md for the architecture they must fit
 
 ## Backup / restore (download/upload + S3-compatible)
 
-Goal: export the **config DB** (users, namespaces, RBAC, API keys, servers, monitors,
+Goal: export the **config DB** (users, workspaces, RBAC, API keys, servers, monitors,
 alerts, channels, thresholds, status pages) as a portable snapshot and restore it
 elsewhere. The **data DB** (metrics/heartbeats) is large, regenerable telemetry and is
 out of scope for backup.
@@ -36,7 +36,7 @@ NAT). So the shell must ride a connection the agent opens *outbound*.
 
 **This is a remote-code-execution channel — must ship with:**
 - Per-agent opt-in (a flag/env; default OFF).
-- Authorization: only `owner`/`admin` on the host's namespace (see RBAC).
+- Authorization: only `owner`/`admin` on the host's workspace (see RBAC).
 - **Audit log** of every session (who, host, when; ideally command/IO capture).
 - Restrict the shell user; consider per-session approval.
 

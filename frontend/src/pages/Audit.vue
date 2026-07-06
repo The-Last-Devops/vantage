@@ -63,7 +63,7 @@ const VERB = { POST: 'Create', PATCH: 'Update', PUT: 'Update', DELETE: 'Delete' 
 const ACTION = { test: 'Test', upload: 'Upload', restore: 'Restore', run: 'Run', revoke: 'Revoke' }
 const ENTITY = {
   channels: 'Notify channel', alerts: 'Alert rule', monitors: 'Monitor', systems: 'System',
-  namespaces: 'Namespace', users: 'User', keys: 'Enrollment token', tokens: 'API token',
+  workspaces: 'Workspace', users: 'User', keys: 'Enrollment token', tokens: 'API token',
   members: 'Member', memberships: 'Member', backup: 'Backup', schedule: 'Backup schedule',
   data: 'Data & retention', restore: 'Backup', s3: 'S3 backup', pats: 'API token',
   thresholds: 'Thresholds', retention: 'Audit retention',

@@ -15,16 +15,16 @@ const auth = useAuth()
 const isAdmin = computed(() => !!auth.user?.is_admin)
 
 const users = ref([])
-const namespaces = ref([])
+const workspaces = ref([])
 
-const nameOf = (id) => namespaces.value.find((n) => n.id === id)?.name || id
+const nameOf = (id) => workspaces.value.find((n) => n.id === id)?.name || id
 
 const { loaded: usersLoaded, reload: loadUsers } = useCached({
   key: () => 'members:users',
   load: async () => {
     const us = await api.get('/api/users')
-    // The list endpoint returns a namespace count only; fetch each member's
-    // per-namespace roles so the table can show named chips. Admins see all.
+    // The list endpoint returns a workspace count only; fetch each member's
+    // per-workspace roles so the table can show named chips. Admins see all.
     await Promise.all(
       us.map(async (u) => {
         if (u.is_admin || u.read_all) { u.access = 'all'; return }
@@ -40,20 +40,20 @@ const loading = computed(() => !usersLoaded.value)
 
 // ---- roles ----
 const SYS = [
-  { v: 'user', label: 'Member', desc: 'Access only the namespaces granted below' },
-  { v: 'read_all', label: 'Admin · read-only', desc: 'View every namespace, no changes' },
+  { v: 'user', label: 'Member', desc: 'Access only the workspaces granted below' },
+  { v: 'read_all', label: 'Admin · read-only', desc: 'View every workspace, no changes' },
   { v: 'admin', label: 'Admin', desc: 'Full access everywhere, manages members' },
 ]
 const sysOf = (u) => (u.is_admin ? 'admin' : u.read_all ? 'read_all' : 'user')
 const sysLabel = (u) => SYS.find((r) => r.v === sysOf(u))?.label
-const NS_ROLES = [{ v: 'viewer', label: 'Viewer' }, { v: 'editor', label: 'Editor' }, { v: 'owner', label: 'Owner' }]
+const WS_ROLES = [{ v: 'viewer', label: 'Viewer' }, { v: 'editor', label: 'Editor' }, { v: 'owner', label: 'Owner' }]
 const memberColumns = [
   { key: 'email', label: 'Member', sortable: true, nowrap: false },
   { key: 'sysrole', label: 'System role' },
-  { key: 'access', label: 'Namespace access', nowrap: false },
+  { key: 'access', label: 'Workspace access', nowrap: false },
   { key: 'actions', label: '', align: 'right', width: '92px' },
 ]
-const nsRoleLabel = (v) => NS_ROLES.find((r) => r.v === v)?.label || v
+const wsRoleLabel = (v) => WS_ROLES.find((r) => r.v === v)?.label || v
 const initials = (email) => (email || '?').slice(0, 2).toUpperCase()
 
 // ---- search + filter ----
@@ -102,7 +102,7 @@ async function addUser({ email: rawEmail, password }) {
 }
 
 async function removeUser(u) {
-  if (!(await confirm({ title: `Delete ${u.email}?`, message: 'Their namespace access and sessions are removed. This cannot be undone.', danger: true, confirmText: 'Delete' }))) return
+  if (!(await confirm({ title: `Delete ${u.email}?`, message: 'Their workspace access and sessions are removed. This cannot be undone.', danger: true, confirmText: 'Delete' }))) return
   try { await api.del(`/api/users/${u.id}`); if (editing.value?.id === u.id) editing.value = null; await loadUsers() }
   catch (e) { alert(e.status === 400 ? "You can't delete yourself." : `Failed (${e.status}).`) }
 }
@@ -110,8 +110,8 @@ async function removeUser(u) {
 // ---- edit member (slide-over) ----
 const editing = ref(null)
 const editRole = ref('user')
-const editNs = ref({}) // namespace_id -> role ('' = no access)
-const editNsExec = ref({}) // namespace_id -> can_exec (shell access)
+const editWs = ref({}) // workspace_id -> role ('' = no access)
+const editWsExec = ref({}) // workspace_id -> can_exec (shell access)
 const editErr = ref('')
 const resetPw = ref('')
 
@@ -121,13 +121,13 @@ async function openEdit(u) {
   const map = {}, execMap = {}
   try {
     for (const m of await api.get(`/api/users/${u.id}/memberships`)) {
-      map[m.namespace_id] = m.role
-      execMap[m.namespace_id] = !!m.can_exec
+      map[m.workspace_id] = m.role
+      execMap[m.workspace_id] = !!m.can_exec
     }
   } catch {}
-  const full = {}; for (const n of namespaces.value) full[n.id] = map[n.id] || ''
-  editNs.value = full
-  editNsExec.value = execMap
+  const full = {}; for (const n of workspaces.value) full[n.id] = map[n.id] || ''
+  editWs.value = full
+  editWsExec.value = execMap
   editing.value = u
 }
 function closeEdit() { editing.value = null }
@@ -137,21 +137,21 @@ async function saveSysRole() {
   try { await api.patch(`/api/users/${editing.value.id}`, { is_admin: editRole.value === 'admin', read_all: editRole.value === 'read_all' }); await loadUsers() }
   catch (e) { editErr.value = e.status === 400 ? "You can't change your own admin rights." : `Failed (${e.status}).`; editRole.value = sysOf(editing.value) }
 }
-async function setNsRole(n, role) {
+async function setWsRole(n, role) {
   editErr.value = ''
   try {
-    if (role) await api.post(`/api/namespaces/${n.id}/members`, { email: editing.value.email, role })
-    else await api.del(`/api/namespaces/${n.id}/members/${editing.value.id}`)
-    editNs.value[n.id] = role
-    if (!role) editNsExec.value[n.id] = false // dropping membership drops exec
+    if (role) await api.post(`/api/workspaces/${n.id}/members`, { email: editing.value.email, role })
+    else await api.del(`/api/workspaces/${n.id}/members/${editing.value.id}`)
+    editWs.value[n.id] = role
+    if (!role) editWsExec.value[n.id] = false // dropping membership drops exec
     await loadUsers()
   } catch (e) { editErr.value = `Failed (${e.status}).` }
 }
-async function setNsExec(n, val) {
+async function setWsExec(n, val) {
   editErr.value = ''
   try {
-    await api.put(`/api/namespaces/${n.id}/members/${editing.value.id}/exec`, { can_exec: val })
-    editNsExec.value[n.id] = val
+    await api.put(`/api/workspaces/${n.id}/members/${editing.value.id}/exec`, { can_exec: val })
+    editWsExec.value[n.id] = val
     await loadUsers()
   } catch (e) { editErr.value = `Failed (${e.status}).` }
 }
@@ -165,7 +165,7 @@ async function doResetPw() {
 
 onMounted(async () => {
   if (!isAdmin.value) return
-  try { namespaces.value = await api.get('/api/namespaces') } catch { namespaces.value = [] }
+  try { workspaces.value = await api.get('/api/workspaces') } catch { workspaces.value = [] }
   await loadUsers()
 })
 </script>
@@ -176,7 +176,7 @@ onMounted(async () => {
       Only system admins can manage members.
     </div>
     <div v-else class="space-y-4">
-      <p class="max-w-3xl text-xs text-faint">People who can sign in. A member's <b class="text-fg">system role</b> sets platform-wide power; <b class="text-fg">namespace access</b> grants specific namespaces and what they can do inside each.</p>
+      <p class="max-w-3xl text-xs text-faint">People who can sign in. A member's <b class="text-fg">system role</b> sets platform-wide power; <b class="text-fg">workspace access</b> grants specific workspaces and what they can do inside each.</p>
 
       <DataTable :columns="memberColumns" :rows="shown" :row-key="(r) => r.id" :loading="loading" :filterable="false"
         clickable @row-click="openEdit" empty="No members yet." empty-filtered="No members match.">
@@ -205,7 +205,7 @@ onMounted(async () => {
           <StatePill :tone="row.is_admin ? 'info' : row.read_all ? 'warn' : 'muted'" :label="sysLabel(row)" />
         </template>
         <template #cell-access="{ row }">
-          <MemberAccessChips :access="row.access" :name-of="nameOf" :ns-role-label="nsRoleLabel" />
+          <MemberAccessChips :access="row.access" :name-of="nameOf" :ws-role-label="wsRoleLabel" />
         </template>
         <template #cell-actions="{ row }">
           <div class="flex items-center justify-end gap-1">
@@ -226,16 +226,16 @@ onMounted(async () => {
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">System role</div>
           <ul class="space-y-1.5 text-xs text-muted">
             <li><b class="text-accent">Admin</b> — full access to everything, manages members.</li>
-            <li><b class="text-warn">Admin · read-only</b> — views every namespace, no changes.</li>
-            <li><b class="text-fg">Member</b> — sees only the namespaces granted to them.</li>
+            <li><b class="text-warn">Admin · read-only</b> — views every workspace, no changes.</li>
+            <li><b class="text-fg">Member</b> — sees only the workspaces granted to them.</li>
           </ul>
         </div>
         <div class="rounded-xl border border-line bg-surface/50 p-3.5">
-          <div class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Namespace role</div>
+          <div class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Workspace role</div>
           <ul class="space-y-1.5 text-xs text-muted">
             <li><b class="text-fg">Viewer</b> — view metrics &amp; status.</li>
             <li><b class="text-fg">Editor</b> — also add / edit systems &amp; services.</li>
-            <li><b class="text-fg">Owner</b> — also manage that namespace's members.</li>
+            <li><b class="text-fg">Owner</b> — also manage that workspace's members.</li>
           </ul>
         </div>
       </div>
@@ -246,10 +246,10 @@ onMounted(async () => {
       @submit="addUser" @close="addOpen = false" />
 
     <!-- Edit member slide-over -->
-    <MemberRoleEditor v-if="editing" :member="editing" :sys="SYS" :ns-roles="NS_ROLES"
-      :namespaces="namespaces" :edit-ns="editNs" :edit-ns-exec="editNsExec" :error="editErr" :initials="initials"
+    <MemberRoleEditor v-if="editing" :member="editing" :sys="SYS" :ws-roles="WS_ROLES"
+      :workspaces="workspaces" :edit-ws="editWs" :edit-ws-exec="editWsExec" :error="editErr" :initials="initials"
       v-model:edit-role="editRole" v-model:reset-pw="resetPw"
-      @close="closeEdit" @save-sys-role="saveSysRole" @set-ns-role="setNsRole" @set-ns-exec="setNsExec"
+      @close="closeEdit" @save-sys-role="saveSysRole" @set-ws-role="setWsRole" @set-ws-exec="setWsExec"
       @gen-password="genResetPw" @reset-password="doResetPw" />
   </AppShell>
 </template>

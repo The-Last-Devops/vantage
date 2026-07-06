@@ -1,7 +1,7 @@
 -- Personal access tokens for programmatic API + MCP access. Distinct from agent
 -- enrollment keys (api_keys) and human login sessions. A PAT acts AS its user, so
 -- it inherits that user's RBAC — scope a token by issuing it to a service-account
--- user with limited namespace membership. Only the SHA-256 hash is stored.
+-- user with limited workspace membership. Only the SHA-256 hash is stored.
 CREATE TABLE api_pats (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

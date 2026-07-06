@@ -7,15 +7,15 @@ import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
 
 const route = useRoute()
-const nsQuery = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const wsQuery = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 
-const namespaces = ref([])
-// Namespaces in scope: the sidebar selection (?ns), or all when none chosen.
-const selectedNsNames = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const activeNs = computed(() =>
-  selectedNsNames.value.length
-    ? namespaces.value.filter((n) => selectedNsNames.value.includes(n.name))
-    : namespaces.value,
+const workspaces = ref([])
+// Workspaces in scope: the sidebar selection (?ws), or all when none chosen.
+const selectedWsNames = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const activeWs = computed(() =>
+  selectedWsNames.value.length
+    ? workspaces.value.filter((n) => selectedWsNames.value.includes(n.name))
+    : workspaces.value,
 )
 const alerts = ref([])
 const events = ref([])
@@ -24,32 +24,32 @@ const filterSource = ref('all') // all | monitor | host
 let timer = null
 
 const { loaded, reload: load } = useCached({
-  key: () => 'events:' + activeNs.value.map((n) => n.id).join(','),
+  key: () => 'events:' + activeWs.value.map((n) => n.id).join(','),
   load: async () => {
-    const nss = activeNs.value
+    const nss = activeWs.value
     if (!nss.length) return { alerts: [], events: [] }
     const [aLists, eLists] = await Promise.all([
       Promise.all(nss.map((n) =>
-        api.get(`/api/namespaces/${n.id}/alerts`)
-          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+        api.get(`/api/workspaces/${n.id}/alerts`)
+          .then((rows) => rows.map((r) => ({ ...r, workspace: n.name })))
           .catch(() => []),
       )),
       Promise.all(nss.map((n) =>
-        api.get(`/api/namespaces/${n.id}/alert-events`)
-          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+        api.get(`/api/workspaces/${n.id}/alert-events`)
+          .then((rows) => rows.map((r) => ({ ...r, workspace: n.name })))
           .catch(() => []),
       )),
     ])
     return {
       alerts: aLists.flat(),
-      // one global feed, newest first across all selected namespaces
+      // one global feed, newest first across all selected workspaces
       events: eLists.flat().sort((x, y) => new Date(y.at) - new Date(x.at)),
     }
   },
   apply: (d) => { alerts.value = d.alerts; events.value = d.events },
   onError: () => { alerts.value = []; events.value = [] },
 })
-watch(() => route.query.ns, load)
+watch(() => route.query.ws, load)
 
 // active = enabled rules currently firing
 const active = computed(() =>
@@ -90,7 +90,7 @@ const histPages = computed(() => Math.max(1, Math.ceil(shownHistory.value.length
 const pagedHistory = computed(() => shownHistory.value.slice((histPage.value - 1) * HIST_PAGE, histPage.value * HIST_PAGE))
 watch(shownHistory, () => { if (histPage.value > histPages.value) histPage.value = 1 })
 
-function ruleLink(id) { return { name: 'alerts', query: { ...nsQuery.value, rule: id } } }
+function ruleLink(id) { return { name: 'alerts', query: { ...wsQuery.value, rule: id } } }
 function dur(ms) {
   if (ms == null) return ''
   let s = Math.max(0, ms / 1000)
@@ -112,7 +112,7 @@ function since(iso) {
 const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
 
 onMounted(async () => {
-  try { namespaces.value = await api.get('/api/namespaces') } catch {}
+  try { workspaces.value = await api.get('/api/workspaces') } catch {}
   await load()
   timer = setInterval(load, 15000)
 })
@@ -122,7 +122,7 @@ onUnmounted(() => clearInterval(timer))
 <template>
   <AppShell title="Events">
     <div class="space-y-5">
-      <p class="text-sm text-muted">A live record of what actually happened — incidents firing now and the resolved history. Populated automatically when an <RouterLink :to="{ name: 'alerts', query: nsQuery }" class="text-accent hover:underline">alert rule</RouterLink> trips.</p>
+      <p class="text-sm text-muted">A live record of what actually happened — incidents firing now and the resolved history. Populated automatically when an <RouterLink :to="{ name: 'alerts', query: wsQuery }" class="text-accent hover:underline">alert rule</RouterLink> trips.</p>
 
       <!-- filters -->
       <div class="flex flex-wrap gap-2">
@@ -145,7 +145,7 @@ onUnmounted(() => clearInterval(timer))
         </span>
         <h2 class="text-base font-semibold text-fg">All clear — no events</h2>
         <p class="max-w-md text-sm text-muted">Nothing has tripped a rule yet. When a host or service breaches a rule, the incident shows up here with its timeline.</p>
-        <RouterLink :to="{ name: 'alerts', query: nsQuery }" class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface2 px-3.5 py-2 text-sm font-semibold text-fg hover:border-accent/50">Review alert rules</RouterLink>
+        <RouterLink :to="{ name: 'alerts', query: wsQuery }" class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface2 px-3.5 py-2 text-sm font-semibold text-fg hover:border-accent/50">Review alert rules</RouterLink>
       </div>
 
       <template v-else>
@@ -161,7 +161,7 @@ onUnmounted(() => clearInterval(timer))
             <span class="text-sm font-semibold text-fg">{{ a.target_name || '—' }} is DOWN</span>
             <span class="rounded-md bg-down/15 px-1.5 py-0.5 font-mono text-[11px] font-bold text-down">{{ since(a.since) }}</span>
             <span class="text-[11px] uppercase text-faint">{{ a.target_kind }}</span>
-            <span class="inline-flex items-center gap-1 text-xs text-faint"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>{{ a.namespace }}</span>
+            <span class="inline-flex items-center gap-1 text-xs text-faint"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>{{ a.workspace }}</span>
             <span v-if="a.since" class="text-xs text-faint">since {{ evTime(a.since) }}</span>
             <span v-if="a.channels?.length" class="truncate text-xs text-faint">via {{ a.channels.map((c) => c.name).join(', ') }}</span>
             <span class="flex-1"></span>
@@ -186,7 +186,7 @@ onUnmounted(() => clearInterval(timer))
                   <span v-if="e.durMs != null" class="rounded-md bg-accent/12 px-1.5 py-0.5 font-mono text-[11px] text-accent">was down {{ dur(e.durMs) }}</span>
                 </div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-faint">
-                  <span class="inline-flex items-center gap-1"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>{{ e.namespace }}</span>
+                  <span class="inline-flex items-center gap-1"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>{{ e.workspace }}</span>
                   <span class="truncate">{{ e.message || (e.target_kind === 'monitor' ? 'Service check' : 'Host condition') }}</span>
                 </div>
               </div>

@@ -43,7 +43,7 @@ pub async fn connect() -> Result<AppState> {
     })
 }
 
-/// If `LOCAL_API_KEY` is set, ensure a `default` namespace and a `local`
+/// If `LOCAL_API_KEY` is set, ensure a `default` workspace and a `local`
 /// server enrolled with that key exist (idempotent). Lets the bundled
 /// docker-compose agent report out of the box with no manual provisioning.
 pub async fn bootstrap_local_server(pool: &sqlx::PgPool) -> Result<()> {
@@ -51,31 +51,31 @@ pub async fn bootstrap_local_server(pool: &sqlx::PgPool) -> Result<()> {
         Ok(t) if !t.is_empty() => t,
         _ => return Ok(()),
     };
-    let (ns,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO namespaces (name) VALUES ('default') \
+    let (ws,): (uuid::Uuid,) = sqlx::query_as(
+        "INSERT INTO workspaces (name) VALUES ('default') \
          ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id",
     )
     .fetch_one(pool)
     .await?;
     // Reusable API key; systems auto-register on first push.
     sqlx::query(
-        "INSERT INTO api_keys (namespace_id, name, key) VALUES ($1, 'local', $2) \
+        "INSERT INTO api_keys (workspace_id, name, key) VALUES ($1, 'local', $2) \
          ON CONFLICT (key) DO NOTHING",
     )
-    .bind(ns)
+    .bind(ws)
     .bind(&api_key)
     .execute(pool)
     .await?;
-    // Give every admin owner access to the default namespace.
+    // Give every admin owner access to the default workspace.
     sqlx::query(
-        "INSERT INTO memberships (user_id, namespace_id, role) \
+        "INSERT INTO memberships (user_id, workspace_id, role) \
          SELECT id, $1, 'owner' FROM users WHERE is_admin = true \
-         ON CONFLICT (user_id, namespace_id) DO NOTHING",
+         ON CONFLICT (user_id, workspace_id) DO NOTHING",
     )
-    .bind(ns)
+    .bind(ws)
     .execute(pool)
     .await?;
-    tracing::info!("bootstrapped default namespace + local token");
+    tracing::info!("bootstrapped default workspace + local token");
     Ok(())
 }
 

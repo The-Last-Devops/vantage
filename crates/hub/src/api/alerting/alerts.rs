@@ -14,7 +14,7 @@ pub struct AttachedRule {
 
 async fn attached_rules(
     state: &AppState,
-    ns: Uuid,
+    ws: Uuid,
     target_col: &str, // "monitor_id" | "system_id"
     target_id: Uuid,
     scope: &str, // "all_services" | "all_hosts"
@@ -22,13 +22,13 @@ async fn attached_rules(
     let sql = format!(
         "SELECT r.id, r.scope_kind, r.enabled, st.firing FROM alerts r \
          LEFT JOIN alert_state st ON st.alert_id = r.id \
-         WHERE r.{target_col} = $1 OR (r.scope_kind = $2 AND r.scope_namespace_id = $3) \
+         WHERE r.{target_col} = $1 OR (r.scope_kind = $2 AND r.scope_workspace_id = $3) \
          ORDER BY r.scope_kind NULLS FIRST, r.id"
     );
     let rows: Vec<(Uuid, Option<String>, bool, Option<bool>)> = sqlx::query_as(&sql)
         .bind(target_id)
         .bind(scope)
-        .bind(ns)
+        .bind(ws)
         .fetch_all(&state.config)
         .await
         .map_err(internal)?;
@@ -43,34 +43,34 @@ async fn attached_rules(
         .collect())
 }
 
-/// GET /api/monitors/:id/alerts — rules covering this service (its own + ns-wide).
+/// GET /api/monitors/:id/alerts — rules covering this service (its own + ws-wide).
 pub async fn monitor_alerts(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<AttachedRule>>, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM monitors WHERE id = $1",
+        "SELECT workspace_id FROM monitors WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     Ok(Json(
-        attached_rules(&state, ns, "monitor_id", id, "all_services").await?,
+        attached_rules(&state, ws, "monitor_id", id, "all_services").await?,
     ))
 }
 
-/// GET /api/systems/:id/alerts — rules covering this host (its own + ns-wide).
+/// GET /api/systems/:id/alerts — rules covering this host (its own + ws-wide).
 pub async fn system_alerts(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Vec<AttachedRule>>, StatusCode> {
-    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let ws = ws_of(&state, "SELECT workspace_id FROM systems WHERE id = $1", id).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     Ok(Json(
-        attached_rules(&state, ns, "system_id", id, "all_hosts").await?,
+        attached_rules(&state, ws, "system_id", id, "all_hosts").await?,
     ))
 }
 
@@ -80,8 +80,8 @@ pub struct AlertDetail {
     pub monitor_id: Option<Uuid>,
     pub system_id: Option<Uuid>,
     pub scope_kind: Option<String>,
-    pub scope_namespace_id: Option<Uuid>,
-    pub namespace: Option<String>,
+    pub scope_workspace_id: Option<Uuid>,
+    pub workspace: Option<String>,
     pub target_name: String,
     pub condition: Value,
     pub renotify_secs: Option<i32>,
@@ -107,14 +107,14 @@ pub async fn get_alert(
         sqlx::types::Json<Value>,
         Option<i32>,
     )> = sqlx::query_as(
-        "SELECT r.monitor_id, r.system_id, r.scope_kind, r.scope_namespace_id, \
-                COALESCE(m.namespace_id, s.namespace_id, r.scope_namespace_id) AS ns_id, \
-                n.name AS namespace, m.name AS monitor_name, s.name AS system_name, \
+        "SELECT r.monitor_id, r.system_id, r.scope_kind, r.scope_workspace_id, \
+                COALESCE(m.workspace_id, s.workspace_id, r.scope_workspace_id) AS ws_id, \
+                n.name AS workspace, m.name AS monitor_name, s.name AS system_name, \
                 r.condition, r.renotify_secs \
          FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id \
-         LEFT JOIN namespaces n ON n.id = COALESCE(m.namespace_id, s.namespace_id, r.scope_namespace_id) \
+         LEFT JOIN workspaces n ON n.id = COALESCE(m.workspace_id, s.workspace_id, r.scope_workspace_id) \
          WHERE r.id = $1",
     )
     .bind(id)
@@ -126,14 +126,14 @@ pub async fn get_alert(
         system_id,
         scope_kind,
         scope_ns,
-        ns_id,
-        namespace,
+        ws_id,
+        workspace,
         mname,
         sname,
         cond,
         renotify,
     ) = row.ok_or(StatusCode::NOT_FOUND)?;
-    rbac::require_role(&state, &user, ns_id, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws_id, Role::Viewer).await?;
 
     let chans: Vec<(Uuid, String, String)> = sqlx::query_as(
         "SELECT c.id, c.name, c.kind FROM alert_channels ac \
@@ -154,8 +154,8 @@ pub async fn get_alert(
         monitor_id,
         system_id,
         scope_kind,
-        scope_namespace_id: scope_ns,
-        namespace,
+        scope_workspace_id: scope_ns,
+        workspace,
         target_name,
         condition: cond.0,
         renotify_secs: renotify,
@@ -185,7 +185,7 @@ pub struct AlertRow {
     /// "monitor" | "host" | "all_services" | "all_hosts" + a display name.
     pub target_kind: String,
     pub target_name: String,
-    /// Set for namespace-wide rules ("all_services" | "all_hosts").
+    /// Set for workspace-wide rules ("all_services" | "all_hosts").
     pub scope_kind: Option<String>,
     pub cooldown_secs: i32,
     /// Re-notify cadence while firing; null = notify once.
@@ -216,15 +216,15 @@ struct AlertJoin {
     channel_kind: Option<String>,
 }
 
-/// GET /api/namespaces/:id/alerts — rules whose target lives in this namespace,
+/// GET /api/workspaces/:id/alerts — rules whose target lives in this workspace,
 /// with their channels, target name and current firing state. One row per
 /// rule×channel is collapsed into a rule with a channels[] list.
 pub async fn list_alerts(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<AlertRow>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     let rows: Vec<AlertJoin> = sqlx::query_as(
         "SELECT r.id, r.monitor_id, r.system_id, r.scope_kind, r.cooldown_secs, r.renotify_secs, r.enabled, \
                 r.condition, m.name AS monitor_name, s.name AS system_name, \
@@ -236,10 +236,10 @@ pub async fn list_alerts(
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id \
          LEFT JOIN alert_state st ON st.alert_id = r.id \
-         WHERE COALESCE(m.namespace_id, s.namespace_id, r.scope_namespace_id) = $1 \
+         WHERE COALESCE(m.workspace_id, s.workspace_id, r.scope_workspace_id) = $1 \
          ORDER BY st.firing DESC NULLS LAST, r.enabled DESC, r.id",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -296,7 +296,7 @@ pub struct PatchAlert {
     #[serde(default)]
     pub condition: Option<Value>,
     /// Optional re-target (the editor's "source" change). Provide a specific
-    /// `monitor_id` or `system_id`, OR a `scope_kind` + `scope_namespace_id`.
+    /// `monitor_id` or `system_id`, OR a `scope_kind` + `scope_workspace_id`.
     #[serde(default)]
     pub monitor_id: Option<Uuid>,
     #[serde(default)]
@@ -304,7 +304,7 @@ pub struct PatchAlert {
     #[serde(default)]
     pub scope_kind: Option<String>,
     #[serde(default)]
-    pub scope_namespace_id: Option<Uuid>,
+    pub scope_workspace_id: Option<Uuid>,
 }
 
 /// PATCH /api/alerts/:id — toggle enabled, edit condition/channels/cadence, and
@@ -316,31 +316,31 @@ pub async fn patch_alert(
     Path(id): Path<Uuid>,
     Json(req): Json<PatchAlert>,
 ) -> Result<StatusCode, StatusCode> {
-    // Current namespace (covers scope-wide rules via scope_namespace_id).
-    let ns = ns_of(
+    // Current workspace (covers scope-wide rules via scope_workspace_id).
+    let ws = ws_of(
         &state,
-        "SELECT COALESCE(m.namespace_id, s.namespace_id, r.scope_namespace_id) FROM alerts r \
+        "SELECT COALESCE(m.workspace_id, s.workspace_id, r.scope_workspace_id) FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
 
-    // Optional re-target. Editor must also be allowed in the NEW target's namespace.
+    // Optional re-target. Editor must also be allowed in the NEW target's workspace.
     let retarget = req.monitor_id.is_some() || req.system_id.is_some() || req.scope_kind.is_some();
     if retarget {
         let new_ns = if let Some(mid) = req.monitor_id {
-            ns_of(
+            ws_of(
                 &state,
-                "SELECT namespace_id FROM monitors WHERE id = $1",
+                "SELECT workspace_id FROM monitors WHERE id = $1",
                 mid,
             )
             .await?
         } else if let Some(sid) = req.system_id {
-            ns_of(
+            ws_of(
                 &state,
-                "SELECT namespace_id FROM systems WHERE id = $1",
+                "SELECT workspace_id FROM systems WHERE id = $1",
                 sid,
             )
             .await?
@@ -352,7 +352,7 @@ pub async fn patch_alert(
             ) {
                 return Err(StatusCode::BAD_REQUEST);
             }
-            req.scope_namespace_id.ok_or(StatusCode::BAD_REQUEST)?
+            req.scope_workspace_id.ok_or(StatusCode::BAD_REQUEST)?
         };
         rbac::require_role(&state, &user, new_ns, Role::Editor).await?;
         let scope_ns = if req.scope_kind.is_some() {
@@ -362,7 +362,7 @@ pub async fn patch_alert(
         };
         sqlx::query(
             "UPDATE alerts SET monitor_id = $2, system_id = $3, scope_kind = $4, \
-                scope_namespace_id = $5 WHERE id = $1",
+                scope_workspace_id = $5 WHERE id = $1",
         )
         .bind(id)
         .bind(req.monitor_id)
@@ -395,7 +395,7 @@ pub async fn patch_alert(
     // Channel set + renotify are replaced together (editor save only).
     if let Some(ids) = req.channel_ids {
         // Channels are a shared resource — a rule may use any existing channel,
-        // regardless of namespace; just require that every id exists.
+        // regardless of workspace; just require that every id exists.
         let valid: Option<(i64,)> =
             sqlx::query_as("SELECT count(DISTINCT id) FROM channels WHERE id = ANY($1)")
                 .bind(&ids)
@@ -434,16 +434,16 @@ pub async fn test_alert(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
+        "SELECT COALESCE(m.workspace_id, s.workspace_id) FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
         id,
     )
     .await
     .map_err(|s| (s, "not found".into()))?;
-    rbac::require_role(&state, &user, ns, Role::Editor)
+    rbac::require_role(&state, &user, ws, Role::Editor)
         .await
         .map_err(|s| (s, "forbidden".into()))?;
     let channels: Vec<(String, String, sqlx::types::Json<Value>)> = sqlx::query_as(
@@ -486,13 +486,13 @@ pub struct AlertEvent {
     pub target_kind: String,
 }
 
-/// GET /api/namespaces/:id/alert-events — recent fired/recovered transitions.
+/// GET /api/workspaces/:id/alert-events — recent fired/recovered transitions.
 pub async fn alert_events(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<AlertEvent>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     let rows: Vec<(
         Uuid,
         chrono::DateTime<chrono::Utc>,
@@ -505,10 +505,10 @@ pub async fn alert_events(
          FROM alert_events e JOIN alerts r ON r.id = e.alert_id \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id \
-         WHERE COALESCE(m.namespace_id, s.namespace_id) = $1 \
+         WHERE COALESCE(m.workspace_id, s.workspace_id) = $1 \
          ORDER BY e.at DESC LIMIT 100",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -538,7 +538,7 @@ pub struct CreateAlert {
     pub monitor_id: Option<Uuid>,
     #[serde(default)]
     pub system_id: Option<Uuid>,
-    /// Namespace-wide scope instead of a single target: "all_services" | "all_hosts".
+    /// Workspace-wide scope instead of a single target: "all_services" | "all_hosts".
     #[serde(default)]
     pub scope_kind: Option<String>,
     pub channel_ids: Vec<Uuid>,
@@ -550,15 +550,15 @@ pub struct CreateAlert {
     pub renotify_secs: Option<i32>,
 }
 
-/// POST /api/namespaces/:id/alerts — editors+ create an alert rule.
+/// POST /api/workspaces/:id/alerts — editors+ create an alert rule.
 pub async fn create_alert(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<CreateAlert>,
 ) -> Result<Json<Uuid>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
-    // Either a specific target (monitor/system) OR a namespace-wide scope.
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
+    // Either a specific target (monitor/system) OR a workspace-wide scope.
     let scope_kind = req.scope_kind.as_deref().filter(|s| !s.is_empty());
     if let Some(k) = scope_kind {
         if !matches!(k, "all_services" | "all_hosts") {
@@ -571,7 +571,7 @@ pub async fn create_alert(
         return Err(StatusCode::BAD_REQUEST);
     }
     // Channels are a shared resource — a rule may use any existing channel,
-    // regardless of namespace; just require that every id exists.
+    // regardless of workspace; just require that every id exists.
     let valid: Option<(i64,)> =
         sqlx::query_as("SELECT count(DISTINCT id) FROM channels WHERE id = ANY($1)")
             .bind(&req.channel_ids)
@@ -582,14 +582,14 @@ pub async fn create_alert(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // For a ns-wide rule the target columns are null and the scope columns are set
-    // (scope namespace = the path's namespace).
+    // For a ws-wide rule the target columns are null and the scope columns are set
+    // (scope workspace = the path's workspace).
     let (mon, sys, scope_ns) = match scope_kind {
-        Some(_) => (None, None, Some(ns)),
+        Some(_) => (None, None, Some(ws)),
         None => (req.monitor_id, req.system_id, None),
     };
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO alerts (monitor_id, system_id, scope_kind, scope_namespace_id, \
+        "INSERT INTO alerts (monitor_id, system_id, scope_kind, scope_workspace_id, \
             condition, cooldown_secs, renotify_secs) \
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
     )
@@ -616,21 +616,21 @@ pub async fn create_alert(
     Ok(Json(id))
 }
 
-/// DELETE /api/alerts/:id (namespace resolved via the rule's monitor/server).
+/// DELETE /api/alerts/:id (workspace resolved via the rule's monitor/server).
 pub async fn delete_alert(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
+        "SELECT COALESCE(m.workspace_id, s.workspace_id) FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     sqlx::query("DELETE FROM alerts WHERE id = $1")
         .bind(id)
         .execute(&state.config)

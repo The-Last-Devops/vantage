@@ -1,7 +1,7 @@
 <script setup>
 // Fleet overview — a war-room board: problems on top, a health heatmap + services
 // on the left, incidents + top-load on the right. Aggregates across all selected
-// namespaces (?ns=a,b; empty = all), like Systems.vue.
+// workspaces (?ws=a,b; empty = all), like Systems.vue.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
@@ -15,25 +15,25 @@ import { useCached } from '../lib/cache'
 import { online, hostState, worstReason, ago, DEFAULT_THR, STATE_RANK } from '../lib/triage'
 
 const route = useRoute()
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
+const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const inWs = (s) => selectedWs.value.length === 0 || selectedWs.value.includes(s.workspace)
 
 const systems = ref([])
 const monitors = ref([])
 const thresholds = ref({})
-const namespaces = ref([])
+const workspaces = ref([])
 const alerts = ref([])
 const lastUpdate = ref(Date.now())
 const nowTick = ref(Date.now())
 let timer = null
 let tick = null
 
-const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
-const hosts = computed(() => systems.value.filter(inNs))
-const svcs = computed(() => monitors.value.filter(inNs))
+const thrOf = (s) => thresholds.value[s.workspace] || DEFAULT_THR
+const hosts = computed(() => systems.value.filter(inWs))
+const svcs = computed(() => monitors.value.filter(inWs))
 const firing = computed(() => alerts.value.filter((a) => a.enabled && a.firing === true))
 
-const crumbNs = computed(() => selectedNs.value.length ? selectedNs.value.join(', ') : 'all namespaces')
+const crumbWs = computed(() => selectedWs.value.length ? selectedWs.value.join(', ') : 'all workspaces')
 const updatedAgo = computed(() => Math.max(0, Math.round((nowTick.value - lastUpdate.value) / 1000)))
 
 // ---- KPIs ----
@@ -55,14 +55,14 @@ const kpis = computed(() => {
   return { up, total: hosts.value.length, down, warn, crit, svcUp, svcTotal, firing: firing.value.length }
 })
 
-// ---- heatmap groups (by namespace) ----
+// ---- heatmap groups (by workspace) ----
 const groups = computed(() => {
   const by = new Map()
   for (const s of hosts.value) {
-    const ns = s.namespace || '—'
-    if (!by.has(ns)) by.set(ns, [])
+    const ws = s.workspace || '—'
+    if (!by.has(ws)) by.set(ws, [])
     let state = hostState(s, thrOf(s))
-    by.get(ns).push({ id: s.id, name: s.name, state })
+    by.get(ws).push({ id: s.id, name: s.name, state })
   }
   return [...by.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
@@ -82,7 +82,7 @@ function spark(recent) {
 }
 const svcRows = computed(() =>
   [...svcs.value]
-    .sort((a, b) => (a.namespace || '').localeCompare(b.namespace || '') || a.name.localeCompare(b.name))
+    .sort((a, b) => (a.workspace || '').localeCompare(b.workspace || '') || a.name.localeCompare(b.name))
     .map((m) => ({ ...m, sk: stateKey(m), uptime: upPct(m), points: spark(m.recent) })),
 )
 
@@ -90,7 +90,7 @@ const svcRows = computed(() =>
 const loadRows = computed(() =>
   hosts.value
     .filter(online)
-    .map((s) => ({ id: s.id, name: s.name, ns: s.namespace, cpu: Math.round(s.cpu_percent || 0) }))
+    .map((s) => ({ id: s.id, name: s.name, ws: s.workspace, cpu: Math.round(s.cpu_percent || 0) }))
     .sort((a, b) => b.cpu - a.cpu)
     .slice(0, 8),
 )
@@ -114,40 +114,40 @@ const incidents = computed(() => {
     const reason = online(s)
       ? `${worstReason(s, thrOf(s)) || 'over threshold'} · ${ago(s.last_seen)}`
       : `offline · ${ago(s.last_seen)}`
-    out.push({ id: 'h:' + s.id, tone: st, host: s.name, reason, ns: s.namespace, systemId: s.id })
+    out.push({ id: 'h:' + s.id, tone: st, host: s.name, reason, ws: s.workspace, systemId: s.id })
   }
   for (const a of firing.value) {
     const dur = a.since ? ' · ' + ago(a.since) : ''
-    out.push({ id: 'a:' + a.id, tone: 'down', host: a.target_name || 'alert', reason: `${condText(a)} firing${dur}`, ns: a.namespace, systemId: a.system_id || null })
+    out.push({ id: 'a:' + a.id, tone: 'down', host: a.target_name || 'alert', reason: `${condText(a)} firing${dur}`, ws: a.workspace, systemId: a.system_id || null })
   }
   return out.sort((x, y) => (STATE_RANK[x.tone] ?? 9) - (STATE_RANK[y.tone] ?? 9) || x.host.localeCompare(y.host))
 })
 
 const { loaded, reload: load } = useCached({
-  key: () => 'fleet-overview:' + selectedNs.value.join(','),
+  key: () => 'fleet-overview:' + selectedWs.value.join(','),
   load: async () => {
-    const nss = namespaces.value
-    const sel = selectedNs.value.length ? nss.filter((n) => selectedNs.value.includes(n.name)) : nss
+    const nss = workspaces.value
+    const sel = selectedWs.value.length ? nss.filter((n) => selectedWs.value.includes(n.name)) : nss
     const [sys, mons, thr, alertLists] = await Promise.all([
       api.get('/api/systems').catch(() => []),
       api.get('/api/monitors').catch(() => []),
       api.get('/api/thresholds').catch(() => []),
       Promise.all(sel.map((n) =>
-        api.get(`/api/namespaces/${n.id}/alerts`)
-          .then((rows) => rows.map((x) => ({ ...x, namespace: n.name })))
+        api.get(`/api/workspaces/${n.id}/alerts`)
+          .then((rows) => rows.map((x) => ({ ...x, workspace: n.name })))
           .catch(() => []),
       )),
     ])
-    const tm = {}; for (const x of thr) tm[x.namespace] = x
+    const tm = {}; for (const x of thr) tm[x.workspace] = x
     const seen = new Set()
     const al = alertLists.flat().filter((a) => !seen.has(a.id) && seen.add(a.id))
     return { systems: sys, monitors: mons, thresholds: tm, alerts: al }
   },
   apply: (d) => { systems.value = d.systems; monitors.value = d.monitors; thresholds.value = d.thresholds; alerts.value = d.alerts; lastUpdate.value = Date.now() },
 })
-watch(() => route.query.ns, load)
+watch(() => route.query.ws, load)
 onMounted(async () => {
-  try { namespaces.value = await api.get('/api/namespaces') } catch {}
+  try { workspaces.value = await api.get('/api/workspaces') } catch {}
   await load()
   timer = setInterval(load, 10000)
   tick = setInterval(() => { nowTick.value = Date.now() }, 1000)
@@ -164,7 +164,7 @@ onUnmounted(() => { clearInterval(timer); clearInterval(tick) })
         <div class="flex items-center gap-2">
           <VIcon name="fleet" :size="20" class="text-accent" />
           <h1 class="text-h1 font-semibold text-fg">Fleet</h1>
-          <span class="text-xs text-muted">· {{ crumbNs }}</span>
+          <span class="text-xs text-muted">· {{ crumbWs }}</span>
         </div>
         <div class="ml-auto flex items-center gap-1.5 text-xs text-muted">
           <span class="relative flex h-2 w-2">

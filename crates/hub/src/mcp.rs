@@ -2,7 +2,7 @@
 //! read and operate the monitor. One endpoint, `POST /mcp`, speaks JSON-RPC 2.0
 //! (initialize / tools/list / tools/call). Auth is a PAT via `Authorization:
 //! Bearer …` (the `CurrentUser` extractor), so every tool runs with that user's
-//! RBAC — reads are scoped to their namespaces, writes require editor there.
+//! RBAC — reads are scoped to their workspaces, writes require editor there.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -64,14 +64,14 @@ pub async fn handle(
 fn tool_defs() -> Value {
     let empty = json!({ "type": "object", "properties": {} });
     json!([
-        { "name": "list_systems", "description": "List monitored hosts with their namespace and online state.", "inputSchema": empty },
-        { "name": "list_services", "description": "List service checks (monitors) with up/down state and namespace.", "inputSchema": empty },
+        { "name": "list_systems", "description": "List monitored hosts with their workspace and online state.", "inputSchema": empty },
+        { "name": "list_services", "description": "List service checks (monitors) with up/down state and workspace.", "inputSchema": empty },
         { "name": "alerts_firing", "description": "Alert rules that are currently firing.", "inputSchema": empty },
         { "name": "recent_events", "description": "Recent alert fire/recover events.", "inputSchema": {
             "type": "object", "properties": { "limit": { "type": "integer", "description": "max events (default 20)" } } } },
-        { "name": "run_service_check", "description": "Probe a service immediately and return its result. Requires editor access to its namespace.", "inputSchema": {
+        { "name": "run_service_check", "description": "Probe a service immediately and return its result. Requires editor access to its workspace.", "inputSchema": {
             "type": "object", "required": ["monitor_id"], "properties": { "monitor_id": { "type": "string", "description": "the monitor's UUID (from list_services)" } } } },
-        { "name": "toggle_alert_rule", "description": "Enable or disable an alert rule. Requires editor access to its namespace.", "inputSchema": {
+        { "name": "toggle_alert_rule", "description": "Enable or disable an alert rule. Requires editor access to its workspace.", "inputSchema": {
             "type": "object", "required": ["alert_id", "enabled"], "properties": {
                 "alert_id": { "type": "string" }, "enabled": { "type": "boolean" } } } },
     ])
@@ -108,13 +108,13 @@ fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
 }
 
-// ---- read tools (scoped to the caller's namespaces) -------------------------
+// ---- read tools (scoped to the caller's workspaces) -------------------------
 
 async fn t_list_systems(state: &AppState, user: &CurrentUser) -> Result<Value, String> {
     let rows: Vec<(String, String, String, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
         "SELECT s.name, s.kind, n.name, s.last_seen FROM systems s \
-         JOIN namespaces n ON n.id = s.namespace_id \
-         WHERE $1 OR s.namespace_id IN (SELECT namespace_id FROM memberships WHERE user_id = $2) \
+         JOIN workspaces n ON n.id = s.workspace_id \
+         WHERE $1 OR s.workspace_id IN (SELECT workspace_id FROM memberships WHERE user_id = $2) \
          ORDER BY n.name, s.name",
     )
     .bind(user.can_read_all())
@@ -125,8 +125,8 @@ async fn t_list_systems(state: &AppState, user: &CurrentUser) -> Result<Value, S
     let now = Utc::now();
     Ok(json!(rows
         .iter()
-        .map(|(name, kind, ns, last)| json!({
-            "name": name, "kind": kind, "namespace": ns,
+        .map(|(name, kind, ws, last)| json!({
+            "name": name, "kind": kind, "workspace": ws,
             "online": last.map(|t| (now - t).num_seconds() < 120).unwrap_or(false),
             "last_seen": last.map(|t| t.to_rfc3339()),
         }))
@@ -136,8 +136,8 @@ async fn t_list_systems(state: &AppState, user: &CurrentUser) -> Result<Value, S
 async fn t_list_services(state: &AppState, user: &CurrentUser) -> Result<Value, String> {
     let mons: Vec<(Uuid, String, String, String, String, bool)> = sqlx::query_as(
         "SELECT m.id, m.name, m.kind::text, m.target, n.name, m.enabled FROM monitors m \
-         JOIN namespaces n ON n.id = m.namespace_id \
-         WHERE $1 OR m.namespace_id IN (SELECT namespace_id FROM memberships WHERE user_id = $2) \
+         JOIN workspaces n ON n.id = m.workspace_id \
+         WHERE $1 OR m.workspace_id IN (SELECT workspace_id FROM memberships WHERE user_id = $2) \
          ORDER BY n.name, m.name",
     )
     .bind(user.can_read_all())
@@ -160,10 +160,10 @@ async fn t_list_services(state: &AppState, user: &CurrentUser) -> Result<Value, 
         .collect();
     Ok(json!(mons
         .iter()
-        .map(|(id, name, kind, target, ns, enabled)| {
+        .map(|(id, name, kind, target, ws, enabled)| {
             let st = latest.get(id);
             json!({
-                "id": id, "name": name, "kind": kind, "target": target, "namespace": ns,
+                "id": id, "name": name, "kind": kind, "target": target, "workspace": ws,
                 "enabled": enabled,
                 "status": st.map(|(up, _)| if *up { "up" } else { "down" }).unwrap_or("pending"),
                 "message": st.and_then(|(_, m)| m.clone()),
@@ -183,10 +183,10 @@ async fn t_alerts_firing(state: &AppState, user: &CurrentUser) -> Result<Value, 
              FROM alert_state st JOIN alerts r ON r.id = st.alert_id \
              LEFT JOIN monitors m ON m.id = r.monitor_id \
              LEFT JOIN systems s ON s.id = r.system_id \
-             LEFT JOIN namespaces n ON n.id = COALESCE(m.namespace_id, s.namespace_id) \
+             LEFT JOIN workspaces n ON n.id = COALESCE(m.workspace_id, s.workspace_id) \
              WHERE st.firing = true AND r.enabled = true \
-             AND ($1 OR COALESCE(m.namespace_id, s.namespace_id) IN \
-                  (SELECT namespace_id FROM memberships WHERE user_id = $2)) \
+             AND ($1 OR COALESCE(m.workspace_id, s.workspace_id) IN \
+                  (SELECT workspace_id FROM memberships WHERE user_id = $2)) \
              ORDER BY st.last_changed",
     )
     .bind(user.can_read_all())
@@ -196,10 +196,10 @@ async fn t_alerts_firing(state: &AppState, user: &CurrentUser) -> Result<Value, 
     .map_err(|e| e.to_string())?;
     Ok(json!(rows
         .iter()
-        .map(|(m, s, ns, since)| json!({
+        .map(|(m, s, ws, since)| json!({
             "target": m.clone().or_else(|| s.clone()),
             "kind": if m.is_some() { "service" } else { "host" },
-            "namespace": ns,
+            "workspace": ws,
             "firing_since": since.map(|t| t.to_rfc3339()),
         }))
         .collect::<Vec<_>>()))
@@ -227,9 +227,9 @@ async fn t_recent_events(
              FROM alert_events e JOIN alerts r ON r.id = e.alert_id \
              LEFT JOIN monitors m ON m.id = r.monitor_id \
              LEFT JOIN systems s ON s.id = r.system_id \
-             LEFT JOIN namespaces n ON n.id = COALESCE(m.namespace_id, s.namespace_id) \
-             WHERE $1 OR COALESCE(m.namespace_id, s.namespace_id) IN \
-                   (SELECT namespace_id FROM memberships WHERE user_id = $2) \
+             LEFT JOIN workspaces n ON n.id = COALESCE(m.workspace_id, s.workspace_id) \
+             WHERE $1 OR COALESCE(m.workspace_id, s.workspace_id) IN \
+                   (SELECT workspace_id FROM memberships WHERE user_id = $2) \
              ORDER BY e.at DESC LIMIT $3",
     )
     .bind(user.can_read_all())
@@ -240,23 +240,23 @@ async fn t_recent_events(
     .map_err(|e| e.to_string())?;
     Ok(json!(rows
         .iter()
-        .map(|(at, firing, msg, m, s, ns)| json!({
+        .map(|(at, firing, msg, m, s, ws)| json!({
             "at": at.to_rfc3339(),
             "state": if *firing { "down" } else { "recovered" },
             "target": m.clone().or_else(|| s.clone()),
-            "namespace": ns,
+            "workspace": ws,
             "message": msg,
         }))
         .collect::<Vec<_>>()))
 }
 
-// ---- write tools (require editor in the target's namespace) -----------------
+// ---- write tools (require editor in the target's workspace) -----------------
 
-async fn require_editor(state: &AppState, user: &CurrentUser, ns: Uuid) -> Result<(), String> {
-    rbac::require_role(state, user, ns, Role::Editor)
+async fn require_editor(state: &AppState, user: &CurrentUser, ws: Uuid) -> Result<(), String> {
+    rbac::require_role(state, user, ws, Role::Editor)
         .await
         .map(|_| ())
-        .map_err(|_| "forbidden: editor access to this namespace is required".to_string())
+        .map_err(|_| "forbidden: editor access to this workspace is required".to_string())
 }
 
 async fn t_run_check(state: &AppState, user: &CurrentUser, args: &Value) -> Result<Value, String> {
@@ -265,13 +265,13 @@ async fn t_run_check(state: &AppState, user: &CurrentUser, args: &Value) -> Resu
         .and_then(Value::as_str)
         .and_then(|s| Uuid::parse_str(s).ok())
         .ok_or("monitor_id must be a UUID")?;
-    let ns: Option<(Uuid,)> = sqlx::query_as("SELECT namespace_id FROM monitors WHERE id = $1")
+    let ws: Option<(Uuid,)> = sqlx::query_as("SELECT workspace_id FROM monitors WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.config)
         .await
         .map_err(|e| e.to_string())?;
-    let (ns,) = ns.ok_or("monitor not found")?;
-    require_editor(state, user, ns).await?;
+    let (ws,) = ws.ok_or("monitor not found")?;
+    require_editor(state, user, ws).await?;
     crate::probe::check_once(state, id).await;
     let beat: Option<(bool, Option<String>)> = sqlx::query_as(
         "SELECT up, message FROM heartbeats WHERE monitor_id = $1 ORDER BY time DESC LIMIT 1",
@@ -302,8 +302,8 @@ async fn t_toggle_rule(
         .get("enabled")
         .and_then(Value::as_bool)
         .ok_or("enabled must be true/false")?;
-    let ns: Option<(Option<Uuid>,)> = sqlx::query_as(
-        "SELECT COALESCE(m.namespace_id, s.namespace_id) FROM alerts r \
+    let ws: Option<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT COALESCE(m.workspace_id, s.workspace_id) FROM alerts r \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id WHERE r.id = $1",
     )
@@ -311,8 +311,8 @@ async fn t_toggle_rule(
     .fetch_optional(&state.config)
     .await
     .map_err(|e| e.to_string())?;
-    let ns = ns.and_then(|(n,)| n).ok_or("alert rule not found")?;
-    require_editor(state, user, ns).await?;
+    let ws = ws.and_then(|(n,)| n).ok_or("alert rule not found")?;
+    require_editor(state, user, ws).await?;
     sqlx::query("UPDATE alerts SET enabled = $2 WHERE id = $1")
         .bind(id)
         .bind(enabled)

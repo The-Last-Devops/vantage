@@ -36,7 +36,7 @@ use axum::http::StatusCode;
 // restore silently destroys every PAT, SSH key and passkey when `users` is replaced.
 pub(crate) const CONFIG_TABLES: &[&str] = &[
     "users",
-    "namespaces",
+    "workspaces",
     "memberships",
     "api_pats",
     "ssh_keys",

@@ -27,8 +27,8 @@ watch(
   },
 )
 const id = computed(() => route.params.id)
-// preserve the namespace selection on the breadcrumb links
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+// preserve the workspace selection on the breadcrumb links
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 const resolvedName = ref('') // host name looked up from /api/systems (precheck)
 const hostName = computed(() => route.query.name || resolvedName.value || `Host ${String(id.value).slice(0, 8)}…`)
 

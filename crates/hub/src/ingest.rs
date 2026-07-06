@@ -25,8 +25,8 @@ pub async fn ingest(
         .and_then(|v| v.to_str().ok())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    // Resolve the (reusable) API key -> its namespace.
-    let row: (Uuid, Uuid) = sqlx::query_as("SELECT id, namespace_id FROM api_keys WHERE key = $1")
+    // Resolve the (reusable) API key -> its workspace.
+    let row: (Uuid, Uuid) = sqlx::query_as("SELECT id, workspace_id FROM api_keys WHERE key = $1")
         .bind(key)
         .fetch_optional(&state.config)
         .await
@@ -35,7 +35,7 @@ pub async fn ingest(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let (key_id, namespace_id) = row;
+    let (key_id, workspace_id) = row;
 
     let hostname = if report.hostname.is_empty() {
         "unknown".to_string()
@@ -56,13 +56,13 @@ pub async fn ingest(
 
     // Auto-register / update the system identified by (key, hostname).
     let system: (Uuid,) = sqlx::query_as(
-        "INSERT INTO systems (namespace_id, key_id, name, hostname, kernel, cpu_model, cpu_cores, agent_version, kind, cluster, last_seen) \
+        "INSERT INTO systems (workspace_id, key_id, name, hostname, kernel, cpu_model, cpu_cores, agent_version, kind, cluster, last_seen) \
          VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, now()) \
          ON CONFLICT (key_id, hostname) DO UPDATE SET \
             last_seen = now(), kernel = $4, cpu_model = $5, cpu_cores = $6, agent_version = $7, kind = $8, cluster = $9 \
          RETURNING id",
     )
-    .bind(namespace_id)
+    .bind(workspace_id)
     .bind(key_id)
     .bind(&hostname)
     .bind(&report.kernel)

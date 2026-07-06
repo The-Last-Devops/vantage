@@ -11,20 +11,20 @@ pub struct ChannelRow {
     pub config: Value,
 }
 
-/// GET /api/namespaces/:id/channels
+/// GET /api/workspaces/:id/channels
 pub async fn list_channels(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<ChannelRow>>, StatusCode> {
-    let role = rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let role = rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     // Secrets (tokens/passwords/webhook URLs) go only to those who can edit the
     // channel; viewers get them masked. Editors need the real config to edit.
     let can_see_secrets = role >= Role::Editor;
     let rows: Vec<(Uuid, String, String, sqlx::types::Json<Value>)> = sqlx::query_as(
-        "SELECT id, name, kind, config FROM channels WHERE namespace_id = $1 ORDER BY name",
+        "SELECT id, name, kind, config FROM channels WHERE workspace_id = $1 ORDER BY name",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -52,27 +52,27 @@ pub struct GlobalChannelRow {
     pub id: Uuid,
     pub name: String,
     pub kind: String,
-    pub namespace: String,
-    pub namespace_id: Uuid,
-    /// Whether the caller may edit/delete this channel (editor+ of its namespace).
+    pub workspace: String,
+    pub workspace_id: Uuid,
+    /// Whether the caller may edit/delete this channel (editor+ of its workspace).
     pub can_edit: bool,
     pub config: Value,
 }
 
-/// GET /api/channels — every channel across all namespaces. Channels are a shared
+/// GET /api/channels — every channel across all workspaces. Channels are a shared
 /// resource: anyone signed in may view them and attach them to alerts. Only an
-/// editor of the channel's OWN namespace may edit/delete it, so secrets are shown
+/// editor of the channel's OWN workspace may edit/delete it, so secrets are shown
 /// only to those editors; everyone else gets them masked.
 pub async fn list_all_channels(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<Vec<GlobalChannelRow>>, StatusCode> {
-    // Namespaces the caller can edit (system admins edit everywhere).
+    // Workspaces the caller can edit (system admins edit everywhere).
     let editable: std::collections::HashSet<Uuid> = if user.is_admin {
         std::collections::HashSet::new()
     } else {
         sqlx::query_as::<_, (Uuid,)>(
-            "SELECT namespace_id FROM memberships \
+            "SELECT workspace_id FROM memberships \
              WHERE user_id = $1 AND role IN ('editor', 'owner')",
         )
         .bind(user.id)
@@ -84,16 +84,16 @@ pub async fn list_all_channels(
         .collect()
     };
     let rows: Vec<(Uuid, String, String, sqlx::types::Json<Value>, Uuid, String)> = sqlx::query_as(
-        "SELECT c.id, c.name, c.kind, c.config, c.namespace_id, n.name \
-         FROM channels c JOIN namespaces n ON n.id = c.namespace_id ORDER BY n.name, c.name",
+        "SELECT c.id, c.name, c.kind, c.config, c.workspace_id, n.name \
+         FROM channels c JOIN workspaces n ON n.id = c.workspace_id ORDER BY n.name, c.name",
     )
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(id, name, kind, config, namespace_id, namespace)| {
-                let can_edit = user.is_admin || editable.contains(&namespace_id);
+            .map(|(id, name, kind, config, workspace_id, workspace)| {
+                let can_edit = user.is_admin || editable.contains(&workspace_id);
                 let config = if can_edit {
                     config.0
                 } else {
@@ -103,8 +103,8 @@ pub async fn list_all_channels(
                     id,
                     name,
                     kind,
-                    namespace,
-                    namespace_id,
+                    workspace,
+                    workspace_id,
                     can_edit,
                     config,
                 }
@@ -114,7 +114,7 @@ pub async fn list_all_channels(
 }
 
 /// GET /api/channel-types — the provider manifest the UI renders the form from.
-/// No namespace scope: it's static schema, any signed-in user may read it.
+/// No workspace scope: it's static schema, any signed-in user may read it.
 pub async fn channel_types(_user: CurrentUser) -> Json<Vec<crate::notify::ProviderMeta>> {
     Json(crate::notify::manifest())
 }
@@ -123,17 +123,17 @@ pub async fn channel_types(_user: CurrentUser) -> Json<Vec<crate::notify::Provid
 pub struct ChannelAlertRow {
     pub id: Uuid,
     /// The rule's target: a monitor/host name, or "All services"/"All hosts" for
-    /// a namespace-wide rule.
+    /// a workspace-wide rule.
     pub target: String,
     /// "service" | "host" — what the rule watches, so the UI can group its reach.
     pub kind: String,
-    pub namespace: String,
+    pub workspace: String,
     pub enabled: bool,
     pub firing: Option<bool>,
 }
 
 /// GET /api/channels/:id/alerts — the alert rules that notify through this channel
-/// (across all namespaces, since channels are shared). Read-only, any signed-in user.
+/// (across all workspaces, since channels are shared). Read-only, any signed-in user.
 pub async fn channel_alerts(
     State(state): State<AppState>,
     _user: CurrentUser,
@@ -152,8 +152,8 @@ pub async fn channel_alerts(
          FROM alert_channels ac JOIN alerts r ON r.id = ac.alert_id \
          LEFT JOIN monitors m ON m.id = r.monitor_id \
          LEFT JOIN systems s ON s.id = r.system_id \
-         LEFT JOIN namespaces nt ON nt.id = COALESCE(m.namespace_id, s.namespace_id) \
-         LEFT JOIN namespaces nsc ON nsc.id = r.scope_namespace_id \
+         LEFT JOIN workspaces nt ON nt.id = COALESCE(m.workspace_id, s.workspace_id) \
+         LEFT JOIN workspaces nsc ON nsc.id = r.scope_workspace_id \
          LEFT JOIN alert_state st ON st.alert_id = r.id \
          WHERE ac.channel_id = $1 ORDER BY r.enabled DESC, nt.name",
     )
@@ -163,7 +163,7 @@ pub async fn channel_alerts(
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(id, m, s, scope, ns, enabled, firing)| {
+            .map(|(id, m, s, scope, ws, enabled, firing)| {
                 let (target, kind) = match scope.as_deref() {
                     Some("all_services") => ("All services".to_string(), "service"),
                     Some("all_hosts") => ("All hosts".to_string(), "host"),
@@ -174,7 +174,7 @@ pub async fn channel_alerts(
                     id,
                     target,
                     kind: kind.to_string(),
-                    namespace: ns.unwrap_or_default(),
+                    workspace: ws.unwrap_or_default(),
                     enabled,
                     firing,
                 }
@@ -189,16 +189,16 @@ pub struct TestChannelConfig {
     pub config: Value,
 }
 
-/// POST /api/namespaces/:id/channels/test — send a test through an unsaved config,
+/// POST /api/workspaces/:id/channels/test — send a test through an unsaved config,
 /// so a channel can be verified BEFORE it is created or its edits are saved.
-/// Scoped to the namespace (editor+) to avoid an open SSRF relay for any signed-in user.
+/// Scoped to the workspace (editor+) to avoid an open SSRF relay for any signed-in user.
 pub async fn test_channel_config(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<TestChannelConfig>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    rbac::require_role(&state, &user, ns, Role::Editor)
+    rbac::require_role(&state, &user, ws, Role::Editor)
         .await
         .map_err(|s| (s, "forbidden".into()))?;
     if !crate::notify::is_valid_kind(&req.kind) {
@@ -227,22 +227,22 @@ pub struct CreateChannel {
     pub config: Option<Value>,
 }
 
-/// POST /api/namespaces/:id/channels — editors+ add a notification channel.
+/// POST /api/workspaces/:id/channels — editors+ add a notification channel.
 pub async fn create_channel(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<CreateChannel>,
 ) -> Result<Json<Uuid>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     if !crate::notify::is_valid_kind(&req.kind) || !super::valid_name(&req.name, 64) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO channels (namespace_id, name, kind, config) \
+        "INSERT INTO channels (workspace_id, name, kind, config) \
          VALUES ($1, $2, $3, $4) RETURNING id",
     )
-    .bind(ns)
+    .bind(ws)
     .bind(req.name.trim())
     .bind(&req.kind)
     .bind(sqlx::types::Json(
@@ -269,13 +269,13 @@ pub async fn patch_channel(
     Path(id): Path<Uuid>,
     Json(req): Json<PatchChannel>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM channels WHERE id = $1",
+        "SELECT workspace_id FROM channels WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     if req
         .name
         .as_deref()
@@ -301,14 +301,14 @@ pub async fn test_channel(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM channels WHERE id = $1",
+        "SELECT workspace_id FROM channels WHERE id = $1",
         id,
     )
     .await
     .map_err(|s| (s, "not found".into()))?;
-    rbac::require_role(&state, &user, ns, Role::Editor)
+    rbac::require_role(&state, &user, ws, Role::Editor)
         .await
         .map_err(|s| (s, "forbidden".into()))?;
     let row: Option<(String, sqlx::types::Json<Value>)> =
@@ -339,13 +339,13 @@ pub async fn delete_channel(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM channels WHERE id = $1",
+        "SELECT workspace_id FROM channels WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     sqlx::query("DELETE FROM channels WHERE id = $1")
         .bind(id)
         .execute(&state.config)

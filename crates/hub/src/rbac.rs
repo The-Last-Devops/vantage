@@ -1,4 +1,4 @@
-//! Namespace-scoped authorization. All permission checks funnel through
+//! Workspace-scoped authorization. All permission checks funnel through
 //! [`require_role`] so new roles or rules are changed in exactly one place.
 
 use axum::http::StatusCode;
@@ -34,12 +34,12 @@ impl Role {
     }
 }
 
-/// Returns the user's effective role in a namespace, or `None` if not a member.
+/// Returns the user's effective role in a workspace, or `None` if not a member.
 /// System admins are `Owner` everywhere; read-only admins are `Viewer` everywhere.
 pub async fn role_in(
     state: &AppState,
     user: &CurrentUser,
-    namespace_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<Option<Role>, StatusCode> {
     if user.is_admin {
         return Ok(Some(Role::Owner));
@@ -48,10 +48,10 @@ pub async fn role_in(
         return Ok(Some(Role::Viewer));
     }
     let row: Option<(String,)> = sqlx::query_as(
-        "SELECT role::text FROM memberships WHERE user_id = $1 AND namespace_id = $2",
+        "SELECT role::text FROM memberships WHERE user_id = $1 AND workspace_id = $2",
     )
     .bind(user.id)
-    .bind(namespace_id)
+    .bind(workspace_id)
     .fetch_optional(&state.config)
     .await
     .map_err(|e| {
@@ -61,39 +61,39 @@ pub async fn role_in(
     Ok(row.and_then(|(r,)| Role::from_db_str(&r)))
 }
 
-/// Authorizes that `user` has at least `min` role in `namespace_id`.
+/// Authorizes that `user` has at least `min` role in `workspace_id`.
 /// Maps to 403 when under-privileged, 404-style 403 when not a member at all.
 pub async fn require_role(
     state: &AppState,
     user: &CurrentUser,
-    namespace_id: Uuid,
+    workspace_id: Uuid,
     min: Role,
 ) -> Result<Role, StatusCode> {
-    match role_in(state, user, namespace_id).await? {
+    match role_in(state, user, workspace_id).await? {
         Some(role) if role >= min => Ok(role),
         _ => Err(StatusCode::FORBIDDEN),
     }
 }
 
-/// Authorizes shell/exec on a namespace's host. The user must be `Owner` of the
-/// namespace **and** hold the dedicated `can_exec` capability — exec is kept
+/// Authorizes shell/exec on a workspace's host. The user must be `Owner` of the
+/// workspace **and** hold the dedicated `can_exec` capability — exec is kept
 /// separate from "edit config" (see docs/exec-design.md). System admins bypass;
 /// read-only admins (`read_all`) never get exec. 403 otherwise. The single place the
 /// exec rule lives (mirrors require_role).
 pub async fn require_exec(
     state: &AppState,
     user: &CurrentUser,
-    namespace_id: Uuid,
+    workspace_id: Uuid,
 ) -> Result<(), StatusCode> {
     if user.is_admin {
         return Ok(());
     }
     // A read-only admin (read_all) is intentionally not exec-capable.
     let row: Option<(String, bool)> = sqlx::query_as(
-        "SELECT role::text, can_exec FROM memberships WHERE user_id = $1 AND namespace_id = $2",
+        "SELECT role::text, can_exec FROM memberships WHERE user_id = $1 AND workspace_id = $2",
     )
     .bind(user.id)
-    .bind(namespace_id)
+    .bind(workspace_id)
     .fetch_optional(&state.config)
     .await
     .map_err(|e| {

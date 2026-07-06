@@ -10,10 +10,10 @@ const route = useRoute()
 const router = useRouter()
 const editId = computed(() => route.params.id || null)
 
-const namespaces = ref([])
+const workspaces = ref([])
 const monitors = ref([])
 const systems = ref([])
-const channels = ref([]) // global channel list { id, name, kind, namespace }
+const channels = ref([]) // global channel list { id, name, kind, workspace }
 const types = ref([]) // channel-type manifest, for provider icon/colors
 const loaded = ref(false)
 const err = ref('')
@@ -42,17 +42,17 @@ const chanFg = (kind) => typeByKind(kind)?.fg || 'rgb(var(--fg))'
 const chanIcon = (kind) => typeByKind(kind)?.icon || 'chat'
 
 const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
-const ed = ref({ srcType: 'monitor', targetId: '', scopeNs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, offlineSecs: 120, channels: new Set(), renotify: '' })
+const ed = ref({ srcType: 'monitor', targetId: '', scopeWs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, offlineSecs: 120, channels: new Set(), renotify: '' })
 
 const isScope = computed(() => ed.value.srcType === 'all_services' || ed.value.srcType === 'all_hosts')
 const isServiceLike = computed(() => ed.value.srcType === 'monitor' || ed.value.srcType === 'all_services')
-const targetNs = computed(() => {
+const targetWs = computed(() => {
   const list = ed.value.srcType === 'monitor' ? monitors.value : systems.value
-  const name = list.find((x) => x.id === ed.value.targetId)?.namespace
-  return namespaces.value.find((n) => n.name === name) || null
+  const name = list.find((x) => x.id === ed.value.targetId)?.workspace
+  return workspaces.value.find((n) => n.name === name) || null
 })
-const saveNs = computed(() => (isScope.value ? namespaces.value.find((n) => n.id === ed.value.scopeNs) || null : targetNs.value))
-const candidates = computed(() => (ed.value.srcType === 'all_services' ? monitors.value : systems.value).filter((x) => x.namespace === saveNs.value?.name))
+const saveWs = computed(() => (isScope.value ? workspaces.value.find((n) => n.id === ed.value.scopeWs) || null : targetWs.value))
+const candidates = computed(() => (ed.value.srcType === 'all_services' ? monitors.value : systems.value).filter((x) => x.workspace === saveWs.value?.name))
 
 function setSrcType(t) {
   ed.value.srcType = t
@@ -91,12 +91,12 @@ function buildCondition() {
   if (ed.value.condType === 'offline') return { offline_secs: Number(ed.value.offlineSecs) || 120 }
   return { metric: ed.value.metric, op: ed.value.op, value: Number(ed.value.value) }
 }
-function backToList() { router.push({ name: 'alerts', query: route.query.ns ? { ns: route.query.ns } : {} }) }
+function backToList() { router.push({ name: 'alerts', query: route.query.ws ? { ws: route.query.ws } : {} }) }
 
 // Build the target (source) part of the payload — shared by create and edit.
 function targetBody() {
   const b = {}
-  if (isScope.value) { b.scope_kind = ed.value.srcType; b.scope_namespace_id = saveNs.value?.id }
+  if (isScope.value) { b.scope_kind = ed.value.srcType; b.scope_workspace_id = saveWs.value?.id }
   else if (ed.value.srcType === 'monitor') b.monitor_id = ed.value.targetId
   else b.system_id = ed.value.targetId
   return b
@@ -104,7 +104,7 @@ function targetBody() {
 async function save() {
   err.value = ''
   if (!isScope.value && !ed.value.targetId) { err.value = `Pick a ${ed.value.srcType === 'monitor' ? 'service' : 'host'}.`; return }
-  if (!saveNs.value) { err.value = 'Pick a source first.'; return }
+  if (!saveWs.value) { err.value = 'Pick a source first.'; return }
   if (!ed.value.channels.size) { err.value = 'Pick at least one channel.'; return }
   const channel_ids = [...ed.value.channels]
   const renotify_secs = ed.value.renotify ? Number(ed.value.renotify) : null
@@ -114,7 +114,7 @@ async function save() {
       // Source is editable now — send the target too (re-targets the rule server-side).
       await api.patch(`/api/alerts/${editId.value}`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody() })
     } else {
-      await api.post(`/api/namespaces/${saveNs.value.id}/alerts`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody() })
+      await api.post(`/api/workspaces/${saveWs.value.id}/alerts`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody() })
     }
     backToList()
   } catch (e) { err.value = e.status === 403 ? 'You need editor access.' : `Failed (${e.status}).` }
@@ -123,14 +123,14 @@ async function save() {
 
 onMounted(async () => {
   const work = (async () => {
-    const [ns, mons, sys, chs, tys] = await Promise.all([
-      api.get('/api/namespaces').catch(() => []),
+    const [ws, mons, sys, chs, tys] = await Promise.all([
+      api.get('/api/workspaces').catch(() => []),
       api.get('/api/monitors').catch(() => []),
       api.get('/api/systems').catch(() => []),
       api.get('/api/channels').catch(() => []),
       api.get('/api/channel-types').catch(() => []),
     ])
-    namespaces.value = ns; monitors.value = mons; systems.value = sys; channels.value = chs; types.value = tys
+    workspaces.value = ws; monitors.value = mons; systems.value = sys; channels.value = chs; types.value = tys
     if (editId.value) {
       const a = await api.get(`/api/alerts/${editId.value}`)
       const c = a.condition || {}
@@ -138,14 +138,14 @@ onMounted(async () => {
       ed.value = {
         srcType: a.scope_kind || (a.monitor_id ? 'monitor' : 'host'),
         targetId: a.monitor_id || a.system_id || '',
-        scopeNs: a.scope_namespace_id || '',
+        scopeWs: a.scope_workspace_id || '',
         condType: serviceLike ? 'down' : c.offline_secs ? 'offline' : 'metric',
         metric: c.metric || 'cpu_percent', op: c.op || '>', value: c.value ?? 90, offlineSecs: c.offline_secs ?? 120,
         channels: new Set((a.channels || []).map((ch) => ch.id)),
         renotify: a.renotify_secs ? String(a.renotify_secs) : '',
       }
     } else {
-      ed.value.scopeNs = ns[0]?.id || ''
+      ed.value.scopeWs = ws[0]?.id || ''
     }
   })()
   await minLoad(work)
@@ -154,7 +154,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell :breadcrumb="[{ label: 'Rules', to: { name: 'alerts', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: editId ? 'Edit rule' : 'New rule' }]">
+  <AppShell :breadcrumb="[{ label: 'Rules', to: { name: 'alerts', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: editId ? 'Edit rule' : 'New rule' }]">
     <PageLoader v-if="!loaded" />
     <template v-else>
       <div class="mx-auto grid w-full max-w-4xl gap-4 lg:grid-cols-[1fr_320px]">
@@ -169,10 +169,10 @@ onMounted(async () => {
             </div>
             <UiSelect v-if="!isScope" v-model="ed.targetId" block
               :placeholder="`— pick a ${ed.srcType === 'monitor' ? 'service' : 'host'} —`"
-              :options="(ed.srcType === 'monitor' ? monitors : systems).map((m) => ({ value: m.id, label: `${m.name} · ${m.namespace}` }))" />
+              :options="(ed.srcType === 'monitor' ? monitors : systems).map((m) => ({ value: m.id, label: `${m.name} · ${m.workspace}` }))" />
             <div v-else>
-              <UiSelect v-model="ed.scopeNs" block placeholder="— pick a namespace —" :options="namespaces.map((n) => ({ value: n.id, label: n.name }))" />
-              <p class="mt-1.5 text-xs text-faint">Covers every {{ ed.srcType === 'all_services' ? 'service' : 'host' }} in this namespace — new ones included automatically.</p>
+              <UiSelect v-model="ed.scopeWs" block placeholder="— pick a workspace —" :options="workspaces.map((n) => ({ value: n.id, label: n.name }))" />
+              <p class="mt-1.5 text-xs text-faint">Covers every {{ ed.srcType === 'all_services' ? 'service' : 'host' }} in this workspace — new ones included automatically.</p>
             </div>
             <p v-if="editId" class="mt-1.5 text-xs text-faint">Changing the source re-points this rule and resets its current state.</p>
           </div>
@@ -210,7 +210,7 @@ onMounted(async () => {
                   <span v-else class="h-4 w-4 shrink-0 rounded border border-line"></span>
                   <span class="grid h-6 w-6 shrink-0 place-items-center rounded-md" :style="{ background: chanColor(c.kind), color: chanFg(c.kind) }" v-html="iconSvg(chanIcon(c.kind), 14)"></span>
                   <span class="truncate text-sm text-fg">{{ c.name }}</span>
-                  <span class="shrink-0 text-[11px] text-faint">{{ c.kind }} · {{ c.namespace }}</span>
+                  <span class="shrink-0 text-[11px] text-faint">{{ c.kind }} · {{ c.workspace }}</span>
                 </button>
                 <span v-if="testState[c.id] === 'ok'" class="text-xs text-accent">✓ sent</span>
                 <span v-else-if="testState[c.id] === 'fail'" class="text-xs text-down">✗ failed</span>
@@ -238,7 +238,7 @@ onMounted(async () => {
         <!-- right rail: wiring -->
         <div class="rounded-2xl border border-line bg-surface p-4">
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Wiring</div>
-          <p class="text-[13px] leading-relaxed text-muted">When <b class="text-fg">{{ targetName || '<source>' }}</b><template v-if="isScope && saveNs"> in <b class="text-fg">{{ saveNs.name }}</b></template> <b class="text-fg">{{ condText }}</b>, notify
+          <p class="text-[13px] leading-relaxed text-muted">When <b class="text-fg">{{ targetName || '<source>' }}</b><template v-if="isScope && saveWs"> in <b class="text-fg">{{ saveWs.name }}</b></template> <b class="text-fg">{{ condText }}</b>, notify
             <template v-if="ed.channels.size"><b v-for="(id, i) in [...ed.channels]" :key="id" class="text-fg">{{ channels.find((c) => c.id === id)?.name }}{{ i < ed.channels.size - 1 ? ', ' : '' }}</b></template>
             <b v-else class="text-down">no channel yet</b>.
           </p>
@@ -246,7 +246,7 @@ onMounted(async () => {
             <div class="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wide text-faint">Covers {{ candidates.length }} {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }}</div>
             <div class="max-h-64 space-y-1 overflow-y-auto">
               <div v-for="t in candidates" :key="t.id" class="truncate rounded-md bg-surface2 px-2 py-1 text-xs text-fg">{{ t.name }}</div>
-              <p v-if="!candidates.length" class="text-xs text-faint">No {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }} in this namespace yet.</p>
+              <p v-if="!candidates.length" class="text-xs text-faint">No {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }} in this workspace yet.</p>
             </div>
           </template>
         </div>

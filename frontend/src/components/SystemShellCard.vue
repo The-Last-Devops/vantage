@@ -52,7 +52,7 @@ async function savePort() {
     await api.put(`/api/systems/${props.id}/shell`, { ssh_port: port })
     await load(); syncPort(); editingPort.value = false
   } catch (e) {
-    shellMsg.value = e.status === 403 ? 'Only the namespace owner can change this.' : `Failed (${e.status}).`
+    shellMsg.value = e.status === 403 ? 'Only the workspace owner can change this.' : `Failed (${e.status}).`
   } finally {
     savingShell.value = false
   }

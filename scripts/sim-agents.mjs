@@ -15,7 +15,7 @@
 //
 // Env (all optional except admin creds):
 //   HUB_URL          default http://localhost:8080
-//   ADMIN_EMAIL/ADMIN_PASSWORD   admin login (to create namespaces + tokens)
+//   ADMIN_EMAIL/ADMIN_PASSWORD   admin login (to create workspaces + tokens)
 //   INTERVAL         seconds between pushes (default 5)
 //   NODES            standalone nodes (default 20)
 //   DOCKER           docker hosts (default 6)
@@ -68,16 +68,16 @@ async function login() {
   console.log('logged in as', ADMIN_EMAIL);
 }
 
-async function ensureNamespace(name) {
-  const list = await api('GET', '/api/namespaces').catch(() => []);
-  const found = (Array.isArray(list) ? list : list.namespaces || []).find((n) => n.name === name);
+async function ensureWorkspace(name) {
+  const list = await api('GET', '/api/workspaces').catch(() => []);
+  const found = (Array.isArray(list) ? list : list.workspaces || []).find((n) => n.name === name);
   if (found) return found.id;
-  const created = await api('POST', '/api/namespaces', { name });
+  const created = await api('POST', '/api/workspaces', { name });
   return created.id || created;
 }
 
-async function createKey(nsId, name) {
-  const k = await api('POST', `/api/namespaces/${nsId}/keys`, { name });
+async function createKey(wsId, name) {
+  const k = await api('POST', `/api/workspaces/${wsId}/keys`, { name });
   return k.key;
 }
 
@@ -176,9 +176,9 @@ async function getTokens() {
   }
   await login();
   const c = {
-    prod: await createKey(await ensureNamespace('production'), 'simulator'),
-    stg: await createKey(await ensureNamespace('staging'), 'simulator'),
-    edge: await createKey(await ensureNamespace('edge'), 'simulator'),
+    prod: await createKey(await ensureWorkspace('production'), 'simulator'),
+    stg: await createKey(await ensureWorkspace('staging'), 'simulator'),
+    edge: await createKey(await ensureWorkspace('edge'), 'simulator'),
   };
   writeFileSync(CACHE, JSON.stringify(c, null, 2));
   console.log('created sim tokens →', CACHE);
@@ -187,8 +187,8 @@ async function getTokens() {
 
 async function main() {
   const { prod: tokProd, stg: tokStg, edge: tokEdge } = await getTokens();
-  const nsTokens = [tokProd, tokProd, tokStg, tokEdge]; // weight prod higher
-  const pickTok = () => nsTokens[Math.floor(rnd(0, nsTokens.length))];
+  const wsTokens = [tokProd, tokProd, tokStg, tokEdge]; // weight prod higher
+  const pickTok = () => wsTokens[Math.floor(rnd(0, wsTokens.length))];
 
   const fleet = [];
   for (let i = 1; i <= N_NODES; i++)

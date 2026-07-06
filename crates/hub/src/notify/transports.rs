@@ -58,7 +58,7 @@ pub async fn dispatch(
                     "title": n.title(),
                     "target": n.target,
                     "type": n.kind_label,
-                    "namespace": n.namespace,
+                    "workspace": n.workspace,
                     "condition": n.condition,
                     "detail": n.detail,
                     "at": n.at,

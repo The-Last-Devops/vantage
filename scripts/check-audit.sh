@@ -17,10 +17,10 @@ for i in $(seq 1 60); do curl -s -o /dev/null -m 2 "$BASE/healthz" && break; sle
 
 curl -s -c "$JAR" -o /dev/null -X POST "$BASE/api/auth/login" \
   -H 'content-type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}"
-NS=$(curl -s -b "$JAR" "$BASE/api/namespaces" | py "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')")
-say "namespace0"; echo "$NS"; [ -n "$NS" ] || { echo "no namespace"; exit 1; }
+WS=$(curl -s -b "$JAR" "$BASE/api/workspaces" | py "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')")
+say "workspace0"; echo "$WS"; [ -n "$WS" ] || { echo "no workspace"; exit 1; }
 
-CH=$(curl -s -b "$JAR" -X POST "$BASE/api/namespaces/$NS/channels" -H 'content-type: application/json' \
+CH=$(curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/channels" -H 'content-type: application/json' \
   -d "{\"name\":\"$NAME\",\"kind\":\"webhook\",\"config\":{\"url\":\"https://example.com/x\"}}" | py "import sys,json;print(json.load(sys.stdin))")
 say "created channel"; echo "$CH"
 curl -s -b "$JAR" -o /dev/null -X DELETE "$BASE/api/channels/$CH"

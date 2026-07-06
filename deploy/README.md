@@ -82,7 +82,7 @@ Nothing required to set:
 `--set timescaledb.enabled=false --set hub.configDatabaseUrl=... --set hub.dataDatabaseUrl=...`
 
 ## 2. Add a system (get an API key)
-In the UI: **Add System** → choose namespace/kind → copy the **API key**.
+In the UI: **Add System** → choose workspace/kind → copy the **API key**.
 One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cluster>**.
 
 ## 3. Install the agent

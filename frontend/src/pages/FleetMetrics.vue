@@ -12,9 +12,9 @@ import { useCached } from '../lib/cache'
 
 const route = useRoute()
 
-// ---- namespace filter (?ns=a,b ; empty = all) — same contract as Systems.vue ----
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const inNs = (ns) => selectedNs.value.length === 0 || selectedNs.value.includes(ns)
+// ---- workspace filter (?ws=a,b ; empty = all) — same contract as Systems.vue ----
+const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const inWs = (ws) => selectedWs.value.length === 0 || selectedWs.value.includes(ws)
 
 // ---- range control (segmented; default 24h) — refetches /api/fleet?range= ----
 const RANGES = ['1h', '6h', '24h', '7d']
@@ -22,14 +22,14 @@ const range = computed(() => (RANGES.includes(route.query.mrange) ? route.query.
 const rtr = useRouter()
 function setRange(r) { rtr.replace({ query: { ...route.query, mrange: r } }) }
 
-// ---- data: /api/systems (name → id + namespace) and /api/fleet (series) -------
+// ---- data: /api/systems (name → id + workspace) and /api/fleet (series) -------
 const systems = ref([])
 const fleet = ref(null)
 
-// host name → { id, namespace } map, from /api/systems (same shape Systems.vue uses)
+// host name → { id, workspace } map, from /api/systems (same shape Systems.vue uses)
 const hostInfo = computed(() => {
   const m = {}
-  for (const s of systems.value) m[s.name] = { id: s.id, namespace: s.namespace }
+  for (const s of systems.value) m[s.name] = { id: s.id, workspace: s.workspace }
   return m
 })
 
@@ -44,10 +44,10 @@ const colorOf = computed(() => {
   return m
 })
 
-// names visible under the current namespace selection
+// names visible under the current workspace selection
 const visibleNames = computed(() => {
   const out = new Set()
-  for (const s of systems.value) if (inNs(s.namespace)) out.add(s.name)
+  for (const s of systems.value) if (inWs(s.workspace)) out.add(s.name)
   return out
 })
 
@@ -68,7 +68,7 @@ const PANELS = [
 
 const lastNonNull = (d) => { if (!d) return null; for (let i = d.length - 1; i >= 0; i--) if (d[i] != null) return d[i]; return null }
 
-// series for one metric, filtered to the namespace selection
+// series for one metric, filtered to the workspace selection
 function seriesFor(key) {
   const arr = (fleet.value && fleet.value[key]) || []
   return arr
@@ -154,9 +154,9 @@ const selectedId = computed(() => (selected.value ? hostInfo.value[selected.valu
 
 // ---- loaders -----------------------------------------------------------------
 // /api/systems is global; /api/fleet is keyed by range. Cache key folds in the
-// range + namespace selection so a switch repaints from cache then revalidates.
+// range + workspace selection so a switch repaints from cache then revalidates.
 const { loaded, reload } = useCached({
-  key: () => 'metrics:' + range.value + ':' + selectedNs.value.join(','),
+  key: () => 'metrics:' + range.value + ':' + selectedWs.value.join(','),
   load: async () => {
     const [sys, fl] = await Promise.all([
       api.get('/api/systems'),
@@ -170,8 +170,8 @@ const { loaded, reload } = useCached({
 let timer = null
 onMounted(() => { reload(); timer = setInterval(reload, 5000) })
 onUnmounted(() => clearInterval(timer))
-// refetch when the range or namespace selection changes
-watch([range, selectedNs], reload)
+// refetch when the range or workspace selection changes
+watch([range, selectedWs], reload)
 </script>
 
 <template>
@@ -217,7 +217,7 @@ watch([range, selectedNs], reload)
 
       <template v-else>
         <p v-if="!hostCount" class="rounded-[11px] border border-line bg-surface p-6 text-center text-sm text-muted">
-          No hosts in the selected namespaces.
+          No hosts in the selected workspaces.
         </p>
 
         <div v-else class="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">

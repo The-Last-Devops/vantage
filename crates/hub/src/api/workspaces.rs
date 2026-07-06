@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Serialize)]
-pub struct NamespaceRow {
+pub struct WorkspaceRow {
     pub id: Uuid,
     pub name: String,
     pub role: String,
@@ -9,19 +9,19 @@ pub struct NamespaceRow {
     pub member_count: i64,
 }
 
-/// GET /api/namespaces — namespaces visible to the caller (all for admins),
+/// GET /api/workspaces — workspaces visible to the caller (all for admins),
 /// each with its system and member counts for the management view.
-pub async fn list_namespaces(
+pub async fn list_workspaces(
     State(state): State<AppState>,
     user: CurrentUser,
-) -> Result<Json<Vec<NamespaceRow>>, StatusCode> {
-    let counts = "(SELECT count(*) FROM systems s WHERE s.namespace_id = n.id), \
-                  (SELECT count(*) FROM memberships mm WHERE mm.namespace_id = n.id)";
+) -> Result<Json<Vec<WorkspaceRow>>, StatusCode> {
+    let counts = "(SELECT count(*) FROM systems s WHERE s.workspace_id = n.id), \
+                  (SELECT count(*) FROM memberships mm WHERE mm.workspace_id = n.id)";
     let rows: Vec<(Uuid, String, Option<String>, i64, i64)> = if user.can_read_all() {
         sqlx::query_as(&format!(
             "SELECT n.id, n.name, m.role::text, {counts} \
-             FROM namespaces n \
-             LEFT JOIN memberships m ON m.namespace_id = n.id AND m.user_id = $1 \
+             FROM workspaces n \
+             LEFT JOIN memberships m ON m.workspace_id = n.id AND m.user_id = $1 \
              ORDER BY n.name",
         ))
         .bind(user.id)
@@ -30,8 +30,8 @@ pub async fn list_namespaces(
     } else {
         sqlx::query_as(&format!(
             "SELECT n.id, n.name, m.role::text, {counts} \
-             FROM namespaces n \
-             JOIN memberships m ON m.namespace_id = n.id \
+             FROM workspaces n \
+             JOIN memberships m ON m.workspace_id = n.id \
              WHERE m.user_id = $1 ORDER BY n.name",
         ))
         .bind(user.id)
@@ -43,7 +43,7 @@ pub async fn list_namespaces(
     Ok(Json(
         rows.into_iter()
             .map(
-                |(id, name, role, system_count, member_count)| NamespaceRow {
+                |(id, name, role, system_count, member_count)| WorkspaceRow {
                     id,
                     name,
                     role: role.unwrap_or_else(|| "admin".into()),
@@ -56,12 +56,12 @@ pub async fn list_namespaces(
 }
 
 #[derive(Deserialize)]
-pub struct CreateNamespace {
+pub struct CreateWorkspace {
     pub name: String,
 }
 
-/// Validates a k8s-style namespace name: a DNS label, max 63 chars.
-pub fn valid_ns_name(name: &str) -> bool {
+/// Validates a k8s-style workspace name: a DNS label, max 63 chars.
+pub fn valid_ws_name(name: &str) -> bool {
     let n = name.len();
     if n == 0 || n > 63 {
         return false;
@@ -77,38 +77,38 @@ pub fn valid_ns_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::valid_ns_name;
+    use super::valid_ws_name;
 
     #[test]
-    fn namespace_names() {
-        assert!(valid_ns_name("default"));
-        assert!(valid_ns_name("team-a"));
-        assert!(valid_ns_name("prod1"));
-        assert!(!valid_ns_name("")); // empty
-        assert!(!valid_ns_name("Team-A")); // uppercase
-        assert!(!valid_ns_name("-lead")); // leading hyphen
-        assert!(!valid_ns_name("trail-")); // trailing hyphen
-        assert!(!valid_ns_name("a b")); // space
-        assert!(!valid_ns_name(&"x".repeat(64))); // too long
+    fn workspace_names() {
+        assert!(valid_ws_name("default"));
+        assert!(valid_ws_name("team-a"));
+        assert!(valid_ws_name("prod1"));
+        assert!(!valid_ws_name("")); // empty
+        assert!(!valid_ws_name("Team-A")); // uppercase
+        assert!(!valid_ws_name("-lead")); // leading hyphen
+        assert!(!valid_ws_name("trail-")); // trailing hyphen
+        assert!(!valid_ws_name("a b")); // space
+        assert!(!valid_ws_name(&"x".repeat(64))); // too long
     }
 }
 
-/// POST /api/namespaces — any authenticated user may create one; creator becomes owner.
-pub async fn create_namespace(
+/// POST /api/workspaces — any authenticated user may create one; creator becomes owner.
+pub async fn create_workspace(
     State(state): State<AppState>,
     user: CurrentUser,
-    Json(req): Json<CreateNamespace>,
-) -> Result<Json<NamespaceRow>, StatusCode> {
-    if !valid_ns_name(&req.name) {
+    Json(req): Json<CreateWorkspace>,
+) -> Result<Json<WorkspaceRow>, StatusCode> {
+    if !valid_ws_name(&req.name) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let mut tx = state.config.begin().await.map_err(internal)?;
-    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO namespaces (name) VALUES ($1) RETURNING id")
+    let (id,): (Uuid,) = sqlx::query_as("INSERT INTO workspaces (name) VALUES ($1) RETURNING id")
         .bind(&req.name)
         .fetch_one(&mut *tx)
         .await
         .map_err(internal)?;
-    sqlx::query("INSERT INTO memberships (user_id, namespace_id, role) VALUES ($1, $2, 'owner')")
+    sqlx::query("INSERT INTO memberships (user_id, workspace_id, role) VALUES ($1, $2, 'owner')")
         .bind(user.id)
         .bind(id)
         .execute(&mut *tx)
@@ -116,7 +116,7 @@ pub async fn create_namespace(
         .map_err(internal)?;
     tx.commit().await.map_err(internal)?;
 
-    Ok(Json(NamespaceRow {
+    Ok(Json(WorkspaceRow {
         id,
         name: req.name,
         role: "owner".into(),
@@ -125,17 +125,17 @@ pub async fn create_namespace(
     }))
 }
 
-/// DELETE /api/namespaces/:id — owners (and admins) only. Refuses to delete the
-/// 'default' namespace, or any namespace that still has systems attached
+/// DELETE /api/workspaces/:id — owners (and admins) only. Refuses to delete the
+/// 'default' workspace, or any workspace that still has systems attached
 /// (avoids cascading away live hosts by accident).
-pub async fn delete_namespace(
+pub async fn delete_workspace(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     rbac::require_role(&state, &user, id, Role::Owner).await?;
 
-    let (name,): (String,) = sqlx::query_as("SELECT name FROM namespaces WHERE id = $1")
+    let (name,): (String,) = sqlx::query_as("SELECT name FROM workspaces WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.config)
         .await
@@ -145,7 +145,7 @@ pub async fn delete_namespace(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let (systems,): (i64,) = sqlx::query_as("SELECT count(*) FROM systems WHERE namespace_id = $1")
+    let (systems,): (i64,) = sqlx::query_as("SELECT count(*) FROM systems WHERE workspace_id = $1")
         .bind(id)
         .fetch_one(&state.config)
         .await
@@ -154,7 +154,7 @@ pub async fn delete_namespace(
         return Err(StatusCode::CONFLICT);
     }
 
-    sqlx::query("DELETE FROM namespaces WHERE id = $1")
+    sqlx::query("DELETE FROM workspaces WHERE id = $1")
         .bind(id)
         .execute(&state.config)
         .await
@@ -162,7 +162,7 @@ pub async fn delete_namespace(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// ---- alert thresholds (per-namespace, for the "Needs attention" view) -------
+// ---- alert thresholds (per-workspace, for the "Needs attention" view) -------
 
 /// Warn/crit % thresholds per resource. Defaults: warn 80, crit 90.
 #[derive(Serialize, Deserialize, Clone, Copy)]
@@ -204,26 +204,26 @@ impl Default for Thresholds {
 
 #[derive(Serialize)]
 pub struct NsThresholds {
-    pub namespace: String,
+    pub workspace: String,
     #[serde(flatten)]
     pub t: Thresholds,
 }
 
-/// GET /api/thresholds — effective thresholds for every namespace the caller can
+/// GET /api/thresholds — effective thresholds for every workspace the caller can
 /// see (stored override merged onto the defaults). The fleet UI maps these by
-/// namespace name to flag abnormal hosts.
+/// workspace name to flag abnormal hosts.
 pub async fn list_thresholds(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<Vec<NsThresholds>>, StatusCode> {
     let rows: Vec<(String, Option<Value>)> = if user.can_read_all() {
-        sqlx::query_as("SELECT name, thresholds FROM namespaces ORDER BY name")
+        sqlx::query_as("SELECT name, thresholds FROM workspaces ORDER BY name")
             .fetch_all(&state.config)
             .await
     } else {
         sqlx::query_as(
-            "SELECT n.name, n.thresholds FROM namespaces n \
-             JOIN memberships m ON m.namespace_id = n.id \
+            "SELECT n.name, n.thresholds FROM workspaces n \
+             JOIN memberships m ON m.workspace_id = n.id \
              WHERE m.user_id = $1 ORDER BY n.name",
         )
         .bind(user.id)
@@ -233,8 +233,8 @@ pub async fn list_thresholds(
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(namespace, v)| NsThresholds {
-                namespace,
+            .map(|(workspace, v)| NsThresholds {
+                workspace,
                 t: v.and_then(|v| serde_json::from_value(v).ok())
                     .unwrap_or_default(),
             })
@@ -242,14 +242,14 @@ pub async fn list_thresholds(
     ))
 }
 
-/// PUT /api/namespaces/:id/thresholds — editors+ set the namespace's thresholds.
+/// PUT /api/workspaces/:id/thresholds — editors+ set the workspace's thresholds.
 pub async fn set_thresholds(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(t): Json<Thresholds>,
 ) -> Result<StatusCode, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     for (w, c) in [
         (t.cpu_warn, t.cpu_crit),
         (t.mem_warn, t.mem_crit),
@@ -261,9 +261,9 @@ pub async fn set_thresholds(
         }
     }
     let v = serde_json::to_value(t).map_err(internal)?;
-    sqlx::query("UPDATE namespaces SET thresholds = $1 WHERE id = $2")
+    sqlx::query("UPDATE workspaces SET thresholds = $1 WHERE id = $2")
         .bind(v)
-        .bind(ns)
+        .bind(ws)
         .execute(&state.config)
         .await
         .map_err(internal)?;
@@ -279,18 +279,18 @@ pub struct MemberRow {
     pub role: String,
 }
 
-/// GET /api/namespaces/:id/members — owners (and admins) list namespace members.
+/// GET /api/workspaces/:id/members — owners (and admins) list workspace members.
 pub async fn list_members(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<MemberRow>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
     let rows: Vec<(Uuid, String, String)> = sqlx::query_as(
         "SELECT u.id, u.email, m.role::text FROM memberships m \
-         JOIN users u ON u.id = m.user_id WHERE m.namespace_id = $1 ORDER BY u.email",
+         JOIN users u ON u.id = m.user_id WHERE m.workspace_id = $1 ORDER BY u.email",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -311,20 +311,20 @@ pub struct CandidateRow {
     pub email: String,
 }
 
-/// GET /api/namespaces/:id/member-candidates — users not yet in this namespace,
+/// GET /api/workspaces/:id/member-candidates — users not yet in this workspace,
 /// for the "add member" picker. Owners (and admins) only; minimal fields.
 pub async fn member_candidates(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<CandidateRow>>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
     let rows: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT u.id, u.email FROM users u \
-         WHERE u.id NOT IN (SELECT user_id FROM memberships WHERE namespace_id = $1) \
+         WHERE u.id NOT IN (SELECT user_id FROM memberships WHERE workspace_id = $1) \
          ORDER BY u.email",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -341,14 +341,14 @@ pub struct AddMember {
     pub role: String, // viewer | editor | owner
 }
 
-/// POST /api/namespaces/:id/members — owners (and admins) manage membership.
+/// POST /api/workspaces/:id/members — owners (and admins) manage membership.
 pub async fn add_member(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<AddMember>,
 ) -> Result<StatusCode, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
     let role = Role::from_db_str(&req.role).ok_or(StatusCode::BAD_REQUEST)?;
 
     let (target,): (Uuid,) = sqlx::query_as("SELECT id FROM users WHERE email = $1")
@@ -359,11 +359,11 @@ pub async fn add_member(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     sqlx::query(
-        "INSERT INTO memberships (user_id, namespace_id, role) VALUES ($1, $2, $3::ns_role) \
-         ON CONFLICT (user_id, namespace_id) DO UPDATE SET role = EXCLUDED.role",
+        "INSERT INTO memberships (user_id, workspace_id, role) VALUES ($1, $2, $3::ws_role) \
+         ON CONFLICT (user_id, workspace_id) DO UPDATE SET role = EXCLUDED.role",
     )
     .bind(target)
-    .bind(ns)
+    .bind(ws)
     .bind(role.as_db())
     .execute(&state.config)
     .await
@@ -373,15 +373,15 @@ pub async fn add_member(
 
 // ---- API keys (reusable; systems auto-register) -----------------------------
 
-/// DELETE /api/namespaces/:id/members/:user_id (owners only).
+/// DELETE /api/workspaces/:id/members/:user_id (owners only).
 pub async fn delete_member(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path((ns, target)): Path<(Uuid, Uuid)>,
+    Path((ws, target)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
-    sqlx::query("DELETE FROM memberships WHERE namespace_id = $1 AND user_id = $2")
-        .bind(ns)
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
+    sqlx::query("DELETE FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+        .bind(ws)
         .bind(target)
         .execute(&state.config)
         .await
@@ -394,20 +394,20 @@ pub struct SetExec {
     pub can_exec: bool,
 }
 
-/// PUT /api/namespaces/:id/members/:user_id/exec — owners (and admins) grant/revoke
+/// PUT /api/workspaces/:id/members/:user_id/exec — owners (and admins) grant/revoke
 /// the shell/exec capability for a member. Only takes effect for `owner` members
-/// (see rbac::require_exec). 404 if the member isn't in the namespace.
+/// (see rbac::require_exec). 404 if the member isn't in the workspace.
 pub async fn set_member_exec(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path((ns, target)): Path<(Uuid, Uuid)>,
+    Path((ws, target)): Path<(Uuid, Uuid)>,
     Json(req): Json<SetExec>,
 ) -> Result<StatusCode, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Owner).await?;
+    rbac::require_role(&state, &user, ws, Role::Owner).await?;
     let res = sqlx::query(
-        "UPDATE memberships SET can_exec = $3 WHERE namespace_id = $1 AND user_id = $2",
+        "UPDATE memberships SET can_exec = $3 WHERE workspace_id = $1 AND user_id = $2",
     )
-    .bind(ns)
+    .bind(ws)
     .bind(target)
     .bind(req.can_exec)
     .execute(&state.config)

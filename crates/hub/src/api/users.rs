@@ -68,10 +68,10 @@ pub struct UserRow {
     pub is_admin: bool,
     pub read_all: bool,
     pub created_at: String,
-    pub namespaces: i64,
+    pub workspaces: i64,
 }
 
-/// GET /api/users — admins list all accounts with their system role + ns count.
+/// GET /api/users — admins list all accounts with their system role + ws count.
 pub async fn list_users(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -90,13 +90,13 @@ pub async fn list_users(
     Ok(Json(
         rows.into_iter()
             .map(
-                |(id, email, is_admin, read_all, created_at, namespaces)| UserRow {
+                |(id, email, is_admin, read_all, created_at, workspaces)| UserRow {
                     id,
                     email,
                     is_admin,
                     read_all,
                     created_at,
-                    namespaces,
+                    workspaces,
                 },
             )
             .collect(),
@@ -214,16 +214,16 @@ pub async fn change_my_password(
 
 #[derive(Serialize)]
 pub struct UserMembership {
-    pub namespace_id: Uuid,
-    pub namespace: String,
+    pub workspace_id: Uuid,
+    pub workspace: String,
     pub role: String,
     /// Dedicated shell/exec capability (separate from the role). Only meaningful
     /// for `owner` (see rbac::require_exec).
     pub can_exec: bool,
 }
 
-/// GET /api/users/:id/memberships — admins list a user's per-namespace roles
-/// (for the user editor). Namespaces the user isn't in are simply absent.
+/// GET /api/users/:id/memberships — admins list a user's per-workspace roles
+/// (for the user editor). Workspaces the user isn't in are simply absent.
 pub async fn user_memberships(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -234,7 +234,7 @@ pub async fn user_memberships(
     }
     let rows: Vec<(Uuid, String, String, bool)> = sqlx::query_as(
         "SELECT n.id, n.name, m.role::text, m.can_exec FROM memberships m \
-         JOIN namespaces n ON n.id = m.namespace_id WHERE m.user_id = $1 ORDER BY n.name",
+         JOIN workspaces n ON n.id = m.workspace_id WHERE m.user_id = $1 ORDER BY n.name",
     )
     .bind(id)
     .fetch_all(&state.config)
@@ -242,9 +242,9 @@ pub async fn user_memberships(
     .map_err(internal)?;
     Ok(Json(
         rows.into_iter()
-            .map(|(namespace_id, namespace, role, can_exec)| UserMembership {
-                namespace_id,
-                namespace,
+            .map(|(workspace_id, workspace, role, can_exec)| UserMembership {
+                workspace_id,
+                workspace,
                 role,
                 can_exec,
             })

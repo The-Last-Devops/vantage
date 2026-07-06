@@ -1,5 +1,5 @@
-//! Management API: namespaces, members, servers (with agent-token issuance),
-//! and monitors. Every namespaced route authorizes via [`rbac::require_role`].
+//! Management API: workspaces, members, servers (with agent-token issuance),
+//! and monitors. Every workspaced route authorizes via [`rbac::require_role`].
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -18,12 +18,12 @@ mod exec;
 mod exposure;
 mod keys;
 mod monitors;
-mod namespaces;
 mod passkey;
 mod pats;
 mod servers;
 mod twofa;
 mod users;
+mod workspaces;
 
 pub use alerting::*;
 pub use data::*;
@@ -31,17 +31,17 @@ pub use exec::*;
 pub use exposure::*;
 pub use keys::*;
 pub use monitors::*;
-pub use namespaces::*;
 pub use passkey::*;
 pub use pats::*;
 pub use servers::*;
 pub use twofa::*;
 pub use users::*;
+pub use workspaces::*;
 
 /// A user-facing display name (channel / monitor / system / status-page title…):
 /// non-empty after trimming, at most `max` characters, and free of control
 /// characters. Spaces, punctuation and unicode are fine — this rejects only
-/// blank or junk input. Slugs/identifiers use the stricter [`valid_ns_name`].
+/// blank or junk input. Slugs/identifiers use the stricter [`valid_ws_name`].
 pub fn valid_name(s: &str, max: usize) -> bool {
     let t = s.trim();
     !t.is_empty() && t.chars().count() <= max && !t.chars().any(char::is_control)
@@ -105,13 +105,13 @@ pub async fn about(_user: CurrentUser) -> Json<About> {
 }
 
 // ---- users (admin-only provisioning) ---------------------------------------
-async fn ns_of(state: &AppState, sql: &str, id: Uuid) -> Result<Uuid, StatusCode> {
+async fn ws_of(state: &AppState, sql: &str, id: Uuid) -> Result<Uuid, StatusCode> {
     sqlx::query_as::<_, (Uuid,)>(sql)
         .bind(id)
         .fetch_optional(&state.config)
         .await
         .map_err(internal)?
-        .map(|(ns,)| ns)
+        .map(|(ws,)| ws)
         .ok_or(StatusCode::NOT_FOUND)
 }
 

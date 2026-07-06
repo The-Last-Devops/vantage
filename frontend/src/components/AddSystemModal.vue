@@ -4,9 +4,9 @@ import { useRoute } from 'vue-router'
 import { api } from '../lib/api'
 
 const route = useRoute()
-// the namespace selected in the sidebar (?ns=), if exactly one is active
-function selectedNsName() {
-  const sel = (route.query.ns || '').split(',').filter(Boolean)
+// the workspace selected in the sidebar (?ws=), if exactly one is active
+function selectedWsName() {
+  const sel = (route.query.ws || '').split(',').filter(Boolean)
   return sel.length === 1 ? sel[0] : null
 }
 
@@ -33,30 +33,30 @@ const METHODS = {
   ],
 }
 
-const namespaces = ref([])
-const state = reactive({ type: 'node', method: 0, name: '', nsId: '', cluster: '', autoUpdate: false, key: '', keyId: '', connected: [], busy: false, error: '' })
+const workspaces = ref([])
+const state = reactive({ type: 'node', method: 0, name: '', wsId: '', cluster: '', autoUpdate: false, key: '', keyId: '', connected: [], busy: false, error: '' })
 const cfg = computed(() => TYPES.find((t) => t.id === state.type))
 const methods = computed(() => METHODS[state.type])
 const snippet = computed(() => (state.key ? methods.value[state.method].snippet(state.key) : ''))
 
 onMounted(async () => {
   try {
-    namespaces.value = await api.get('/api/namespaces')
-    const match = namespaces.value.find((n) => n.name === selectedNsName())
-    state.nsId = (match || namespaces.value[0])?.id || ''
-  } catch { namespaces.value = [] }
+    workspaces.value = await api.get('/api/workspaces')
+    const match = workspaces.value.find((n) => n.name === selectedWsName())
+    state.wsId = (match || workspaces.value[0])?.id || ''
+  } catch { workspaces.value = [] }
 })
 
 function pickType(t) { state.type = t; state.method = 0; state.key = ''; stopPolling(); state.connected = [] }
 
 async function createKey() {
-  if (!state.nsId) { state.error = 'Pick a namespace'; return }
+  if (!state.wsId) { state.error = 'Pick a workspace'; return }
   state.error = ''; state.busy = true
   try {
     // k8s uses the cluster name as the key's label; node/docker use Name.
     const label = state.type === 'k8s' ? state.cluster.trim() : state.name.trim()
     const name = (label || `${state.type}-key`).slice(0, 64)
-    const res = await api.post(`/api/namespaces/${state.nsId}/keys`, { name })
+    const res = await api.post(`/api/workspaces/${state.wsId}/keys`, { name })
     state.key = res.key
     state.keyId = res.id
     startPolling()
@@ -115,8 +115,8 @@ function copy(ev) {
             <label v-if="state.type === 'k8s'" class="block text-sm"><span class="text-muted">Cluster name</span>
               <input v-model="state.cluster" placeholder="e.g. prod-cluster" class="mt-1.5 w-full rounded-lg border border-line bg-surface2 px-3 py-2 text-fg outline-none focus:border-accent/50" />
             </label>
-            <label class="block text-sm"><span class="text-muted">Namespace</span>
-              <UiSelect v-model="state.nsId" block class="mt-1.5" :options="namespaces.map((n) => ({ value: n.id, label: n.name }))" />
+            <label class="block text-sm"><span class="text-muted">Workspace</span>
+              <UiSelect v-model="state.wsId" block class="mt-1.5" :options="workspaces.map((n) => ({ value: n.id, label: n.name }))" />
             </label>
           </div>
 

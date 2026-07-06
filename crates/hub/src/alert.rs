@@ -28,7 +28,7 @@ struct Rule {
     id: Uuid,
     monitor_id: Option<Uuid>,
     system_id: Option<Uuid>,
-    /// Namespace-wide scope: "all_services" | "all_hosts" (+ scope_ns), else specific target.
+    /// Workspace-wide scope: "all_services" | "all_hosts" (+ scope_ns), else specific target.
     scope_kind: Option<String>,
     scope_ns: Option<Uuid>,
     condition: Value,
@@ -94,13 +94,13 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
         };
 
         if should_notify {
-            let (target, kind_label, namespace) = target_info(state, &rule).await;
+            let (target, kind_label, workspace) = target_info(state, &rule).await;
             let n = crate::notify::Notification {
                 firing: eval.firing,
                 repeat: was_firing && eval.firing, // a re-notify while still firing
                 target,
                 kind_label: kind_label.to_string(),
-                namespace,
+                workspace,
                 condition: condition_text(&rule),
                 detail: eval.message.clone(),
                 at: now.format("%Y-%m-%d %H:%M UTC").to_string(),
@@ -159,7 +159,7 @@ async fn load_rules(state: &AppState) -> anyhow::Result<Vec<Rule>> {
         Option<String>,
     );
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT r.id, r.monitor_id, r.system_id, r.scope_kind, r.scope_namespace_id, \
+        "SELECT r.id, r.monitor_id, r.system_id, r.scope_kind, r.scope_workspace_id, \
                 r.condition, r.renotify_secs, c.kind, c.config, c.name \
          FROM alerts r \
          LEFT JOIN alert_channels ac ON ac.alert_id = r.id \
@@ -216,33 +216,33 @@ async fn evaluate(state: &AppState, rule: &Rule) -> anyhow::Result<Option<Eval>>
     if let Some(sid) = rule.system_id {
         return evaluate_server(state, sid, &rule.condition).await;
     }
-    if let (Some(kind), Some(ns)) = (rule.scope_kind.as_deref(), rule.scope_ns) {
-        return evaluate_scope(state, kind, ns, &rule.condition).await;
+    if let (Some(kind), Some(ws)) = (rule.scope_kind.as_deref(), rule.scope_ns) {
+        return evaluate_scope(state, kind, ws, &rule.condition).await;
     }
     Ok(None)
 }
 
-/// A namespace-wide rule: evaluate every matching target and aggregate. Fires when
+/// A workspace-wide rule: evaluate every matching target and aggregate. Fires when
 /// ANY target is failing; the message names them. None until at least one target has data.
 async fn evaluate_scope(
     state: &AppState,
     kind: &str,
-    ns: Uuid,
+    ws: Uuid,
     cond: &Value,
 ) -> anyhow::Result<Option<Eval>> {
     let (targets, label): (Vec<(Uuid, String)>, &str) = match kind {
         "all_services" => (
             sqlx::query_as(
-                "SELECT id, name FROM monitors WHERE namespace_id = $1 AND enabled = true",
+                "SELECT id, name FROM monitors WHERE workspace_id = $1 AND enabled = true",
             )
-            .bind(ns)
+            .bind(ws)
             .fetch_all(&state.config)
             .await?,
             "services",
         ),
         "all_hosts" => (
-            sqlx::query_as("SELECT id, name FROM systems WHERE namespace_id = $1")
-                .bind(ns)
+            sqlx::query_as("SELECT id, name FROM systems WHERE workspace_id = $1")
+                .bind(ws)
                 .fetch_all(&state.config)
                 .await?,
             "hosts",
@@ -433,34 +433,34 @@ async fn notify(client: &reqwest::Client, rule: &Rule, n: &crate::notify::Notifi
     }
 }
 
-/// Human description of a rule's target: (name, "Service"|"Host", namespace).
+/// Human description of a rule's target: (name, "Service"|"Host", workspace).
 async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, String) {
     if let Some(mid) = rule.monitor_id {
         let r: Option<(String, String)> = sqlx::query_as(
-            "SELECT m.name, n.name FROM monitors m JOIN namespaces n ON n.id = m.namespace_id WHERE m.id = $1",
+            "SELECT m.name, n.name FROM monitors m JOIN workspaces n ON n.id = m.workspace_id WHERE m.id = $1",
         )
         .bind(mid)
         .fetch_optional(&state.config)
         .await
         .ok()
         .flatten();
-        let (t, ns) = r.unwrap_or_else(|| ("service".into(), String::new()));
-        return (t, "Service", ns);
+        let (t, ws) = r.unwrap_or_else(|| ("service".into(), String::new()));
+        return (t, "Service", ws);
     }
     if let Some(sid) = rule.system_id {
         let r: Option<(String, String)> = sqlx::query_as(
-            "SELECT s.name, n.name FROM systems s JOIN namespaces n ON n.id = s.namespace_id WHERE s.id = $1",
+            "SELECT s.name, n.name FROM systems s JOIN workspaces n ON n.id = s.workspace_id WHERE s.id = $1",
         )
         .bind(sid)
         .fetch_optional(&state.config)
         .await
         .ok()
         .flatten();
-        let (t, ns) = r.unwrap_or_else(|| ("host".into(), String::new()));
-        return (t, "Host", ns);
+        let (t, ws) = r.unwrap_or_else(|| ("host".into(), String::new()));
+        return (t, "Host", ws);
     }
-    let ns = match rule.scope_ns {
-        Some(id) => sqlx::query_as::<_, (String,)>("SELECT name FROM namespaces WHERE id = $1")
+    let ws = match rule.scope_ns {
+        Some(id) => sqlx::query_as::<_, (String,)>("SELECT name FROM workspaces WHERE id = $1")
             .bind(id)
             .fetch_optional(&state.config)
             .await
@@ -471,8 +471,8 @@ async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, St
         None => String::new(),
     };
     match rule.scope_kind.as_deref() {
-        Some("all_hosts") => ("All hosts".into(), "Host", ns),
-        _ => ("All services".into(), "Service", ns),
+        Some("all_hosts") => ("All hosts".into(), "Host", ws),
+        _ => ("All services".into(), "Service", ws),
     }
 }
 

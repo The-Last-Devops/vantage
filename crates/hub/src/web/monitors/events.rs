@@ -110,7 +110,7 @@ pub async fn recent_events(
     // monitors the caller can see (id → name) from the config DB
     let mons: Vec<(Uuid, String)> = sqlx::query_as(
         "SELECT m.id, m.name FROM monitors m \
-         WHERE $1 OR m.namespace_id IN (SELECT namespace_id FROM memberships WHERE user_id = $2)",
+         WHERE $1 OR m.workspace_id IN (SELECT workspace_id FROM memberships WHERE user_id = $2)",
     )
     .bind(user.can_read_all())
     .bind(user.id)

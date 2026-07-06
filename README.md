@@ -11,7 +11,7 @@
 
 One place to **monitor, alert and operate** your infrastructure — servers, clusters,
 services and cloud. Host metrics (an agent on every server) with a NewRelic-style fleet
-overview, SSH/shell exec to act on a host, multi-user namespaces and RBAC — all served
+overview, SSH/shell exec to act on a host, multi-user workspaces and RBAC — all served
 from a **single Rust binary** that embeds the web UI. No Node, no `node_modules` at runtime.
 
 </div>
@@ -34,7 +34,7 @@ from a **single Rust binary** that embeds the web UI. No Node, no `node_modules`
 **Fleet overview** — every host on one chart per metric (CPU / Memory / Disk / Network).
 Hover a host to isolate its line across all charts, click to pin (multi-select), drag to
 zoom a time range — selection and zoom window are kept in the URL (shareable). A powerful
-search box filters both charts and tables: `web*`, `cpu>50`, `ns:production`, `kind:docker`.
+search box filters both charts and tables: `web*`, `cpu>50`, `ws:production`, `kind:docker`.
 
 **Host metrics** (agent) — overall CPU plus a **CPU breakdown** (user / system / iowait /
 steal on Linux via `/proc/stat`; user / system on macOS via mach), **load average** (1m / 5m
@@ -42,7 +42,7 @@ steal on Linux via `/proc/stat`; user / system on macOS via mach), **load averag
 sensors, NVIDIA **GPU** (usage / VRAM / power), and **per-container Docker stats**.
 
 **Systems view** — nodes, Docker hosts (expand to their containers) and Kubernetes clusters
-(expand to their nodes), with a namespace column, sortable columns, multi-select + bulk
+(expand to their nodes), with a workspace column, sortable columns, multi-select + bulk
 delete, and an **Add system** wizard (binary / Docker / Compose / k8s DaemonSet).
 
 **Per-system detail** — uPlot charts with a synced cursor, drag-to-zoom, interactive legends
@@ -61,11 +61,11 @@ channels**. 17 channel types (Telegram, Slack, Discord, Mattermost, Teams, Googl
 Matrix, ntfy, Pushover, Gotify, Bark, PagerDuty, Opsgenie, Twilio SMS, SMTP email, generic
 webhook, Apprise) with a one-click test; fire on monitor-down or a host condition (offline,
 CPU/memory/load), with an optional **re-notify cadence** while still firing. Channels are a
-shared resource any namespace can attach. An **Events** feed records every fire/recover with
+shared resource any workspace can attach. An **Events** feed records every fire/recover with
 durations.
 
 **Needs attention** — triage view that surfaces only abnormal hosts (down / high
-CPU / memory / disk / disk-I/O), with per-namespace thresholds.
+CPU / memory / disk / disk-I/O), with per-workspace thresholds.
 
 **API & automation** — a token-authed JSON API (**personal access tokens** under Settings)
 and an **embedded MCP server** (`POST /mcp`) so AI assistants (Claude, etc.) can read and
@@ -76,7 +76,7 @@ page (version + update check), **data retention** tiers (TimescaleDB continuous 
 retention policies), and **backup / restore** — download/upload or scheduled to
 S3-compatible storage.
 
-**Multi-tenant** — namespaces (k8s-style names), namespace-scoped RBAC plus a system
+**Multi-tenant** — workspaces (k8s-style names), workspace-scoped RBAC plus a system
 `admin`, opaque revocable cookie sessions (argon2), and a first-run wizard to create
 the admin account. Reusable API keys enroll agents; deleting a key de-registers its hosts.
 
@@ -126,7 +126,7 @@ Security is the top design constraint. What protects a Vantage deployment:
   factor; one-time backup codes are issued. See [docs/auth-2fa-passkey.md](docs/auth-2fa-passkey.md).
 - **Login throttle** — repeated failures lock the account for an escalating cooldown, so
   passwords and 2FA codes can't be brute-forced online.
-- **Namespace-scoped RBAC** — `owner` / `editor` / `viewer` per namespace, plus a system
+- **Workspace-scoped RBAC** — `owner` / `editor` / `viewer` per workspace, plus a system
   `admin`. Shell/exec into a host additionally requires the `can_exec` capability.
 - **Put the hub behind an auth gate.** Vantage authenticates every request, but you should
   still front it with **nginx basic-auth**, **Cloudflare Zero Trust**, or a **VPN** so the
@@ -183,7 +183,7 @@ In the UI: **Add system** → pick Node / Docker / Kubernetes → copy the insta
 API key is managed for you. Run the agent anywhere; hosts appear automatically.
 
 ```bash
-# Docker (reports host metrics via shared namespaces + mounts)
+# Docker (reports host metrics via shared workspaces + mounts)
 docker run -d --restart=unless-stopped --pid=host \
   -e HUB_URL=https://hub.example.com -e API_KEY=<api-key> -e DISK_PATH=/host \
   -v /:/host:ro -v /var/run/docker.sock:/var/run/docker.sock:ro \
@@ -198,7 +198,7 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `CONFIG_DATABASE_URL` | ✅ | — | Postgres URL for the **config** DB (users, namespaces, RBAC, server/monitor config, alert rules, status pages). |
+| `CONFIG_DATABASE_URL` | ✅ | — | Postgres URL for the **config** DB (users, workspaces, RBAC, server/monitor config, alert rules, status pages). |
 | `DATA_DATABASE_URL` | ✅ | — | Postgres **+ TimescaleDB** URL for the **data** DB (metrics & heartbeat hypertables). May point at the same instance early on. |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | — | — | Bootstrap the first admin on startup if that user doesn't exist. After first login, provision users in the UI. |
 | `EXEC_APP_SECRET` | — (prod: yes) | — | Application secret that wraps the **outer** layer of every user's SSH-key master key. **Set a high-entropy value in production** and back it up. Omitted → password-only protection + a startup warning. See [Security](#security). |
@@ -209,7 +209,7 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | `BIND_ADDR` | — | `0.0.0.0:8080` | Listen address. |
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` flag on the session cookie (local **http** dev only). |
 | `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918/ULA) outbound targets for probes / notify / backup (SSRF hardening). |
-| `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` namespace + a `local` server enrolled with this key (lets the bundled compose agent report out of the box). |
+| `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server enrolled with this key (lets the bundled compose agent report out of the box). |
 | `AUTO_UPDATE` | — | — | On the `:auto-update` channel under k8s, opt the hub into self-update. |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing` / `env_filter`). |
 
@@ -220,7 +220,7 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `HUB_URL` | ✅ | — | Base URL of the hub the agent pushes to (e.g. `https://vantage.example.com`). |
-| `API_KEY` | ✅ | — | The per-server enrollment key (sent as `x-api-key`). The hub maps it to a namespace; hosts auto-register. |
+| `API_KEY` | ✅ | — | The per-server enrollment key (sent as `x-api-key`). The hub maps it to a workspace; hosts auto-register. |
 | `INTERVAL` | — | hub-controlled | Optional push-cadence override (seconds). Normally the hub returns the next interval. |
 | `ALLOW_SHELL` | — | **on** | The reverse SSH tunnel for the browser console. Set `0`/`false`/`no`/`off` to disable shell access from this host. |
 | `HOSTNAME_OVERRIDE` | — | system hostname | The name this host reports as. |

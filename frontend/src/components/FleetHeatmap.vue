@@ -1,5 +1,5 @@
 <script setup>
-// Fleet health heatmap — hosts grouped by namespace, each a 20px rounded tile
+// Fleet health heatmap — hosts grouped by workspace, each a 20px rounded tile
 // coloured by state. Hover → host name (v-tip), click → its detail page.
 // `groups` = [{ name, hosts: [{ id, name, state }] }], state ∈ ok|warn|down|pending|disabled.
 import { useRouter } from 'vue-router'

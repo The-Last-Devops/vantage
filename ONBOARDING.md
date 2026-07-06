@@ -66,14 +66,14 @@ from*. **Locked.** Lives in `assets/logo.svg`, `assets/logo-mark.svg`,
 
 Left sidebar + header. **Active nav = bold fg text + a 3px teal left bar** (NOT a teal
 background), **no dividers** between groups. Header = **breadcrumb (left)** +
-(namespace filter · theme · version · avatar) on the **right**. Full-height (`100dvh`),
+(workspace filter · theme · version · avatar) on the **right**. Full-height (`100dvh`),
 responsive (panes stack on mobile).
 
 ## 7. Components
 
 - **Existing**: `DataTable`, `StatePill`, `UiSelect`, `ConfirmDialog`, `PageLoader`, the `v-tip` directive.
 - **Planned**: `Page / PageHeader / PageBody / PageFooter / PageRail`, `UserMenu`,
-  `NamespaceFilter`, `FleetChart` (overlaid multi-host + p5–p95 band), host `Table / Map / Grid`, time-range picker.
+  `WorkspaceFilter`, `FleetChart` (overlaid multi-host + p5–p95 band), host `Table / Map / Grid`, time-range picker.
 
 ## 8. UX rules (non-negotiable)
 
@@ -83,10 +83,10 @@ responsive (panes stack on mobile).
   use the accent color**, **bold header**; tables carry a filter + bulk-action toolbar.
 - **No native `<select>` / `title=` / `confirm()`** — use the themed primitives
   (`UiSelect`, `v-tip`, `confirm()`).
-- Namespace-scoped data must **aggregate across the whole selection** and be **labelled
-  with its namespace**; **list order is stable** (a mutation never reorders rows).
+- Workspace-scoped data must **aggregate across the whole selection** and be **labelled
+  with its workspace**; **list order is stable** (a mutation never reorders rows).
 - **Redact secrets** (tokens / webhook URLs / request headers) unless the caller is
-  editor+ of that namespace.
+  editor+ of that workspace.
 - Validate every user field **server-side** (the API is the source of truth).
 
 ## 9. Open decisions

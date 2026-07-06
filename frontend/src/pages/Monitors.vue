@@ -30,11 +30,11 @@ const KIND_ICON = {
 const kindIcon = (k) => KIND_ICON[k] || 'service'
 
 const downOnly = computed(() => route.query.status === 'down')
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const nsMonitors = computed(() =>
-  selectedNs.value.length ? monitors.value.filter((m) => selectedNs.value.includes(m.namespace)) : monitors.value,
+const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const wsMonitors = computed(() =>
+  selectedWs.value.length ? monitors.value.filter((m) => selectedWs.value.includes(m.workspace)) : monitors.value,
 )
-const shown = computed(() => (downOnly.value ? nsMonitors.value.filter((m) => m.enabled && m.up === false) : nsMonitors.value))
+const shown = computed(() => (downOnly.value ? wsMonitors.value.filter((m) => m.enabled && m.up === false) : wsMonitors.value))
 // Uptime % over the last 24h, computed server-side (null if no beats in window).
 const upPct = (m) => (m.uptime_24h == null ? null : Math.round(m.uptime_24h))
 // Whether the 24h trend has at least one real beat (else show "no checks").
@@ -43,7 +43,7 @@ const hasTrend = (m) => (m.trend_24h || []).some((u) => u != null)
 const stats = computed(() => {
   let up = 0, down = 0, paused = 0, warn = 0
   const ups = []
-  for (const m of nsMonitors.value) {
+  for (const m of wsMonitors.value) {
     if (!m.enabled) paused++
     else if (m.up === true) up++
     else if (m.up === false) down++
@@ -53,7 +53,7 @@ const stats = computed(() => {
   }
   const active = up + down + warn
   const avg = ups.length ? Math.round(ups.reduce((a, b) => a + b, 0) / ups.length) : null
-  return { up, down, warn, paused, active, total: nsMonitors.value.length, avg }
+  return { up, down, warn, paused, active, total: wsMonitors.value.length, avg }
 })
 
 // ---- table ----
@@ -76,7 +76,7 @@ const filteredRows = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return tableRows.value
   return tableRows.value.filter((r) =>
-    [r.name, r.namespace, r.target, r.typeLabel].some((v) => (v || '').toLowerCase().includes(s)),
+    [r.name, r.workspace, r.target, r.typeLabel].some((v) => (v || '').toLowerCase().includes(s)),
   )
 })
 const columns = [
@@ -87,7 +87,7 @@ const columns = [
 ]
 const selectedIds = ref([])
 
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 const openCreate = () => router.push({ name: 'monitor-new', query: nsq.value })
 const openEdit = (m) => router.push({ name: 'monitor-edit', params: { id: m.id }, query: nsq.value })
 const openDetail = (m) => router.push({ name: 'monitor', params: { id: m.id }, query: nsq.value })
@@ -118,8 +118,8 @@ async function bulkDelete(rows) {
 
 // ---- recent-events feed ----
 const shownEvents = computed(() => {
-  if (!selectedNs.value.length) return events.value
-  const ids = new Set(nsMonitors.value.map((m) => m.id))
+  if (!selectedWs.value.length) return events.value
+  const ids = new Set(wsMonitors.value.map((m) => m.id))
   return events.value.filter((e) => ids.has(e.monitor_id))
 })
 const evTime = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -148,7 +148,7 @@ const agoSecs = (iso) => (Date.now() - new Date(iso).getTime()) / 1000
 const WINDOW_30D = 30 * 86400
 
 const monById = computed(() => Object.fromEntries(monitors.value.map((m) => [m.id, m])))
-const downNow = computed(() => nsMonitors.value.filter((m) => m.enabled && m.up === false))
+const downNow = computed(() => wsMonitors.value.filter((m) => m.enabled && m.up === false))
 
 // Pair status transitions (newest-first) into resolved incidents; leftover unresolved
 // downs are the ongoing outages (their start time is used as "down since").
@@ -164,7 +164,7 @@ const incident30 = computed(() => {
     } else if (pendingUp[mid] != null) {
       const m = monById.value[mid] || {}
       history.push({
-        id: `${mid}-${e.at}`, monitor_id: mid, name: e.name, kind: m.kind, namespace: m.namespace,
+        id: `${mid}-${e.at}`, monitor_id: mid, name: e.name, kind: m.kind, workspace: m.workspace,
         started_at: e.at, duration_s: Math.max(0, (pendingUp[mid] - t) / 1000), cause: e.message || 'Down', resolved: true,
       })
       delete pendingUp[mid]
@@ -181,8 +181,8 @@ const matchQ = (r, ...fields) => {
   const s = q.value.trim().toLowerCase()
   return !s || fields.some((v) => (v || '').toLowerCase().includes(s))
 }
-const downNowFiltered = computed(() => downNow.value.filter((m) => matchQ(m, m.name, m.namespace, m.target, m.message)))
-const historyFiltered = computed(() => history.value.filter((h) => matchQ(h, h.name, h.namespace, h.cause)))
+const downNowFiltered = computed(() => downNow.value.filter((m) => matchQ(m, m.name, m.workspace, m.target, m.message)))
+const historyFiltered = computed(() => history.value.filter((h) => matchQ(h, h.name, h.workspace, h.cause)))
 
 const stats30 = computed(() => {
   const h = history.value
@@ -265,7 +265,7 @@ onUnmounted(() => clearInterval(timer))
                   <StatePill :tone="STATE[row.stateKey][0]" :label="row.state" />
                   <span class="truncate font-mono text-sm text-fg">{{ row.name }}</span>
                 </div>
-                <div class="mt-0.5 truncate text-micro text-faint">{{ row.namespace }} · {{ row.typeLabel }}<span v-if="row.target"> · {{ row.target }}</span></div>
+                <div class="mt-0.5 truncate text-micro text-faint">{{ row.workspace }} · {{ row.typeLabel }}<span v-if="row.target"> · {{ row.target }}</span></div>
               </div>
             </div>
           </template>
@@ -339,7 +339,7 @@ onUnmounted(() => clearInterval(timer))
                         <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-down"><VIcon :name="kindIcon(m.kind)" :size="18" /></span>
                         <div class="min-w-0">
                           <div class="flex items-center gap-2"><StatePill tone="down" label="Down" /><span class="truncate font-mono text-sm text-fg">{{ m.name }}</span></div>
-                          <div class="mt-0.5 truncate text-micro text-faint">{{ m.namespace }} · {{ KINDS[m.kind] || m.kind }}<span v-if="m.target"> · {{ m.target }}</span></div>
+                          <div class="mt-0.5 truncate text-micro text-faint">{{ m.workspace }} · {{ KINDS[m.kind] || m.kind }}<span v-if="m.target"> · {{ m.target }}</span></div>
                         </div>
                       </div>
                     </td>
@@ -370,7 +370,7 @@ onUnmounted(() => clearInterval(timer))
                 <thead><tr class="text-left"><th :class="TH">Service</th><th :class="TH">Started</th><th :class="TH" class="text-right">Duration</th><th :class="TH">Cause</th><th :class="TH" class="text-right">Status</th></tr></thead>
                 <tbody>
                   <tr v-for="h in historyFiltered" :key="h.id" class="border-b border-line/60 last:border-b-0">
-                    <td class="px-4 py-2.5"><div class="font-mono text-fg">{{ h.name }}</div><div class="mt-0.5 text-micro text-faint">{{ h.namespace }} · {{ KINDS[h.kind] || h.kind }}</div></td>
+                    <td class="px-4 py-2.5"><div class="font-mono text-fg">{{ h.name }}</div><div class="mt-0.5 text-micro text-faint">{{ h.workspace }} · {{ KINDS[h.kind] || h.kind }}</div></td>
                     <td class="px-4 py-2.5 font-mono tabular-nums text-muted">{{ evTime(h.started_at) }}</td>
                     <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ fmtDur(h.duration_s) }}</td>
                     <td class="px-4 py-2.5 text-muted">{{ h.cause }}</td>

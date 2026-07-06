@@ -6,7 +6,7 @@
 // component's own refs, which reset on unmount). A page describes its data with
 // `useCached({ key, load, apply })`:
 //   - key()   → a string identifying this resource for the current inputs
-//               (e.g. selected namespaces). A new key fetches fresh; a known key
+//               (e.g. selected workspaces). A new key fetches fresh; a known key
 //               paints from cache first.
 //   - load()  → async, returns the data object (does the fetch/merge).
 //   - apply() → assigns that data into the page's own refs.
@@ -22,7 +22,7 @@ const store = reactive(new Map()) // key -> { data, ts } (ts = last fetch time)
 // fix for the classic stale-cache trap (you leave a page open, the data goes out
 // of date, and nothing refetches it). This is what SWR/Query libraries do by
 // default. Pages that already poll get this for free; the win is the no-poll
-// pages (Members, Namespaces, API tokens, retention).
+// pages (Members, Workspaces, API tokens, retention).
 const active = new Set()
 let wired = false
 function wireGlobalRevalidation() {
@@ -76,7 +76,7 @@ export function useCached({ key, load, apply, onError, minMs = 200, maxAgeMs = M
     const work = (async () => {
       const data = await load()
       store.set(k, { data, ts: Date.now() })
-      // Guard against a fast key switch (e.g. namespace change) landing an older
+      // Guard against a fast key switch (e.g. workspace change) landing an older
       // response after the user already moved on.
       if (key() === k) { apply(data); shownKey = k; loaded.value = true }
       return data

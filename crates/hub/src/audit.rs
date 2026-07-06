@@ -40,7 +40,7 @@ async fn object_name(state: &AppState, path: &str) -> Option<String> {
         "channels" => "SELECT name FROM channels WHERE id = $1",
         "monitors" => "SELECT name FROM monitors WHERE id = $1",
         "systems" => "SELECT name FROM systems WHERE id = $1",
-        "namespaces" => "SELECT name FROM namespaces WHERE id = $1",
+        "workspaces" => "SELECT name FROM workspaces WHERE id = $1",
         "users" => "SELECT email FROM users WHERE id = $1",
         // an alert rule has no name of its own — identify it by its target
         "alerts" => {

@@ -25,43 +25,43 @@ say "login"; echo "$code"; [ "$code" = 200 ] || { echo "login failed"; exit 1; }
 say "channel-types (manifest)"; g /api/channel-types | py "import sys,json;print(len(json.load(sys.stdin)))"
 say "systems"; g /api/systems | py "import sys,json;print(len(json.load(sys.stdin)))"
 
-# --- pick a namespace that actually contains a system, so the alert we create
-#     is visible in that namespace's alert list (list_alerts is target-scoped) ---
-read NS SYS < <(python3 - "$(g /api/namespaces)" "$(g /api/systems)" <<'PY'
+# --- pick a workspace that actually contains a system, so the alert we create
+#     is visible in that workspace's alert list (list_alerts is target-scoped) ---
+read WS SYS < <(python3 - "$(g /api/workspaces)" "$(g /api/systems)" <<'PY'
 import sys, json
 nss = json.loads(sys.argv[1]); systems = json.loads(sys.argv[2])
 by_name = {n["name"]: n["id"] for n in nss}
 for s in systems:
-    nid = by_name.get(s.get("namespace"))
+    nid = by_name.get(s.get("workspace"))
     if nid:
         print(nid, s["id"]); break
 else:
     print("", "")
 PY
 )
-say "namespace+system"; echo "${NS:-<none>} / ${SYS:-<none>}"
-[ -n "$NS" ] || { echo "no namespace/system pair (run sim-agents.sh first)"; exit 1; }
+say "workspace+system"; echo "${WS:-<none>} / ${SYS:-<none>}"
+[ -n "$WS" ] || { echo "no workspace/system pair (run sim-agents.sh first)"; exit 1; }
 
 # --- pre-clean any leftover smoke objects from a previous aborted run ---
-for a in $(g "/api/namespaces/$NS/alerts" | py "import sys,json;[print(x['id']) for x in json.load(sys.stdin) if any(c['name'].startswith('smoke-') for c in x['channels'])]"); do del "/api/alerts/$a" >/dev/null; done
-for c in $(g "/api/namespaces/$NS/channels" | py "import sys,json;[print(x['id']) for x in json.load(sys.stdin) if x['name'].startswith('smoke-')]"); do del "/api/channels/$c" >/dev/null; done
+for a in $(g "/api/workspaces/$WS/alerts" | py "import sys,json;[print(x['id']) for x in json.load(sys.stdin) if any(c['name'].startswith('smoke-') for c in x['channels'])]"); do del "/api/alerts/$a" >/dev/null; done
+for c in $(g "/api/workspaces/$WS/channels" | py "import sys,json;[print(x['id']) for x in json.load(sys.stdin) if x['name'].startswith('smoke-')]"); do del "/api/channels/$c" >/dev/null; done
 
-say "channels (before)"; g "/api/namespaces/$NS/channels" | py "import sys,json;print(len(json.load(sys.stdin)))"
-say "alerts (before)";   g "/api/namespaces/$NS/alerts"   | py "import sys,json;print(len(json.load(sys.stdin)))"
+say "channels (before)"; g "/api/workspaces/$WS/channels" | py "import sys,json;print(len(json.load(sys.stdin)))"
+say "alerts (before)";   g "/api/workspaces/$WS/alerts"   | py "import sys,json;print(len(json.load(sys.stdin)))"
 
 # --- create two channels so we exercise the multi-channel fan-out ---
-mkch() { curl -s -b "$JAR" -X POST "$BASE/api/namespaces/$NS/channels" -H 'content-type: application/json' \
+mkch() { curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/channels" -H 'content-type: application/json' \
   -d "{\"name\":\"$1\",\"kind\":\"webhook\",\"config\":{\"url\":\"https://example.com/$1\"}}" | py "import sys,json;print(json.load(sys.stdin))"; }
 CH1=$(mkch smoke-a); CH2=$(mkch smoke-b)
 say "created 2 channels"; echo "$CH1 $CH2"
 
 # --- create an alert wired to BOTH channels, with a renotify cadence ---
-AL=$(curl -s -b "$JAR" -X POST "$BASE/api/namespaces/$NS/alerts" -H 'content-type: application/json' \
+AL=$(curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/alerts" -H 'content-type: application/json' \
   -d "{\"system_id\":\"$SYS\",\"channel_ids\":[\"$CH1\",\"$CH2\"],\"renotify_secs\":600,\"condition\":{\"kind\":\"metric\",\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}}" \
   | py "import sys,json;print(json.load(sys.stdin))")
 say "created alert"; echo "$AL"
 
-row() { g "/api/namespaces/$NS/alerts" | py "import sys,json;d=[a for a in json.load(sys.stdin) if a['id']=='$AL'];print($1 if d else 'MISSING')"; }
+row() { g "/api/workspaces/$WS/alerts" | py "import sys,json;d=[a for a in json.load(sys.stdin) if a['id']=='$AL'];print($1 if d else 'MISSING')"; }
 say "alert channels (expect 2)"; row "len(d[0]['channels'])"
 say "alert renotify_secs (600)"; row "d[0]['renotify_secs']"
 

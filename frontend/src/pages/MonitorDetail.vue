@@ -30,9 +30,9 @@ const m = ref(null)
 const hb = ref({ t: [], latency: [], up: [] })
 const events = ref([])
 const debug = ref(null)
-const rules = ref([]) // alert rules covering this service (own + namespace-wide)
+const rules = ref([]) // alert rules covering this service (own + workspace-wide)
 const range = ref('24h')
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 async function loadRules() {
   try { rules.value = await api.get(`/api/monitors/${id}/alerts`) } catch { rules.value = [] }
 }
@@ -87,7 +87,7 @@ const status = computed(() => {
 const statusLabel = { up: 'Up', down: 'Down', paused: 'Paused', pending: 'Pending' }
 const statusTone = { up: 'ok', down: 'down', paused: 'muted', pending: 'pending' }
 
-const nsq2 = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const nsq2 = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 function openEdit() { router.push({ name: 'monitor-edit', params: { id }, query: nsq2.value }) }
 async function removeMonitor() {
   if (!m.value) return
@@ -139,7 +139,7 @@ onUnmounted(() => timer && clearInterval(timer))
 </script>
 
 <template>
-  <AppShell :title="m?.name || 'Service'" :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: m?.name || 'Service' }]">
+  <AppShell :title="m?.name || 'Service'" :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: m?.name || 'Service' }]">
 
     <div v-if="err" class="rounded-xl border border-line bg-surface p-6 text-center text-down">{{ err }}</div>
     <PageLoader v-else-if="!m" />
@@ -157,7 +157,7 @@ onUnmounted(() => timer && clearInterval(timer))
               <StatePill :tone="statusTone[status]" :label="statusLabel[status]" />
             </div>
             <p class="mt-1 text-sm text-muted">
-              {{ m.namespace }} · {{ KINDS[m.kind] || m.kind }} · check every {{ m.interval_secs }}s
+              {{ m.workspace }} · {{ KINDS[m.kind] || m.kind }} · check every {{ m.interval_secs }}s
               <span v-if="status === 'up' || status === 'down'"> · since {{ dur(m.since) }} ago</span>
             </p>
             <p class="mt-1 min-w-0 truncate font-mono text-xs text-faint" v-tip="m.kind === 'push' ? pushUrl : m.target">{{ m.kind === 'push' ? pushUrl : m.target }}</p>
@@ -196,7 +196,7 @@ onUnmounted(() => timer && clearInterval(timer))
             <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ...nsq, rule: r.id } }"
               class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs hover:border-accent/50">
               <span class="h-1.5 w-1.5 rounded-full" :class="r.firing === true ? 'bg-down' : r.firing === false ? 'bg-ok' : 'bg-faint'"></span>
-              <span class="text-fg">{{ r.scope_kind === 'all_services' ? 'All services in namespace' : 'This service' }}</span>
+              <span class="text-fg">{{ r.scope_kind === 'all_services' ? 'All services in workspace' : 'This service' }}</span>
               <span v-if="!r.enabled" class="text-faint">· off</span>
             </RouterLink>
           </div>

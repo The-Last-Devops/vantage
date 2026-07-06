@@ -12,7 +12,7 @@ const router = useRouter()
 const id = computed(() => route.params.id)
 
 const loaded = ref(false)
-const chan = ref(null) // { id, name, kind, namespace, namespace_id, can_edit, config }
+const chan = ref(null) // { id, name, kind, workspace, workspace_id, can_edit, config }
 const types = ref([])
 const rules = ref([])
 const byKind = (k) => types.value.find((t) => t.kind === k)
@@ -61,11 +61,11 @@ async function save() {
   } catch (e) { err.value = e.status === 403 ? 'You need editor access.' : `Failed (${e.status}).` }
   finally { saving.value = false }
 }
-// Test the CURRENT (possibly unsaved) config, scoped to this channel's namespace.
+// Test the CURRENT (possibly unsaved) config, scoped to this channel's workspace.
 async function sendTest() {
   testState.value = 'run'
   try {
-    await api.post(`/api/namespaces/${chan.value.namespace_id}/channels/test`, { kind: chan.value.kind, config: form.value.config })
+    await api.post(`/api/workspaces/${chan.value.workspace_id}/channels/test`, { kind: chan.value.kind, config: form.value.config })
     testState.value = 'ok'
   } catch { testState.value = 'fail' }
   setTimeout(() => { testState.value = '' }, 4000)
@@ -105,7 +105,7 @@ onMounted(async () => {
         <span class="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" :style="{ background: meta?.color || 'rgb(var(--surface2))', color: meta?.fg || 'rgb(var(--fg))' }" v-html="iconSvg(meta?.icon || 'chat', 24)"></span>
         <div>
           <h1 class="text-xl font-bold text-fg">{{ chan.name }}</h1>
-          <div class="text-xs text-faint">{{ meta?.name || chan.kind }} · {{ chan.namespace }}</div>
+          <div class="text-xs text-faint">{{ meta?.name || chan.kind }} · {{ chan.workspace }}</div>
         </div>
         <div class="ml-auto flex items-center gap-2">
           <span v-if="testState === 'ok'" class="text-xs text-accent">✓ Test sent</span>
@@ -116,7 +116,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <p v-if="!canEdit" class="mb-4 rounded-lg border border-line bg-surface2/50 px-3 py-2.5 text-xs text-muted">View only — this channel belongs to another namespace; secrets are masked. Editors of <b class="text-fg">{{ chan.namespace }}</b> can change it.</p>
+      <p v-if="!canEdit" class="mb-4 rounded-lg border border-line bg-surface2/50 px-3 py-2.5 text-xs text-muted">View only — this channel belongs to another workspace; secrets are masked. Editors of <b class="text-fg">{{ chan.workspace }}</b> can change it.</p>
 
       <div class="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
         <!-- configuration form -->
@@ -161,10 +161,10 @@ onMounted(async () => {
             <h2 class="mb-3 text-[11px] font-semibold uppercase tracking-wider text-faint">Used by {{ rules.length }} rule{{ rules.length === 1 ? '' : 's' }}</h2>
             <p v-if="!rules.length" class="text-xs text-faint">No alert rules notify through this channel yet.</p>
             <div v-else class="space-y-1.5">
-              <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ns: r.namespace, rule: r.id } }" class="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-2 text-xs hover:border-accent/50">
+              <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ws: r.workspace, rule: r.id } }" class="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-2 text-xs hover:border-accent/50">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="!r.enabled ? 'bg-faint' : r.firing === true ? 'bg-down' : r.firing === false ? 'bg-accent' : 'bg-warn'"></span>
                 <span class="truncate text-fg">{{ r.target }}</span>
-                <span class="shrink-0 text-faint">· {{ r.namespace }}</span>
+                <span class="shrink-0 text-faint">· {{ r.workspace }}</span>
                 <span v-if="!r.enabled" class="ml-auto shrink-0 text-faint">disabled</span>
               </RouterLink>
             </div>

@@ -1,7 +1,7 @@
 //! vantage hub: ingest endpoint, JSON API, and the embedded Vue web UI.
 //!
 //! Environment:
-//!   CONFIG_DATABASE_URL  Postgres URL for the config DB (users, namespaces, configs)
+//!   CONFIG_DATABASE_URL  Postgres URL for the config DB (users, workspaces, configs)
 //!   DATA_DATABASE_URL    Postgres URL for the data DB (metrics, TimescaleDB)
 //!   BIND_ADDR            listen address, default 0.0.0.0:8080
 //!   INSECURE_COOKIES     set to 1 to drop the Secure flag on the session cookie (local http dev)
@@ -170,51 +170,51 @@ async fn main() -> Result<()> {
         .route("/api/about", get(api::about))
         // management (session + RBAC)
         .route(
-            "/api/namespaces",
-            get(api::list_namespaces).post(api::create_namespace),
+            "/api/workspaces",
+            get(api::list_workspaces).post(api::create_workspace),
         )
-        .route("/api/namespaces/{id}", delete(api::delete_namespace))
+        .route("/api/workspaces/{id}", delete(api::delete_workspace))
         .route("/api/thresholds", get(api::list_thresholds))
         .route(
-            "/api/namespaces/{id}/thresholds",
+            "/api/workspaces/{id}/thresholds",
             axum::routing::put(api::set_thresholds),
         )
         .route(
-            "/api/namespaces/{id}/members",
+            "/api/workspaces/{id}/members",
             get(api::list_members).post(api::add_member),
         )
         .route(
-            "/api/namespaces/{id}/member-candidates",
+            "/api/workspaces/{id}/member-candidates",
             get(api::member_candidates),
         )
         // API keys (reusable; systems auto-register)
         .route(
-            "/api/namespaces/{id}/keys",
+            "/api/workspaces/{id}/keys",
             get(api::list_keys).post(api::create_key),
         )
         .route("/api/keys/{id}", delete(api::delete_key))
         .route("/api/keys/{id}/systems", get(api::key_systems))
-        .route("/api/namespaces/{id}/monitors", post(api::create_monitor))
+        .route("/api/workspaces/{id}/monitors", post(api::create_monitor))
         .route("/api/channel-types", get(api::channel_types))
         .route("/api/channels", get(api::list_all_channels))
         .route("/api/channels/{id}/alerts", get(api::channel_alerts))
         .route("/api/monitors/{id}/alerts", get(api::monitor_alerts))
         .route("/api/systems/{id}/alerts", get(api::system_alerts))
         .route(
-            "/api/namespaces/{id}/channels",
+            "/api/workspaces/{id}/channels",
             get(api::list_channels).post(api::create_channel),
         )
         .route(
-            "/api/namespaces/{id}/channels/test",
+            "/api/workspaces/{id}/channels/test",
             post(api::test_channel_config),
         )
         .route(
-            "/api/namespaces/{id}/alerts",
+            "/api/workspaces/{id}/alerts",
             get(api::list_alerts).post(api::create_alert),
         )
-        .route("/api/namespaces/{id}/alert-events", get(api::alert_events))
+        .route("/api/workspaces/{id}/alert-events", get(api::alert_events))
         .route(
-            "/api/namespaces/{id}/status-pages",
+            "/api/workspaces/{id}/status-pages",
             post(api::create_status_page),
         )
         // edit / delete resources
@@ -266,11 +266,11 @@ async fn main() -> Result<()> {
         .route("/api/alerts/{id}/test", post(api::test_alert))
         .route("/api/status-pages/{id}", delete(api::delete_status_page))
         .route(
-            "/api/namespaces/{id}/members/{user_id}",
+            "/api/workspaces/{id}/members/{user_id}",
             delete(api::delete_member),
         )
         .route(
-            "/api/namespaces/{id}/members/{user_id}/exec",
+            "/api/workspaces/{id}/members/{user_id}/exec",
             put(api::set_member_exec),
         )
         // read views (scoped to caller)

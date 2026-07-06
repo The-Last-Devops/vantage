@@ -29,8 +29,8 @@ pub async fn fleet(
     use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     let sys: Vec<(Uuid, String)> = sqlx::query_as(
-        "SELECT s.id, s.name FROM systems s WHERE $1 OR s.namespace_id IN ( \
-            SELECT namespace_id FROM memberships WHERE user_id = $2)",
+        "SELECT s.id, s.name FROM systems s WHERE $1 OR s.workspace_id IN ( \
+            SELECT workspace_id FROM memberships WHERE user_id = $2)",
     )
     .bind(user.can_read_all())
     .bind(user.id)

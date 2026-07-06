@@ -1,6 +1,6 @@
 <script setup>
 // Presentational header card for a service monitor: status dot/label/duration
-// + type / namespace / interval / latency / target. All values are passed in;
+// + type / workspace / interval / latency / target. All values are passed in;
 // the parent owns the monitor object and derived status.
 defineProps({
   m: { type: Object, required: true },
@@ -21,7 +21,7 @@ defineProps({
       <span v-if="status === 'up' || status === 'down'" class="text-sm text-muted">for {{ dur(m.since) }}</span>
     </div>
     <div class="text-sm text-muted"><span class="text-faint">Type</span> {{ m.kind }}</div>
-    <div class="text-sm text-muted"><span class="text-faint">Namespace</span> {{ m.namespace }}</div>
+    <div class="text-sm text-muted"><span class="text-faint">Workspace</span> {{ m.workspace }}</div>
     <div class="text-sm text-muted"><span class="text-faint">Interval</span> {{ m.interval_secs }}s</div>
     <div v-if="m.latency_ms != null" class="text-sm text-muted"><span class="text-faint">Latency</span> {{ m.latency_ms }} ms</div>
     <div class="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted" v-tip="m.kind === 'push' ? pushUrl : m.target">

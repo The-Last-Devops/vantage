@@ -18,21 +18,21 @@ fail=0
 for i in $(seq 1 60); do curl -s -o /dev/null -m 2 "$BASE/healthz" && break; sleep 1; done
 curl -s -c "$ADM" -o /dev/null -X POST "$BASE/api/auth/login" -H 'content-type: application/json' \
   -d "{\"email\":\"$ADMIN_EMAIL_\",\"password\":\"$ADMIN_PASS\"}"
-NS=$(curl -s -b "$ADM" "$BASE/api/namespaces" | py "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')")
+WS=$(curl -s -b "$ADM" "$BASE/api/workspaces" | py "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')")
 
 # viewer user + viewer membership in ns0 (ignore 409 if it already exists)
 curl -s -b "$ADM" -o /dev/null -X POST "$BASE/api/users" -H 'content-type: application/json' \
   -d "{\"email\":\"$VIEWER\",\"password\":\"$VPASS\"}"
-curl -s -b "$ADM" -o /dev/null -X POST "$BASE/api/namespaces/$NS/members" -H 'content-type: application/json' \
+curl -s -b "$ADM" -o /dev/null -X POST "$BASE/api/workspaces/$WS/members" -H 'content-type: application/json' \
   -d "{\"email\":\"$VIEWER\",\"role\":\"viewer\"}"
 
 # a channel carrying a secret (telegram bot_token is type:secret)
-CH=$(curl -s -b "$ADM" -X POST "$BASE/api/namespaces/$NS/channels" -H 'content-type: application/json' \
+CH=$(curl -s -b "$ADM" -X POST "$BASE/api/workspaces/$WS/channels" -H 'content-type: application/json' \
   -d "{\"name\":\"secret-probe\",\"kind\":\"telegram\",\"config\":{\"bot_token\":\"$SECRET\",\"chat_id\":\"123\"}}" \
   | py "import sys,json;print(json.load(sys.stdin))")
 
 tok() { # read bot_token of the probe channel from a given cookie jar
-  curl -s -b "$1" "$BASE/api/namespaces/$NS/channels" \
+  curl -s -b "$1" "$BASE/api/workspaces/$WS/channels" \
     | py "import sys,json;d=[c for c in json.load(sys.stdin) if c['id']=='$CH'];print(d[0]['config'].get('bot_token','') if d else 'MISSING')"
 }
 

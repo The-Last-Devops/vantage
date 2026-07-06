@@ -5,15 +5,15 @@ pub struct PatchServer {
     pub name: String,
 }
 
-/// PATCH /api/systems/:id — rename (cosmetic; namespace is governed by the token).
+/// PATCH /api/systems/:id — rename (cosmetic; workspace is governed by the token).
 pub async fn patch_system(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
     Json(req): Json<PatchServer>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    let ws = ws_of(&state, "SELECT workspace_id FROM systems WHERE id = $1", id).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     if !super::valid_name(&req.name, 80) {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -33,8 +33,8 @@ pub async fn delete_system(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(&state, "SELECT namespace_id FROM systems WHERE id = $1", id).await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    let ws = ws_of(&state, "SELECT workspace_id FROM systems WHERE id = $1", id).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     sqlx::query("DELETE FROM systems WHERE id = $1")
         .bind(id)
         .execute(&state.config)

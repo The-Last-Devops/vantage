@@ -36,8 +36,8 @@ Rationale: preserve the project's **single-binary** philosophy.
 - `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/me`
 - `GET /api/servers` — already has `kind` (`node`/`docker`/`k8s`) + `cluster` → group client-side
 - `GET /api/servers/:id/metrics` (history) · `/containers` · `/temps` · `/gpu`
-- `GET /api/namespaces` · CRUD namespaces/servers/tokens/members
-- `DELETE /api/servers/:id` (bulk-delete) · `POST /api/namespaces/:id/tokens` (Add system)
+- `GET /api/workspaces` · CRUD workspaces/servers/tokens/members
+- `DELETE /api/servers/:id` (bulk-delete) · `POST /api/workspaces/:id/tokens` (Add system)
 
 **Needed (phase-tagged):**
 - [P-realtime] **SSE live 1s**: `GET /api/servers/:id/stream` (+ a fleet-wide stream for the dashboard).
@@ -63,7 +63,7 @@ Rationale: preserve the project's **single-binary** philosophy.
 - **Done when**: logging in with `admin@local/admin123` reaches Systems.
 
 ### M3 — Systems dashboard
-- `components/AppShell.vue` (sidebar + topbar, theme toggle, multi-select namespace switcher).
+- `components/AppShell.vue` (sidebar + topbar, theme toggle, multi-select workspace switcher).
 - `pages/Systems.vue`: hero (online/avg CPU/mem from `/api/servers`), 3 sections
   **Nodes / Docker / Kubernetes** (grouped by `kind`; k8s grouped by `cluster`).
 - Table: column sort, filter, checkbox + **bulk delete** (`DELETE /api/servers/:id`).
@@ -87,8 +87,8 @@ Rationale: preserve the project's **single-binary** philosophy.
 
 ### M6 — Add system
 - Node/Docker/K8s modal + install-command tabs (Binary/Docker/Compose; Helm/Manifest).
-- Create a token implicitly via `POST /api/namespaces/:id/tokens`, embed it in the command, don't expose the token in the UI.
-- Customizable namespace dropdown.
+- Create a token implicitly via `POST /api/workspaces/:id/tokens`, embed it in the command, don't expose the token in the UI.
+- Customizable workspace dropdown.
 - **Done when**: creating a new system → token generated implicitly → install command correct per type.
 
 ### M7 — Realtime (backend + frontend phase)

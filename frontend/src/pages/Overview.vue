@@ -2,7 +2,7 @@
 // Overview / Dashboard: a single uniform grid of status tiles (no scattered lists,
 // charts or event feeds). Every tile is the same size, shows one number, highlights
 // only when something needs attention, and links to the page it summarises. Sections
-// group the tiles; aggregates across the selected namespaces (?ns=).
+// group the tiles; aggregates across the selected workspaces (?ws=).
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
@@ -15,15 +15,15 @@ import { online, hostState, DEFAULT_THR } from '../lib/triage'
 const route = useRoute()
 const auth = useAuth()
 const isAdmin = computed(() => !!auth.user?.is_admin)
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
-const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
+const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
+const inWs = (s) => selectedWs.value.length === 0 || selectedWs.value.includes(s.workspace)
 
 const systems = ref([])
 const monitors = ref([])
 const events = ref([])
 const thresholds = ref({})
-const namespaces = ref([])
+const workspaces = ref([])
 const alerts = ref([])
 const backup = ref(null) // { enabled, last_backup_at } (admin only)
 const tfa = ref({ enabled: false })
@@ -32,9 +32,9 @@ const dataStats = ref(null) // { data: { db_size, … }, config } from /api/admi
 const memberCount = ref(null) // user count (admin only)
 let timer = null
 
-const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
-const hosts = computed(() => systems.value.filter(inNs))
-const nsMonitors = computed(() => monitors.value.filter(inNs).filter((m) => m.enabled))
+const thrOf = (s) => thresholds.value[s.workspace] || DEFAULT_THR
+const hosts = computed(() => systems.value.filter(inWs))
+const wsMonitors = computed(() => monitors.value.filter(inWs).filter((m) => m.enabled))
 
 // ---- counts ----
 const host = computed(() => {
@@ -50,12 +50,12 @@ const host = computed(() => {
 })
 const svc = computed(() => {
   let up = 0, down = 0, pending = 0
-  for (const m of nsMonitors.value) {
+  for (const m of wsMonitors.value) {
     if (m.up === true) up++
     else if (m.up === false) down++
     else pending++
   }
-  return { total: nsMonitors.value.length, up, down, pending }
+  return { total: wsMonitors.value.length, up, down, pending }
 })
 const firing = computed(() => alerts.value.filter((a) => a.enabled && a.firing === true).length)
 const events24 = computed(() => events.value.length)
@@ -63,7 +63,7 @@ const events24 = computed(() => events.value.length)
 // average service uptime (SLA) over services that have recent checks
 const upPct = (m) => (m.recent && m.recent.length ? Math.round((m.recent.filter(Boolean).length / m.recent.length) * 100) : null)
 const svcUptime = computed(() => {
-  const ups = nsMonitors.value.map(upPct).filter((u) => u != null)
+  const ups = wsMonitors.value.map(upPct).filter((u) => u != null)
   return ups.length ? Math.round(ups.reduce((a, b) => a + b, 0) / ups.length) : null
 })
 
@@ -142,7 +142,7 @@ const sections = computed(() => [
       ...(isAdmin.value
         ? [
             { label: 'Database', value: dataStats.value?.data?.db_size || '—', sub: 'data DB size', icon: 'disk', to: { name: 'data' } },
-            { label: 'Namespaces', value: namespaces.value.length, icon: 'globe', to: { name: 'namespaces' } },
+            { label: 'Workspaces', value: workspaces.value.length, icon: 'globe', to: { name: 'workspaces' } },
             { label: 'Members', value: memberCount.value ?? '—', icon: 'user', to: { name: 'members' } },
           ]
         : []),
@@ -154,16 +154,16 @@ const BAD_BORDER = { down: 'border-down/40 bg-down/10', crit: 'border-crit/40 bg
 const BAD_TEXT = { down: 'text-down', crit: 'text-crit', warn: 'text-warn' }
 
 const { loaded, reload: load } = useCached({
-  key: () => 'overview:' + selectedNs.value.join(','),
+  key: () => 'overview:' + selectedWs.value.join(','),
   load: async () => {
-    const nss = namespaces.value
+    const nss = workspaces.value
     const admin = isAdmin.value
     const [sys, mons, evs, thr, alertLists, bk, t2, pks, ds, users] = await Promise.all([
       api.get('/api/systems').catch(() => []),
       api.get('/api/monitors').catch(() => []),
       api.get('/api/events?range=24h').catch(() => []),
       api.get('/api/thresholds').catch(() => ({})),
-      Promise.all(nss.map((n) => api.get(`/api/namespaces/${n.id}/alerts`).catch(() => []))),
+      Promise.all(nss.map((n) => api.get(`/api/workspaces/${n.id}/alerts`).catch(() => []))),
       admin ? api.get('/api/admin/backup/schedule').catch(() => null) : Promise.resolve(null),
       api.get('/api/me/2fa').catch(() => ({ enabled: false })),
       api.get('/api/me/passkeys').catch(() => []),
@@ -180,9 +180,9 @@ const { loaded, reload: load } = useCached({
   },
 })
 
-watch(() => route.query.ns, load)
+watch(() => route.query.ws, load)
 onMounted(async () => {
-  try { namespaces.value = await api.get('/api/namespaces') } catch {}
+  try { workspaces.value = await api.get('/api/workspaces') } catch {}
   await load()
   timer = setInterval(load, 10000)
 })

@@ -17,7 +17,7 @@ pub struct MonitorDetail {
     pub name: String,
     pub kind: String,
     pub target: String,
-    pub namespace: String,
+    pub workspace: String,
     pub interval_secs: i32,
     pub enabled: bool,
     pub config: serde_json::Value,
@@ -52,7 +52,7 @@ pub async fn monitor_detail(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<MonitorDetail>, StatusCode> {
-    let (namespace, name, kind, target, interval_secs, enabled, mut config) =
+    let (workspace, name, kind, target, interval_secs, enabled, mut config) =
         load_monitor(&state, &user, id).await?;
 
     // config (push token, header creds, auth/redis passwords) and the target
@@ -64,7 +64,7 @@ pub async fn monitor_detail(
     } else {
         sqlx::query_as(
             "SELECT EXISTS(SELECT 1 FROM memberships me \
-             JOIN monitors mo ON mo.namespace_id = me.namespace_id \
+             JOIN monitors mo ON mo.workspace_id = me.workspace_id \
              WHERE mo.id = $1 AND me.user_id = $2 AND me.role IN ('editor', 'owner'))",
         )
         .bind(id)
@@ -128,7 +128,7 @@ pub async fn monitor_detail(
         name,
         kind,
         target,
-        namespace,
+        workspace,
         interval_secs,
         enabled,
         config,

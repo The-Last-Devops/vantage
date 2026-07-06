@@ -9,7 +9,7 @@
 //! - [`status_pages`] — public status-page create/delete.
 
 // Re-export the parent `api` module's helpers and shared imports (`internal`,
-// `ns_of`, `valid_name`, `valid_ns_name`, `AppState`, `CurrentUser`, `rbac`,
+// `ws_of`, `valid_name`, `valid_ws_name`, `AppState`, `CurrentUser`, `rbac`,
 // the axum/serde/uuid re-exports, …) so the submodules below reach them via
 // `use super::*;` exactly as the un-split file did with `super::valid_name`, etc.
 pub use super::*;

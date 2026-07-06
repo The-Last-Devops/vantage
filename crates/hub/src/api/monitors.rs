@@ -11,14 +11,14 @@ pub struct CreateMonitor {
     pub config: Option<Value>,
 }
 
-/// POST /api/namespaces/:id/monitors — editors+ add a service check.
+/// POST /api/workspaces/:id/monitors — editors+ add a service check.
 pub async fn create_monitor(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<CreateMonitor>,
 ) -> Result<Json<Uuid>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     if !matches!(
         req.kind.as_str(),
         "http"
@@ -51,10 +51,10 @@ pub async fn create_monitor(
     }
 
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO monitors (namespace_id, name, kind, target, interval_secs, config) \
+        "INSERT INTO monitors (workspace_id, name, kind, target, interval_secs, config) \
          VALUES ($1, $2, $3::monitor_kind, $4, $5, $6) RETURNING id",
     )
-    .bind(ns)
+    .bind(ws)
     .bind(req.name.trim())
     .bind(&req.kind)
     .bind(req.target.trim())
@@ -78,13 +78,13 @@ pub async fn monitor_debug(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM monitors WHERE id = $1",
+        "SELECT workspace_id FROM monitors WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     let rows: Vec<(String, Value, String)> =
         sqlx::query_as("SELECT outcome, detail, at::text FROM monitor_debug WHERE monitor_id = $1")
             .bind(id)
@@ -126,14 +126,14 @@ pub async fn patch_monitor(
     Path(id): Path<Uuid>,
     Json(req): Json<PatchMonitor>,
 ) -> Result<StatusCode, StatusCode> {
-    let (ns, kind, existing): (Uuid, String, sqlx::types::Json<Value>) =
-        sqlx::query_as("SELECT namespace_id, kind::text, config FROM monitors WHERE id = $1")
+    let (ws, kind, existing): (Uuid, String, sqlx::types::Json<Value>) =
+        sqlx::query_as("SELECT workspace_id, kind::text, config FROM monitors WHERE id = $1")
             .bind(id)
             .fetch_optional(&state.config)
             .await
             .map_err(internal)?
             .ok_or(StatusCode::NOT_FOUND)?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     // Validate only the fields actually being changed.
     if req
         .name
@@ -197,13 +197,13 @@ pub async fn delete_monitor(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM monitors WHERE id = $1",
+        "SELECT workspace_id FROM monitors WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     sqlx::query("DELETE FROM monitors WHERE id = $1")
         .bind(id)
         .execute(&state.config)

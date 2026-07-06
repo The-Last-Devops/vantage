@@ -21,10 +21,10 @@ async function api(m, p, b) {
 const isSim = (n) => n === 'simulator' || n.startsWith('sim-');
 (async () => {
   await api('POST', '/api/auth/login', { email, password });
-  const nss = await api('GET', '/api/namespaces');
+  const nss = await api('GET', '/api/workspaces');
   let deleted = 0;
-  for (const ns of (Array.isArray(nss) ? nss : nss.namespaces || [])) {
-    const keys = await api('GET', `/api/namespaces/${ns.id}/keys`).catch(() => []);
+  for (const ws of (Array.isArray(nss) ? nss : nss.workspaces || [])) {
+    const keys = await api('GET', `/api/workspaces/${ws.id}/keys`).catch(() => []);
     for (const k of (Array.isArray(keys) ? keys : [])) {
       if (isSim(k.name)) { await api('DELETE', `/api/keys/${k.id}`).catch(() => {}); deleted++; }
     }

@@ -12,7 +12,7 @@ pub struct MonitorRow {
     pub name: String,
     pub kind: String,
     pub target: String,
-    pub namespace: String,
+    pub workspace: String,
     pub interval_secs: i32,
     pub enabled: bool,
     pub config: serde_json::Value,
@@ -29,7 +29,7 @@ pub struct MonitorRow {
     pub trend_24h: Vec<Option<bool>>,
 }
 
-/// GET /api/monitors — each monitor (scoped to the caller's namespaces) plus
+/// GET /api/monitors — each monitor (scoped to the caller's workspaces) plus
 /// its latest heartbeat + a recent-beats sparkline. Admins see every monitor.
 pub async fn list_monitors(
     State(state): State<AppState>,
@@ -37,9 +37,9 @@ pub async fn list_monitors(
 ) -> Result<Json<Vec<MonitorRow>>, StatusCode> {
     let monitors: Vec<(Uuid, String, String, String, String, i32, bool, sqlx::types::Json<serde_json::Value>)> = sqlx::query_as(
         "SELECT m.id, m.name, m.kind::text, m.target, n.name, m.interval_secs, m.enabled, m.config \
-         FROM monitors m JOIN namespaces n ON n.id = m.namespace_id \
-         WHERE $1 OR m.namespace_id IN ( \
-            SELECT namespace_id FROM memberships WHERE user_id = $2) \
+         FROM monitors m JOIN workspaces n ON n.id = m.workspace_id \
+         WHERE $1 OR m.workspace_id IN ( \
+            SELECT workspace_id FROM memberships WHERE user_id = $2) \
          ORDER BY m.name",
     )
     .bind(user.can_read_all())
@@ -141,7 +141,7 @@ pub async fn list_monitors(
     }
 
     let mut rows = Vec::with_capacity(monitors.len());
-    for (id, name, kind, target, namespace, interval_secs, enabled, config) in monitors {
+    for (id, name, kind, target, workspace, interval_secs, enabled, config) in monitors {
         let (last_check, up, latency_ms, message) = match latest.remove(&id) {
             Some((t, up, lat, msg)) => (Some(t), Some(up), lat, msg),
             None => (None, None, None, None),
@@ -157,7 +157,7 @@ pub async fn list_monitors(
             name,
             kind,
             target,
-            namespace,
+            workspace,
             interval_secs,
             enabled,
             config,

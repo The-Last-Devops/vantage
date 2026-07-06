@@ -26,9 +26,9 @@ watch(q, (v) => { clearTimeout(qTimer); qTimer = setTimeout(() => router.replace
 // keep q in sync with the URL too, so navigating to a clean "/" (e.g. clicking
 // "Systems") actually clears the chips instead of the stale ref re-adding them
 watch(() => route.query.q, (v) => { if ((v || '') !== q.value) q.value = v || '' })
-// namespace filter from URL (?ns=a,b ; empty = all) — shared/persisted, set in the sidebar
-const selectedNs = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const inNs = (s) => selectedNs.value.length === 0 || selectedNs.value.includes(s.namespace)
+// workspace filter from URL (?ws=a,b ; empty = all) — shared/persisted, set in the sidebar
+const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const inWs = (s) => selectedWs.value.length === 0 || selectedWs.value.includes(s.workspace)
 const selected = reactive(new Set())
 const expanded = reactive(new Set())
 const containers = reactive({}) // dockerSystemId -> [{name, cpu, mem}]
@@ -71,7 +71,7 @@ const attnStatus = computed(() => SEV_OF_STATUS[route.query.status] ?? null)
 const ATTN_LABEL = { down: 'Down', crit: 'Critical', warn: 'Warning' }
 const attnTitle = computed(() => (attnMode.value ? ATTN_LABEL[route.query.status] || 'Issues' : 'Infrastructure'))
 const visible = computed(() => {
-  let list = servers.value.filter((s) => inNs(s) && preds.value.every((p) => matchPred(s, p)))
+  let list = servers.value.filter((s) => inWs(s) && preds.value.every((p) => matchPred(s, p)))
   if (attnMode.value) {
     list = attnStatus.value != null ? list.filter((s) => sevOf(s) === attnStatus.value) : list.filter((s) => sevOf(s) > 0)
   }
@@ -82,7 +82,7 @@ function sortList(list, st) {
     name: (a, b) => a.name.localeCompare(b.name),
     type: (a, b) => (a.kind || '').localeCompare(b.kind || '') || a.name.localeCompare(b.name),
     cluster: (a, b) => (a.cluster || '').localeCompare(b.cluster || '') || a.name.localeCompare(b.name),
-    ns: (a, b) => (a.namespace || '').localeCompare(b.namespace || ''),
+    ws: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
     status: (a, b) => Number(online(b)) - Number(online(a)),
     cpu: (a, b) => (a.cpu_percent || 0) - (b.cpu_percent || 0),
     mem: (a, b) => (pct(a.mem_used, a.mem_total) || 0) - (pct(b.mem_used, b.mem_total) || 0),
@@ -102,11 +102,11 @@ const hero = computed(() => {
 
 // ---- thresholds + "needs attention" triage --------------------------------
 const DEFAULT_THR = { cpu_warn: 80, cpu_crit: 90, mem_warn: 80, mem_crit: 90, disk_warn: 80, disk_crit: 90, dutil_warn: 80, dutil_crit: 95 }
-const thresholds = ref({}) // namespace name -> thresholds object
+const thresholds = ref({}) // workspace name -> thresholds object
 async function loadThresholds() {
-  try { const r = await api.get('/api/thresholds'); const m = {}; for (const x of r) m[x.namespace] = x; thresholds.value = m } catch {}
+  try { const r = await api.get('/api/thresholds'); const m = {}; for (const x of r) m[x.workspace] = x; thresholds.value = m } catch {}
 }
-const thrOf = (s) => thresholds.value[s.namespace] || DEFAULT_THR
+const thrOf = (s) => thresholds.value[s.workspace] || DEFAULT_THR
 const metricsOf = (s) => ({ cpu: s.cpu_percent, mem: pct(s.mem_used, s.mem_total), disk: pct(s.disk_used, s.disk_total), dutil: s.disk_util })
 // severity: 0 ok · 1 warn · 2 crit · 3 down
 function sevOf(s) {
@@ -148,12 +148,12 @@ const attnHosts = computed(() => {
 })
 // human-readable problem text for tooltips
 const issueText = (i) => (i.key === 'down' ? 'Offline — not reporting in' : `High ${ISSUE[i.key].label.toLowerCase()}: ${i.val}% (${i.crit ? 'critical' : 'warning'})`)
-const chipTitle = (h) => `${h.s.name} · ${h.s.namespace}\n` + h.issues.map(issueText).join('\n')
+const chipTitle = (h) => `${h.s.name} · ${h.s.workspace}\n` + h.issues.map(issueText).join('\n')
 // Picking a new column defaults to descending — we usually want the busiest
 // (near-overload) hosts at the top; click again to flip to ascending.
 function sortBy(col) { if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc'; else { sortState.col = col; sortState.dir = 'desc' } }
 const arrow = (col) => (sortState.col === col ? (sortState.dir === 'desc' ? ' ↓' : ' ↑') : '')
-// click a row attribute (type/cluster/ns) → set that filter dimension (replacing any existing)
+// click a row attribute (type/cluster/ws) → set that filter dimension (replacing any existing)
 function setFilter(key, val) { const toks = chips.value.filter((t) => !t.toLowerCase().startsWith(key + ':')); toks.push(`${key}:${val}`); q.value = toks.join(' ') }
 function toggleRow(id) { selected.has(id) ? selected.delete(id) : selected.add(id) }
 function toggleAll(rows) { const all = rows.length && rows.every((s) => selected.has(s.id)); rows.forEach((s) => (all ? selected.delete(s.id) : selected.add(s.id))) }
@@ -185,7 +185,7 @@ const colorOf = computed(() => {
   names.forEach((n, i) => { m[n] = `hsl(${(i * 47) % 360} 70% 58%)` })
   return m
 })
-// overlay only the hosts that pass the current filter + namespace
+// overlay only the hosts that pass the current filter + workspace
 const visibleNames = computed(() => new Set(visible.value.map((s) => s.name)))
 const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s) => ({ name: s.name, color: colorOf.value[s.name] || '#888', data: s.data }))
 // Selection is unified: the row checkbox (`selected`, by id) both marks for
@@ -228,7 +228,7 @@ const fleetCharts = computed(() => {
   ]
 })
 
-// `/api/systems` is global (not namespace-scoped), so one cache key — navigating
+// `/api/systems` is global (not workspace-scoped), so one cache key — navigating
 // back to Systems paints the last fleet instantly, then revalidates silently.
 const { loaded, reload: load } = useCached({
   key: () => 'systems',
@@ -336,7 +336,7 @@ const detailLink = (s) => {
           @legend-hover="onLegendHover" @legend-toggle="toggleByName" @zoom="setFzoom" />
       </section>
 
-      <!-- Hosts: one flat table; Type / Cluster / Namespace are clickable filters -->
+      <!-- Hosts: one flat table; Type / Cluster / Workspace are clickable filters -->
       <section v-if="rows.length">
         <div class="mb-2 flex items-center gap-2"><h2 class="text-sm font-semibold text-fg">Hosts</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ rows.length }}</span></div>
         <div class="overflow-x-auto rounded-xl border border-line">
@@ -344,7 +344,7 @@ const detailLink = (s) => {
             <thead class="border-b border-line2 bg-head text-left text-xs uppercase tracking-wide text-fg"><tr>
               <th class="w-8 px-3 py-2.5"><input type="checkbox" :checked="rows.length && rows.every((s)=>selected.has(s.id))" @change="toggleAll(rows)" class="h-4 w-4 accent-accent" /></th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('name')">Host{{ arrow('name') }}</th>
-              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('ns')">Namespace{{ arrow('ns') }}</th>
+              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('ws')">Workspace{{ arrow('ws') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('type')">Type{{ arrow('type') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('cluster')">Cluster{{ arrow('cluster') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('status')">Status{{ arrow('status') }}</th>
@@ -365,7 +365,7 @@ const detailLink = (s) => {
                       <RouterLink :to="detailLink(s)" class="font-mono text-fg hover:text-accent">{{ s.name }}</RouterLink>
                     </div>
                   </td>
-                  <td class="px-4 py-3"><button @click="setFilter('ns', s.namespace)" v-tip="`Filter ns:${s.namespace}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.namespace || '—' }}</button></td>
+                  <td class="px-4 py-3"><button @click="setFilter('ws', s.workspace)" v-tip="`Filter ws:${s.workspace}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.workspace || '—' }}</button></td>
                   <td class="px-4 py-3"><button @click="setFilter('kind', s.kind)" v-tip="`Filter kind:${s.kind}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ KIND_LABEL[s.kind] || s.kind }}</button></td>
                   <td class="px-4 py-3"><button v-if="s.cluster" @click="setFilter('cluster', s.cluster)" v-tip="`Filter cluster:${s.cluster}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.cluster }}</button><span v-else class="text-faint">—</span></td>
                   <td class="px-4 py-3"><button @click="setFilter('status', online(s)?'online':'offline')" v-tip="`Filter status:${online(s)?'online':'offline'}`" class="text-sm hover:underline" :class="online(s)?'text-accent':'text-down'">{{ online(s)?'online':'offline' }}</button></td>

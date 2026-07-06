@@ -22,7 +22,7 @@ const fmtBytes = (v) => {
   <div v-if="type !== 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
     <span><span class="text-faint">Type</span> <RouterLink :to="{ path: '/', query: { q: `kind:${meta.kind}` } }" class="text-fg hover:text-accent">{{ TYPE_LABEL[meta.kind] || meta.kind }}</RouterLink></span>
     <span v-if="meta.cluster"><span class="text-faint">Cluster</span> <RouterLink :to="{ path: '/', query: { q: `cluster:${meta.cluster}` } }" class="text-fg hover:text-accent">{{ meta.cluster }}</RouterLink></span>
-    <span><span class="text-faint">Namespace</span> <RouterLink :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" class="text-fg hover:text-accent">{{ meta.namespace }}</RouterLink></span>
+    <span><span class="text-faint">Workspace</span> <RouterLink :to="{ path: '/', query: { q: `ws:${meta.workspace}` } }" class="text-fg hover:text-accent">{{ meta.workspace }}</RouterLink></span>
     <span v-if="meta.hostname"><span class="text-faint">Hostname</span> <RouterLink :to="{ path: '/', query: { q: meta.hostname } }" class="text-fg hover:text-accent">{{ meta.hostname }}</RouterLink></span>
     <span v-if="meta.cpu_model"><span class="text-faint">CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
     <span v-if="fmtBytes(meta.mem_total)"><span class="text-faint">RAM</span> <span class="text-fg">{{ fmtBytes(meta.mem_total) }}</span></span>
@@ -35,7 +35,7 @@ const fmtBytes = (v) => {
   <div v-if="type === 'container'" class="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs">
     <span><span class="text-faint">Type</span> <span class="text-fg">Container</span></span>
     <span><span class="text-faint">Host</span> <RouterLink :to="`/system/${id}?type=docker&name=${encodeURIComponent(meta.name)}`" class="text-fg hover:text-accent">{{ meta.name }}</RouterLink></span>
-    <span><span class="text-faint">Namespace</span> <RouterLink :to="{ path: '/', query: { q: `ns:${meta.namespace}` } }" class="text-fg hover:text-accent">{{ meta.namespace }}</RouterLink></span>
+    <span><span class="text-faint">Workspace</span> <RouterLink :to="{ path: '/', query: { q: `ws:${meta.workspace}` } }" class="text-fg hover:text-accent">{{ meta.workspace }}</RouterLink></span>
     <span v-if="meta.cpu_model"><span class="text-faint">Host CPU</span> <span class="text-fg">{{ meta.cpu_model }}<template v-if="meta.cpu_cores"> · {{ meta.cpu_cores }} cores</template></span></span>
     <span v-if="meta.kernel"><span class="text-faint">Host kernel</span> <span class="text-fg">{{ meta.kernel }}</span></span>
     <RouterLink :to="`/system/${id}?type=containers&name=${encodeURIComponent(meta.name)}`" class="ml-auto text-accent hover:underline">All containers ›</RouterLink>

@@ -14,7 +14,7 @@ pub struct Notification {
     pub repeat: bool,
     pub target: String,     // "api.shop" or "All services"
     pub kind_label: String, // "Service" / "Host"
-    pub namespace: String,
+    pub workspace: String,
     pub condition: String, // "is DOWN" / "CPU % > 90" / "offline > 120s"
     pub detail: String,    // the probe / evaluation message
     pub at: String,        // formatted UTC timestamp
@@ -28,7 +28,7 @@ impl Notification {
             repeat: false,
             target: "Test notification".into(),
             kind_label: String::new(),
-            namespace: String::new(),
+            workspace: String::new(),
             condition: String::new(),
             detail: "Your channel is wired up correctly — real alerts will arrive here.".into(),
             at: now_utc(),
@@ -60,8 +60,8 @@ impl Notification {
         if !self.kind_label.is_empty() {
             v.push(("Type", &self.kind_label));
         }
-        if !self.namespace.is_empty() {
-            v.push(("Namespace", &self.namespace));
+        if !self.workspace.is_empty() {
+            v.push(("Workspace", &self.workspace));
         }
         if !self.condition.is_empty() {
             v.push(("Condition", &self.condition));

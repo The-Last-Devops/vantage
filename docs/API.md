@@ -24,7 +24,7 @@ Three independent paths — never mix them:
 **Personal access tokens (PAT)** are the way to call the API from code. Create one in the
 UI under **Settings › API tokens** (or `POST /api/pats`); the secret is shown once. A PAT
 **acts as the user who created it** and inherits that user's RBAC. To limit a token's reach,
-create a dedicated *service-account* user with membership in only the namespaces it needs,
+create a dedicated *service-account* user with membership in only the workspaces it needs,
 then issue the PAT as that user.
 
 ```bash
@@ -33,10 +33,10 @@ curl -H "Authorization: Bearer $LM_TOKEN" https://monitor.example.com/api/system
 
 ## RBAC
 
-Permissions are namespace-scoped: `viewer` (read) < `editor` (add/edit systems, services,
+Permissions are workspace-scoped: `viewer` (read) < `editor` (add/edit systems, services,
 alerts, channels) < `owner` (also manage members). A system **admin** is owner everywhere;
-a **read-only admin** can view every namespace. Reads return only the namespaces you can see;
-writes require `editor`+ in the target's namespace.
+a **read-only admin** can view every workspace. Reads return only the workspaces you can see;
+writes require `editor`+ in the target's workspace.
 
 ## Endpoints
 
@@ -57,50 +57,50 @@ writes require `editor`+ in the target's namespace.
 ### Infrastructure (hosts)
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/systems` | hosts + latest sample (in your namespaces) |
+| GET | `/api/systems` | hosts + latest sample (in your workspaces) |
 | GET | `/api/systems/{id}/metrics` | time series; `range` + `bucket` params |
 | GET | `/api/systems/{id}/containers` · `/temps` · `/gpu` | per-host detail |
 | GET | `/api/fleet` | fleet-wide overview |
 | PATCH | `/api/systems/{id}` | rename (editor+) |
 | DELETE | `/api/systems/{id}` | remove (editor+) |
-| GET/POST | `/api/thresholds` | per-namespace alert thresholds |
+| GET/POST | `/api/thresholds` | per-workspace alert thresholds |
 
 ### Services (monitors)
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/monitors` | all service checks you can see, with up/down |
-| POST | `/api/namespaces/{id}/monitors` | create (editor+); probed immediately |
+| POST | `/api/workspaces/{id}/monitors` | create (editor+); probed immediately |
 | PATCH/DELETE | `/api/monitors/{id}` | edit / delete (editor+) |
 | GET | `/api/monitors/{id}/debug` · `/events` | last request/response · status history |
 
 ### Alerts
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/namespaces/{id}/alerts` | rules whose target is in this namespace |
-| POST | `/api/namespaces/{id}/alerts` | create rule (editor+); `channel_ids` may be any channel |
+| GET | `/api/workspaces/{id}/alerts` | rules whose target is in this workspace |
+| POST | `/api/workspaces/{id}/alerts` | create rule (editor+); `channel_ids` may be any channel |
 | PATCH/DELETE | `/api/alerts/{id}` | edit / delete (editor+) |
 | POST | `/api/alerts/{id}/test` | send a test through the rule's channels |
-| GET | `/api/namespaces/{id}/alert-events` | fire/recover history |
+| GET | `/api/workspaces/{id}/alert-events` | fire/recover history |
 | GET | `/api/events` | recent service status changes |
 
 ### Notify channels (shared resource)
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/channels` | every channel + `namespace`, `can_edit` (secrets masked unless you can edit) |
+| GET | `/api/channels` | every channel + `workspace`, `can_edit` (secrets masked unless you can edit) |
 | GET | `/api/channel-types` | provider manifest (form schema) |
-| POST | `/api/namespaces/{id}/channels` | create in a namespace (editor+) |
-| POST | `/api/namespaces/{id}/channels/test` | test an unsaved `{kind, config}` before creating/saving (editor+) |
-| PATCH/DELETE | `/api/channels/{id}` | edit / delete (editor of the channel's namespace) |
+| POST | `/api/workspaces/{id}/channels` | create in a workspace (editor+) |
+| POST | `/api/workspaces/{id}/channels/test` | test an unsaved `{kind, config}` before creating/saving (editor+) |
+| PATCH/DELETE | `/api/channels/{id}` | edit / delete (editor of the channel's workspace) |
 | POST | `/api/channels/{id}/test` | send a test notification |
 | GET | `/api/channels/{id}/alerts` | rules that use this channel (`target`, `kind`, `firing`) |
 
-### Namespaces, members, users (admin)
+### Workspaces, members, users (admin)
 | Method | Path | Notes |
 |---|---|---|
-| GET/POST | `/api/namespaces` · DELETE `/api/namespaces/{id}` | manage namespaces |
-| GET/POST/DELETE | `/api/namespaces/{id}/members` | membership + role |
+| GET/POST | `/api/workspaces` · DELETE `/api/workspaces/{id}` | manage workspaces |
+| GET/POST/DELETE | `/api/workspaces/{id}/members` | membership + role |
 | GET/POST | `/api/users` · PATCH/DELETE `/api/users/{id}` | accounts (admin) |
-| GET | `/api/users/{id}/memberships` | a user's per-namespace roles |
+| GET | `/api/users/{id}/memberships` | a user's per-workspace roles |
 | GET | `/api/audit` | action log (admin); filters `?q=&method=&status=ok\|client\|server&limit=&offset=`, returns `{rows, total, retention_days}` |
 | PUT | `/api/admin/audit/retention` | `{days}` — keep window for the audit log; `null`/0 = forever (admin) |
 
@@ -131,8 +131,8 @@ Methods: `initialize`, `tools/list`, `tools/call`, `ping`.
 | `list_services` | read | — |
 | `alerts_firing` | read | — |
 | `recent_events` | read | `limit?` |
-| `run_service_check` | editor of target ns | `monitor_id` |
-| `toggle_alert_rule` | editor of target ns | `alert_id`, `enabled` |
+| `run_service_check` | editor of target ws | `monitor_id` |
+| `toggle_alert_rule` | editor of target ws | `alert_id`, `enabled` |
 
 ```bash
 # list available tools

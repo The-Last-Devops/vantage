@@ -10,12 +10,12 @@ import { useCached } from '../lib/cache'
 const route = useRoute()
 const router = useRouter()
 
-const namespaces = ref([])
-const selectedNsNames = computed(() => (route.query.ns || '').split(',').filter(Boolean))
-const activeNs = computed(() =>
-  selectedNsNames.value.length
-    ? namespaces.value.filter((n) => selectedNsNames.value.includes(n.name))
-    : namespaces.value,
+const workspaces = ref([])
+const selectedWsNames = computed(() => (route.query.ws || '').split(',').filter(Boolean))
+const activeWs = computed(() =>
+  selectedWsNames.value.length
+    ? workspaces.value.filter((n) => selectedWsNames.value.includes(n.name))
+    : workspaces.value,
 )
 const alerts = ref([])
 const channels = ref([])
@@ -73,21 +73,21 @@ const columns = [
   { key: 'target_name', label: 'Source', sortable: true, nowrap: false },
   { key: 'cond', label: 'Condition', sortable: true },
   { key: 'channels', label: 'Channels' },
-  { key: 'namespace', label: 'Namespace', sortable: true },
+  { key: 'workspace', label: 'Workspace', sortable: true },
   { key: 'renotify_secs', label: 'Re-notify', sortable: true },
   { key: 'enabled', label: 'On', align: 'center', width: '70px' },
   { key: 'actions', label: '', align: 'right', width: '116px' },
 ]
 
 const { loaded, reload: load } = useCached({
-  key: () => 'alerts:' + activeNs.value.map((n) => n.id).join(','),
+  key: () => 'alerts:' + activeWs.value.map((n) => n.id).join(','),
   load: async () => {
-    const nss = activeNs.value
+    const nss = activeWs.value
     if (!nss.length) return { alerts: [], channels: [] }
     const [aLists, allChannels] = await Promise.all([
       Promise.all(nss.map((n) =>
-        api.get(`/api/namespaces/${n.id}/alerts`)
-          .then((rows) => rows.map((r) => ({ ...r, namespace: n.name })))
+        api.get(`/api/workspaces/${n.id}/alerts`)
+          .then((rows) => rows.map((r) => ({ ...r, workspace: n.name })))
           .catch(() => []),
       )),
       api.get('/api/channels').catch(() => []),
@@ -97,7 +97,7 @@ const { loaded, reload: load } = useCached({
       .flat()
       .filter((a) => !seen.has(a.id) && seen.add(a.id))
       .sort((a, b) =>
-        (a.namespace || '').localeCompare(b.namespace || '') ||
+        (a.workspace || '').localeCompare(b.workspace || '') ||
         String(a.target_name).localeCompare(String(b.target_name)) ||
         String(a.id).localeCompare(String(b.id)),
       )
@@ -105,7 +105,7 @@ const { loaded, reload: load } = useCached({
   },
   apply: (d) => { alerts.value = d.alerts; channels.value = d.channels },
 })
-watch(() => route.query.ns, load)
+watch(() => route.query.ws, load)
 
 // ---- row actions ----
 async function toggle(row) {
@@ -144,7 +144,7 @@ async function bulkDelete(rows) {
 }
 
 // ---- navigation ----
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 const openNew = () => router.push({ name: 'alert-new', query: nsq.value })
 const openEdit = (a) => router.push({ name: 'alert-edit', params: { id: a.id }, query: nsq.value })
 
@@ -154,13 +154,13 @@ const q = ref('')
 const filteredRows = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return tableRows.value
-  const keys = ['target_name', 'namespace', 'cond', 'state']
+  const keys = ['target_name', 'workspace', 'cond', 'state']
   return tableRows.value.filter((r) => keys.some((k) => (r[k] ?? '').toString().toLowerCase().includes(s)))
 })
 
 onMounted(async () => {
   try { types.value = await api.get('/api/channel-types') } catch {}
-  try { namespaces.value = await api.get('/api/namespaces') } catch {}
+  try { workspaces.value = await api.get('/api/workspaces') } catch {}
   await load()
   timer = setInterval(load, 15000)
 })
@@ -217,8 +217,8 @@ onUnmounted(() => clearInterval(timer))
           </span>
         </template>
 
-        <template #cell-namespace="{ row }">
-          <span class="text-muted">{{ row.namespace }}</span>
+        <template #cell-workspace="{ row }">
+          <span class="text-muted">{{ row.workspace }}</span>
         </template>
 
         <template #cell-renotify_secs="{ row }">

@@ -1,13 +1,13 @@
 <script setup>
 // Canonical top bar (design-system header.html): identity + status ONLY.
-// Left = breadcrumb / page name. Right = a compact ⌘K jump, the namespace switcher,
+// Left = breadcrumb / page name. Right = a compact ⌘K jump, the workspace switcher,
 // live status, alerts, theme, version, account. Page-scoped search + action buttons do
 // NOT live here — they go in the page bar (AppShell) below, scoped to the current page.
 import { onMounted, onBeforeUnmount, computed } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { useUi } from '../stores/ui'
 import { useVersion } from '../stores/version'
-import NamespacePicker from './NamespacePicker.vue'
+import WorkspacePicker from './WorkspacePicker.vue'
 import AccountMenu from './AccountMenu.vue'
 
 const props = defineProps({
@@ -28,7 +28,7 @@ const headTitle = computed(() => props.title || route.meta?.title || '')
 
 // ⌘K global jump. Full command palette is a follow-up; for now it jumps to the host list.
 function jump() {
-  router.push({ name: 'systems', query: route.query.ns ? { ns: route.query.ns } : {} })
+  router.push({ name: 'systems', query: route.query.ws ? { ws: route.query.ws } : {} })
 }
 function onKey(e) {
   if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
@@ -67,7 +67,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
         <kbd class="rounded border border-line2 px-1 font-mono text-[10px] text-cap">⌘K</kbd>
       </button>
 
-      <NamespacePicker />
+      <WorkspacePicker />
 
       <span class="h-[22px] w-px bg-line2"></span>
 

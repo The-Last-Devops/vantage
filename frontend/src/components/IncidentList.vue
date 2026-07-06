@@ -1,6 +1,6 @@
 <script setup>
 // Shared "Needs attention" incident list — used by Overview + FleetOverview.
-// Each incident = { id, tone ('down'|'warn'), host, reason, ns, systemId? }.
+// Each incident = { id, tone ('down'|'warn'), host, reason, ws, systemId? }.
 // A down/warn row gets a tinted bg + a 3px left rail in its severity colour, the
 // host name in mono, the reason, and (when a host id is known) an inline accent
 // SSH/Exec button that routes to the host console. No incidents → calm "All clear".
@@ -10,7 +10,7 @@ import VIcon from './VIcon.vue'
 import StatePill from './StatePill.vue'
 
 const props = defineProps({
-  incidents: { type: Array, default: () => [] }, // [{ id, tone, host, reason, ns, systemId }]
+  incidents: { type: Array, default: () => [] }, // [{ id, tone, host, reason, ws, systemId }]
   // Hide the card chrome (header) — the parent supplies its own.
   bare: { type: Boolean, default: false },
   // Cap the list height and scroll inside, so a long incident list can't take over
@@ -52,7 +52,7 @@ function openConsole(inc) {
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
             <span class="truncate font-mono text-body tabular-nums text-fg">{{ inc.host }}</span>
-            <span v-if="inc.ns" class="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-micro text-muted">{{ inc.ns }}</span>
+            <span v-if="inc.ws" class="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-micro text-muted">{{ inc.ws }}</span>
           </div>
           <div class="truncate text-xs text-muted">{{ inc.reason }}</div>
         </div>

@@ -1,6 +1,6 @@
 <script setup>
 // Presentational status-change feed for service monitors. Rows are passed in
-// pre-shaped by the parent (it owns fetching + namespace filtering); formatting
+// pre-shaped by the parent (it owns fetching + workspace filtering); formatting
 // helpers come in as props so this stays purely presentational. The list is
 // height-capped (scrolls inside) and paginated so a chatty feed can't grow the
 // page without bound. `stateDur` is indexed against the FULL list, so we pass the

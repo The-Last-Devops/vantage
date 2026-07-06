@@ -101,7 +101,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 - **Overview redesigned** as a single, uniform grid of clickable status tiles — Hosts
   (total/up · down · critical · warning), Services (total/up · down · avg uptime),
   Operations (alerts firing · events 24h · agent updates · backup) and Security
-  (two-factor) plus, for admins, a System row (database size · namespaces · members).
+  (two-factor) plus, for admins, a System row (database size · workspaces · members).
   Each tile links to its page, **turns green when healthy** and red/amber when it needs
   attention. The scattered event feed / incident list / capacity charts are gone.
 - **Public-exposure self-check** (**Settings → Security**, admin) — the hub probes its own
@@ -171,7 +171,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 ### Fixed
 - **The SSH console no longer says "Shell is disabled for this host."** The leftover
   per-host enable/disable flag is gone — every host is SSH-capable, gated only by your
-  namespace `can_exec` permission and a live agent tunnel.
+  workspace `can_exec` permission and a live agent tunnel.
 
 ### Changed
 - A reachable host that's over a **critical** threshold (e.g. disk 93%) now reads as
@@ -237,10 +237,10 @@ Each released version's section is used verbatim as the GitHub Release notes
 ## [2.3.0] — 2026-06-29
 
 ### Changed
-- **Unified top bar.** The namespace switcher and your account menu moved up from the
+- **Unified top bar.** The workspace switcher and your account menu moved up from the
   sidebar into a single 56px header — alongside a global search (⌘K), alerts, theme
   toggle, version, and avatar. The sidebar is now just brand + navigation. Picking
-  namespaces works exactly as before (`?ns=` in the URL).
+  workspaces works exactly as before (`?ws=` in the URL).
 - **Redesigned Services.** The list gains a health KPI strip and a severity-aware table
   (down/degraded rows washed) with uptime, latency, and a trend sparkline per check,
   plus a related live events feed. A service's detail page leads with a status hero and
@@ -251,7 +251,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 ### Added
 - **New Overview dashboard** — an attention-first landing: open incidents lead, then a
   health KPI strip, with the fleet CPU trend demoted to the bottom.
-- **Fleet war-room** (`Fleet`) — every host & service at a glance: a namespace-grouped
+- **Fleet war-room** (`Fleet`) — every host & service at a glance: a workspace-grouped
   health heatmap, services with uptime, live incidents with inline SSH/Exec, and top-load.
 - **Fleet metrics** (`Metrics`) — small-multiples across the fleet (CPU / Memory / Disk /
   Network), one line per host; click a host to isolate its line across every panel, with
@@ -270,7 +270,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 ## [2.1.1] — 2026-06-28
 
 ### Added
-- **Grant shell access to members from the UI.** In the member editor, each namespace
+- **Grant shell access to members from the UI.** In the member editor, each workspace
   where someone is an **owner** now has a **Shell access** toggle that grants/revokes
   the console capability (previously only system admins could open a shell). A `shell`
   chip marks members who have it.
@@ -333,7 +333,7 @@ Each released version's section is used verbatim as the GitHub Release notes
   endpoints now redact secret `config` (auth headers like `Authorization`/`Cookie`,
   basic-auth/bearer credentials, Redis password) and mask the password in DB
   connection-string `target`s for anyone who isn't an editor of the monitor's
-  namespace. (Previously only `push_token` was stripped, so read-only members could
+  workspace. (Previously only `push_token` was stripped, so read-only members could
   read stored credentials.)
 - **SSRF egress guard on all outbound requests.** Service probes, notification
   webhooks, and the S3 backup endpoint resolve the target and reject loopback,
@@ -343,7 +343,7 @@ Each released version's section is used verbatim as the GitHub Release notes
   metadata endpoint and read the response back via the debug view. Private
   (RFC1918/ULA) targets stay allowed so internal monitoring works; set
   `EGRESS_POLICY=strict` to block those too.
-- **Agent enrollment keys masked for viewers.** The namespace key list only shows
+- **Agent enrollment keys masked for viewers.** The workspace key list only shows
   the full `x-api-key` to editors; viewers see a short non-usable preview.
 - **Session cookie now sets the `Secure` flag** (set `INSECURE_COOKIES=1` to keep
   plain-http local dev working).
@@ -392,9 +392,9 @@ Each released version's section is used verbatim as the GitHub Release notes
 - **Switching pages is now instant.** Every list page used to re-show its loading
   spinner and re-fetch from scratch on each visit; pages now paint the last-known
   data immediately and refresh in the background, so navigating between Systems,
-  Alerts, Monitors, Notifications, Members, Namespaces, Events, Audit, API tokens,
+  Alerts, Monitors, Notifications, Members, Workspaces, Events, Audit, API tokens,
   and Data retention no longer flashes a spinner. The spinner appears only on a
-  genuine first load or the first time you view a new namespace selection.
+  genuine first load or the first time you view a new workspace selection.
 
 ### Fixed
 - **Cached data can't silently go stale.** Pages re-validate when the browser tab
@@ -405,7 +405,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 ## [1.7.2] — 2026-06-26
 
 ### Changed
-- **Alert notifications are now properly formatted** — a title plus Type / Namespace /
+- **Alert notifications are now properly formatted** — a title plus Type / Workspace /
   Condition / Detail / When, rendered natively per channel (Discord embed, Slack &
   Mattermost colored attachment, Telegram HTML, webhook structured JSON, email HTML,
   Matrix formatted) instead of a single terse line.
@@ -437,7 +437,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 ### Changed
 - **Services is now a sortable table** with bulk actions, and its create/edit form
   moved to a full page (matching alert rules & channels). An alert rule's **source
-  is now editable** (re-targets in place). Namespace members are added from a
+  is now editable** (re-targets in place). Workspace members are added from a
   **picker of existing users** instead of a free-text email box.
 - Service rows show the **time window** their uptime/history covers; the alert-rule
   editor shows each channel's provider icon.
@@ -453,8 +453,8 @@ Each released version's section is used verbatim as the GitHub Release notes
 ## [1.7.0] — 2026-06-26
 
 ### Added
-- **Namespace-wide alert rules.** One rule can watch **all services** or **all hosts** in a
-  namespace (new hosts/services are covered automatically) — no more editing a rule per target.
+- **Workspace-wide alert rules.** One rule can watch **all services** or **all hosts** in a
+  workspace (new hosts/services are covered automatically) — no more editing a rule per target.
 - **Cross-linking everywhere.** A service or host detail page lists the **alert rules** covering
   it; a notify channel's page shows the **rules that use it** and the **services/hosts it reaches**.
 - **Test a channel before saving it** — send a test from the unsaved config while creating or
@@ -468,7 +468,7 @@ Each released version's section is used verbatim as the GitHub Release notes
   (**Services, Alert rules, Notify channels, Members**) are now sortable, filterable tables with
   status pills and bulk actions (select rows → enable/disable/delete). Bulk buttons stay visible
   (disabled until you select) so the actions are discoverable.
-- **Namespaces redesigned** into a card grid; each namespace has a detail page to manage its
+- **Workspaces redesigned** into a card grid; each workspace has a detail page to manage its
   **members**, see its **attached alert rules**, and tuck the "Needs attention" thresholds away.
 - **Alert rules, channels, and services now edit on a full page** (no more modal); a service's
   create/edit form moved out of the list into its own page.
@@ -486,18 +486,18 @@ Each released version's section is used verbatim as the GitHub Release notes
   RBAC — scope it by issuing it to a limited service-account user.
 - **Embedded MCP server** at `POST /mcp` (JSON-RPC 2.0), authenticated by a PAT, so AI
   assistants (Claude, etc.) can read and operate the monitor. Tools: `list_systems`,
-  `list_services`, `alerts_firing`, `recent_events` (read, scoped to your namespaces) and
-  `run_service_check`, `toggle_alert_rule` (write, require editor of the target's namespace).
+  `list_services`, `alerts_firing`, `recent_events` (read, scoped to your workspaces) and
+  `run_service_check`, `toggle_alert_rule` (write, require editor of the target's workspace).
 
 ## [1.5.5] — 2026-06-25
 
 ### Added
 - A newly created service is **probed immediately**, so its status (and any alert on
   it) shows at once instead of waiting for the next scheduler cycle.
-- Viewing a notify channel lists the **alert rules that use it** (with their namespace
+- Viewing a notify channel lists the **alert rules that use it** (with their workspace
   and enabled state) — click one to jump to the rule.
-- Namespace-scoped data now **shows its namespace**: alert rules, the events feed, and
-  the services list are each labelled with the namespace they belong to.
+- Workspace-scoped data now **shows its workspace**: alert rules, the events feed, and
+  the services list are each labelled with the workspace they belong to.
 
 ### Changed
 - **Graceful shutdown** — the hub drains in-flight requests and the agent stops cleanly
@@ -509,30 +509,30 @@ Each released version's section is used verbatim as the GitHub Release notes
   now keeps a stable order instead of re-sorting on every change.
 - The Rules list no longer renders under the loader and jumps up when loading finishes.
 - **Mobile**: the Services two-pane layout no longer overflows the screen (it stacks),
-  and the sidebar's namespace selector + logout are no longer hidden by the browser bar.
+  and the sidebar's workspace selector + logout are no longer hidden by the browser bar.
 
 ## [1.5.4] — 2026-06-25
 
 ### Security
 - Channel secrets (tokens, passwords, webhook URLs) are masked for anyone who
-  can't edit the channel; only editors of the channel's namespace see them.
+  can't edit the channel; only editors of the channel's workspace see them.
 - Push-monitor tokens are no longer returned to viewers — shown only to editors
   on the monitor detail page (the token is a write credential).
 - Credential-bearing request headers (Authorization / Cookie / API-key) are
   redacted in the monitor debug view.
 
 ### Added
-- **Notify channels are a shared resource**: every namespace can see and use any
-  channel in its alert rules; only an editor of a channel's own namespace can
+- **Notify channels are a shared resource**: every workspace can see and use any
+  channel in its alert rules; only an editor of a channel's own workspace can
   edit or delete it. New `GET /api/channels`.
 - Click a rule or channel card to view it (read-only when you lack edit rights).
 
 ### Changed
-- Alert **Rules** and **Events** now span all selected namespaces — previously the
-  list silently collapsed to a single namespace when "all" or several were picked.
+- Alert **Rules** and **Events** now span all selected workspaces — previously the
+  list silently collapsed to a single workspace when "all" or several were picked.
 
 ### Fixed
-- Mobile: the namespace selector and logout were pushed below the browser toolbar
+- Mobile: the workspace selector and logout were pushed below the browser toolbar
   in the sidebar (now uses dynamic viewport height).
 
 ## [1.5.3] — 2026-06-25
@@ -542,16 +542,16 @@ Each released version's section is used verbatim as the GitHub Release notes
   "Thread ID" field on the Discord channel form.
 
 ### Fixed
-- **Services** now respects the sidebar namespace filter — the service list, the
+- **Services** now respects the sidebar workspace filter — the service list, the
   Up/Down/Paused/Total stats, and the Recent-events feed all scope to the selected
-  namespace(s), matching Infrastructure (previously Services ignored the filter).
+  workspace(s), matching Infrastructure (previously Services ignored the filter).
 
 ## [1.5.2] — 2026-06-25
 
 ### Added
 - **Members** redesign — search + role filter, an *Add member* dialog and an edit
-  slide-over, per-namespace access shown as named role chips, and a clearer legend
-  distinguishing system roles from namespace roles.
+  slide-over, per-workspace access shown as named role chips, and a clearer legend
+  distinguishing system roles from workspace roles.
 - **Services › Recent events** now shows a message on recovery ("Recovered") and a
   **Duration** column — how long each state lasted, with the latest marked "ongoing".
 
@@ -621,7 +621,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ### Added
 - Backup / restore (download & upload, S3-compatible).
-- Service detail page with uptime history (click a name to open); namespace column.
+- Service detail page with uptime history (click a name to open); workspace column.
 - Hour-based raw retention plus container rollup tiers.
 
 ## [1.2.1] — 2026-06-23
@@ -638,9 +638,9 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ### Added
 - Many monitor kinds: PostgreSQL, MySQL, MongoDB, Redis, RabbitMQ, DNS, TLS-cert-expiry, and Push (passive).
-- "Needs attention" triage view with per-namespace alert thresholds.
+- "Needs attention" triage view with per-workspace alert thresholds.
 - System-level RBAC roles and a Members management UI.
-- Namespaces management page.
+- Workspaces management page.
 
 ### Changed
 - Nav renamed Systems → Infrastructure and Monitors → Services.
@@ -656,12 +656,12 @@ Each released version's section is used verbatim as the GitHub Release notes
 - Teal design identity with an animated logo / favicon.
 
 ### Changed
-- Filter mini-language with URL state; namespace-aware fleet view.
+- Filter mini-language with URL state; workspace-aware fleet view.
 
 ## [1.0.0] — 2026-06-20
 
 - Initial release: self-hosted server & service monitoring — a push-based host-metrics
-  agent, Uptime-Kuma-style service checks, and alerting, with multi-user namespace-scoped
+  agent, Uptime-Kuma-style service checks, and alerting, with multi-user workspace-scoped
   RBAC and public status pages.
 
 [Unreleased]: https://github.com/The-Last-Devops/last-monitor/compare/v1.7.2...HEAD

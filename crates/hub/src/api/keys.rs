@@ -13,14 +13,14 @@ pub struct CreateKey {
     pub name: String,
 }
 
-/// POST /api/namespaces/:id/keys — editors+ mint a reusable API key.
+/// POST /api/workspaces/:id/keys — editors+ mint a reusable API key.
 pub async fn create_key(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
     Json(req): Json<CreateKey>,
 ) -> Result<Json<CreatedKey>, StatusCode> {
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     let name = req.name.trim().to_string();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(StatusCode::BAD_REQUEST);
@@ -28,9 +28,9 @@ pub async fn create_key(
     // 32-char key (UUIDv4 hex, ~122 bits of entropy).
     let key = Uuid::new_v4().simple().to_string();
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO api_keys (namespace_id, name, key) VALUES ($1, $2, $3) RETURNING id",
+        "INSERT INTO api_keys (workspace_id, name, key) VALUES ($1, $2, $3) RETURNING id",
     )
-    .bind(ns)
+    .bind(ws)
     .bind(&name)
     .bind(&key)
     .fetch_one(&state.config)
@@ -47,23 +47,23 @@ pub struct KeyRow {
     pub system_count: i64,
 }
 
-/// GET /api/namespaces/:id/keys
+/// GET /api/workspaces/:id/keys
 pub async fn list_keys(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(ns): Path<Uuid>,
+    Path(ws): Path<Uuid>,
 ) -> Result<Json<Vec<KeyRow>>, StatusCode> {
-    let role = rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    let role = rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     // The enrollment key is a secret that grants metric ingest / auto-registration
-    // into the namespace; only editors+ may see it in full. Viewers get a masked
+    // into the workspace; only editors+ may see it in full. Viewers get a masked
     // preview that can't be used to enroll an agent.
     let can_see_secret = role >= Role::Editor;
     let rows: Vec<(Uuid, String, String, i64)> = sqlx::query_as(
         "SELECT k.id, k.name, k.key, count(s.id) \
          FROM api_keys k LEFT JOIN systems s ON s.key_id = k.id \
-         WHERE k.namespace_id = $1 GROUP BY k.id ORDER BY k.name",
+         WHERE k.workspace_id = $1 GROUP BY k.id ORDER BY k.name",
     )
-    .bind(ns)
+    .bind(ws)
     .fetch_all(&state.config)
     .await
     .map_err(internal)?;
@@ -97,13 +97,13 @@ pub async fn key_systems(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<KeySystems>, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM api_keys WHERE id = $1",
+        "SELECT workspace_id FROM api_keys WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Viewer).await?;
+    rbac::require_role(&state, &user, ws, Role::Viewer).await?;
     let key_name: (String,) = sqlx::query_as("SELECT name FROM api_keys WHERE id = $1")
         .bind(id)
         .fetch_one(&state.config)
@@ -127,13 +127,13 @@ pub async fn delete_key(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let ns = ns_of(
+    let ws = ws_of(
         &state,
-        "SELECT namespace_id FROM api_keys WHERE id = $1",
+        "SELECT workspace_id FROM api_keys WHERE id = $1",
         id,
     )
     .await?;
-    rbac::require_role(&state, &user, ns, Role::Editor).await?;
+    rbac::require_role(&state, &user, ws, Role::Editor).await?;
     sqlx::query("DELETE FROM api_keys WHERE id = $1")
         .bind(id)
         .execute(&state.config)

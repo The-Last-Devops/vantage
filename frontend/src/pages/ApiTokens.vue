@@ -59,7 +59,7 @@ onMounted(load)
   <AppShell title="API tokens">
     <div class="space-y-4">
       <div class="flex items-start gap-3">
-        <p class="max-w-3xl text-xs text-faint">Personal access tokens for the API and the MCP server. A token acts as <b class="text-fg">you</b> — it can do whatever your account can, in the namespaces you belong to. Send it as <code class="rounded bg-surface2 px-1">Authorization: Bearer &lt;token&gt;</code>. The secret is shown once.</p>
+        <p class="max-w-3xl text-xs text-faint">Personal access tokens for the API and the MCP server. A token acts as <b class="text-fg">you</b> — it can do whatever your account can, in the workspaces you belong to. Send it as <code class="rounded bg-surface2 px-1">Authorization: Bearer &lt;token&gt;</code>. The secret is shown once.</p>
         <button @click="openNew" class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>New token
         </button>

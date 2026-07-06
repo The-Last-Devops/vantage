@@ -46,7 +46,7 @@ pub struct AgentParams {
     key: String,
     #[serde(default)]
     cluster: String,
-    /// k8s namespace to install the DaemonSet into (NOT the RBAC namespace, which
+    /// k8s namespace to install the DaemonSet into (NOT the RBAC workspace, which
     /// the API key already encodes). Defaults to `vantage`.
     ns: Option<String>,
     /// `1`/`true` → use the rolling `:auto-update` image so the agent self-updates.

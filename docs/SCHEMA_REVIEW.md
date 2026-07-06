@@ -4,7 +4,7 @@ Goal: standardize table/field names in one pass before moving on. Resetting the 
 
 ## Proposed conventions
 - Tables: **plural, snake_case** (`api_keys`, `system_metrics`).
-- Foreign keys: `<singular>_id` (`namespace_id`, `system_id`, `key_id`).
+- Foreign keys: `<singular>_id` (`workspace_id`, `system_id`, `key_id`).
 - Time-series: prefix by object (`system_metrics`, `container_metrics`).
 - Drop leaky technical names ("token", "stats") → use domain terms ("key", "metrics").
 
@@ -14,7 +14,7 @@ Goal: standardize table/field names in one pass before moving on. Resetting the 
 |---|---|---|
 | `users` | `users` | keep |
 | `sessions` | `sessions` | keep |
-| `namespaces` | `namespaces` | keep (slug, name) |
+| `workspaces` | `workspaces` | keep (slug, name) |
 | `memberships` | `memberships` | keep |
 | `enrollment_tokens` | **`api_keys`** | column `token` → **`key`**; reuse as a general API key |
 | `servers` | **`systems`** | UI already calls them "Systems"; covers node/docker/k8s |
@@ -26,7 +26,7 @@ Goal: standardize table/field names in one pass before moving on. Resetting the 
 | `status_pages` | `status_pages` | keep (deferred) |
 | `alert_state` | `alert_state` | keep |
 
-**`systems` (proposed columns):** `id, namespace_id, key_id, name, hostname, kind, cluster, enabled, last_seen, kernel, cpu_model, cpu_cores, agent_version, created_at`
+**`systems` (proposed columns):** `id, workspace_id, key_id, name, hostname, kind, cluster, enabled, last_seen, kernel, cpu_model, cpu_cores, agent_version, created_at`
 
 ## DATA DB
 
@@ -42,6 +42,6 @@ Goal: standardize table/field names in one pass before moving on. Resetting the 
 ## Ripple (follow-on changes)
 - Wire type `MetricsReport` keeps its fields (already fine) + `kind`/`cluster`.
 - Header `x-agent-token` → **`x-api-key`**; const `AGENT_TOKEN_HEADER` → `API_KEY_HEADER`.
-- API routes: `/api/namespaces/:id/tokens` → `/keys`; `/api/tokens/:id` → `/api/keys/:id`.
+- API routes: `/api/workspaces/:id/tokens` → `/keys`; `/api/tokens/:id` → `/api/keys/:id`.
 - Code: ingest.rs, web.rs, api.rs, db.rs, agent, scripts (sim) — change `server_id→system_id`, `enrollment_tokens→api_keys`, `token→key`.
 - Migrations: **consolidate** for cleanliness (merge server_meta/tokens/kind into init), reset the DB.

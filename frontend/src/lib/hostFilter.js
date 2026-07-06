@@ -2,7 +2,7 @@
 // lives here as a self-contained module (and is unit-test-friendly).
 //
 // The search box is a tiny query language: space-separated tokens AND together.
-//   cpu>50 disk<30 status:online kind:docker ns:prod web
+//   cpu>50 disk<30 status:online kind:docker ws:prod web
 // Numeric predicates (cpu/mem/disk + >,<,>=,<=,=), key:value predicates, and bare
 // text (matched against node name + hostname, wildcard-aware).
 
@@ -22,7 +22,7 @@ export function parseQuery(qs) {
   return (qs || '').trim().split(/\s+/).filter(Boolean).map((tok) => {
     let m = tok.match(/^(cpu|mem|disk)(>=|<=|>|<|=)(\d+(?:\.\d+)?)$/i)
     if (m) return { t: 'num', f: m[1].toLowerCase(), op: m[2], v: +m[3] }
-    m = tok.match(/^(status|kind|type|cluster|ns|agent|kernel|name|node|system):(.+)$/i)
+    m = tok.match(/^(status|kind|type|cluster|ws|agent|kernel|name|node|system):(.+)$/i)
     if (m) return { t: 'kv', k: m[1].toLowerCase(), v: m[2].toLowerCase() }
     return { t: 'text', v: tok.toLowerCase() }
   })
@@ -52,7 +52,7 @@ export function matchPred(s, p) {
     if (p.k === 'status') return (online(s) ? 'online' : 'offline').startsWith(p.v)
     if (p.k === 'kind' || p.k === 'type') return s.kind === p.v
     if (p.k === 'cluster') return wild(s.cluster, p.v)
-    if (p.k === 'ns') return wild(s.namespace, p.v)
+    if (p.k === 'ws') return wild(s.workspace, p.v)
     if (p.k === 'agent') return wild(s.agent_version, p.v)
     if (p.k === 'kernel') return wild(s.kernel, p.v)
   }

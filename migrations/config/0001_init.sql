@@ -1,4 +1,4 @@
--- Config DB: users, sessions, namespaces, RBAC, API keys, systems, monitors,
+-- Config DB: users, sessions, workspaces, RBAC, API keys, systems, monitors,
 -- channels, alerts, status pages. Plain PostgreSQL (no TimescaleDB here).
 -- Pre-release: this is the single consolidated schema (no incremental history).
 
@@ -21,27 +21,27 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_user ON sessions(user_id);
 
--- k8s-style namespace: a single DNS-label name identifies it.
-CREATE TABLE namespaces (
+-- k8s-style workspace: a single DNS-label name identifies it.
+CREATE TABLE workspaces (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name       TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TYPE ns_role AS ENUM ('owner', 'editor', 'viewer');
+CREATE TYPE ws_role AS ENUM ('owner', 'editor', 'viewer');
 
 CREATE TABLE memberships (
     user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    namespace_id UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
-    role         ns_role NOT NULL,
-    PRIMARY KEY (user_id, namespace_id)
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    role         ws_role NOT NULL,
+    PRIMARY KEY (user_id, workspace_id)
 );
 
 -- API keys: a reusable secret presented by agents (and reusable elsewhere later).
 -- One key can enroll MANY systems (e.g. a k8s DaemonSet).
 CREATE TABLE api_keys (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace_id UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     key          TEXT NOT NULL UNIQUE,      -- the secret sent in the x-api-key header
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -51,7 +51,7 @@ CREATE TABLE api_keys (
 -- (key_id, hostname); auto-registers on first metrics push.
 CREATE TABLE systems (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace_id  UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     key_id        UUID NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     hostname      TEXT NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE systems (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX systems_key_host ON systems (key_id, hostname);
-CREATE INDEX idx_systems_namespace ON systems(namespace_id);
+CREATE INDEX idx_systems_workspace ON systems(workspace_id);
 CREATE INDEX idx_systems_kind ON systems(kind);
 
 -- A service check (Uptime-Kuma style).
@@ -74,7 +74,7 @@ CREATE TYPE monitor_kind AS ENUM ('http', 'tcp', 'ping', 'keyword');
 
 CREATE TABLE monitors (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace_id  UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     name          TEXT NOT NULL,
     kind          monitor_kind NOT NULL,
     target        TEXT NOT NULL,
@@ -83,11 +83,11 @@ CREATE TABLE monitors (
     enabled       BOOLEAN NOT NULL DEFAULT true,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_monitors_namespace ON monitors(namespace_id);
+CREATE INDEX idx_monitors_workspace ON monitors(workspace_id);
 
 CREATE TABLE channels (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace_id UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
     kind         TEXT NOT NULL,             -- telegram | webhook | email
     config       JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -115,7 +115,7 @@ CREATE TABLE alert_state (
 
 CREATE TABLE status_pages (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    namespace_id UUID NOT NULL REFERENCES namespaces(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     slug         TEXT NOT NULL UNIQUE,
     title        TEXT NOT NULL,
     config       JSONB NOT NULL DEFAULT '{}'::jsonb,

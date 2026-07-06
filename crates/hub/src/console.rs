@@ -154,21 +154,21 @@ pub async fn console_ws(
     if ticket.user_id != user.id || ticket.system_id != id {
         return StatusCode::FORBIDDEN.into_response();
     }
-    // Defense in depth: re-verify exec rights on the system's namespace.
-    let ns: Option<(Uuid,)> = sqlx::query_as("SELECT namespace_id FROM systems WHERE id = $1")
+    // Defense in depth: re-verify exec rights on the system's workspace.
+    let ws_id: Option<(Uuid,)> = sqlx::query_as("SELECT workspace_id FROM systems WHERE id = $1")
         .bind(id)
         .fetch_optional(&state.config)
         .await
         .unwrap_or(None);
-    let Some((ns,)) = ns else {
+    let Some((ws_id,)) = ws_id else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if rbac::require_exec(&state, &user, ns).await.is_err() {
+    if rbac::require_exec(&state, &user, ws_id).await.is_err() {
         return StatusCode::FORBIDDEN.into_response();
     }
     let cols = q.cols.unwrap_or(80).clamp(20, 500);
     let rows = q.rows.unwrap_or(24).clamp(5, 300);
-    ws.on_upgrade(move |socket| run(state, ns, ticket, cols, rows, socket))
+    ws.on_upgrade(move |socket| run(state, ws_id, ticket, cols, rows, socket))
 }
 
 /// Record one transcript chunk (output only — see module docs).
@@ -186,7 +186,7 @@ async fn record(state: &AppState, session: Uuid, seq: &mut i32, data: &[u8]) {
 
 async fn run(
     state: AppState,
-    ns: Uuid,
+    ws_id: Uuid,
     t: ExecTicket,
     cols: u32,
     rows: u32,
@@ -202,12 +202,12 @@ async fn run(
         .unwrap_or_else(|| t.hostname.clone());
     let session_id: Uuid = match sqlx::query_scalar(
         "INSERT INTO exec_sessions \
-         (system_id, system_name, namespace_id, user_id, user_email, transport, ssh_user) \
+         (system_id, system_name, workspace_id, user_id, user_email, transport, ssh_user) \
          VALUES ($1, $2, $3, $4, $5, 'ssh', $6) RETURNING id",
     )
     .bind(t.system_id)
     .bind(&system_name)
-    .bind(ns)
+    .bind(ws_id)
     .bind(t.user_id)
     .bind(&t.user_email)
     .bind(&t.ssh_user)

@@ -2,7 +2,7 @@
 //!
 //! Minimal skeleton: a dashboard page (HTML + HTMX + uPlot via CDN) and a JSON
 //! endpoint listing servers with their latest metric. Real templating (Askama/Maud),
-//! auth, and namespaces come next.
+//! auth, and workspaces come next.
 
 use axum::http::StatusCode;
 use uuid::Uuid;
@@ -17,7 +17,7 @@ pub use monitors::*;
 pub use systems::*;
 
 /// True if the user may view the given server (admin / read-only admin, or a
-/// member of its namespace).
+/// member of its workspace).
 pub async fn can_view_system(
     state: &AppState,
     user: &CurrentUser,
@@ -28,7 +28,7 @@ pub async fn can_view_system(
     }
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT 1 FROM systems s \
-         JOIN memberships m ON m.namespace_id = s.namespace_id \
+         JOIN memberships m ON m.workspace_id = s.workspace_id \
          WHERE s.id = $1 AND m.user_id = $2",
     )
     .bind(system_id)

@@ -12,11 +12,11 @@ JAR="$(mktemp)"; trap 'rm -f "$JAR"' EXIT
 curl -fsS -c "$JAR" -X POST "$BASE/api/auth/login" -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" >/dev/null
 
-NS=$(curl -fsS -b "$JAR" "$BASE/api/namespaces")
-NS_ID=$(printf '%s' "$NS" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
+WS=$(curl -fsS -b "$JAR" "$BASE/api/workspaces")
+WS_ID=$(printf '%s' "$WS" | sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' | head -1)
 
 echo "create push monitor…"
-MID=$(curl -fsS -b "$JAR" -X POST "$BASE/api/namespaces/$NS_ID/monitors" \
+MID=$(curl -fsS -b "$JAR" -X POST "$BASE/api/workspaces/$WS_ID/monitors" \
   -H 'content-type: application/json' \
   -d '{"name":"__pushcheck","kind":"push","target":"push","interval_secs":60}' | tr -d '"')
 

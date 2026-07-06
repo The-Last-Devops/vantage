@@ -228,11 +228,11 @@ async function reload() {
 const live = computed(() => ['30m', '1h'].includes(range.value))
 let timer = null
 function restartTimer() { clearInterval(timer); timer = setInterval(reload, live.value ? 1000 : 5000) }
-// node metadata (namespace, kernel, cpu model…) — fetched once per target, not polled
+// node metadata (workspace, kernel, cpu model…) — fetched once per target, not polled
 const meta = ref(null)
 async function loadMeta() { try { const all = await minLoad(api.get('/api/systems')); meta.value = all.find((s) => s.id === id.value) || null } catch { meta.value = null } }
-const rules = ref([]) // alert rules covering this host (own + namespace-wide)
-const nsq = computed(() => (route.query.ns ? { ns: route.query.ns } : {}))
+const rules = ref([]) // alert rules covering this host (own + workspace-wide)
+const nsq = computed(() => (route.query.ws ? { ws: route.query.ws } : {}))
 async function loadRules() { try { rules.value = await api.get(`/api/systems/${id.value}/alerts`) } catch { rules.value = [] } }
 // shell status → drives the "Open console" button next to the status
 const shell = ref(null)
@@ -251,7 +251,7 @@ watch(() => [route.params.id, type.value, range.value, name.value, parent.value]
 </script>
 
 <template>
-  <AppShell :title="name" :breadcrumb="[{ label: 'Infrastructure', to: { name: 'systems', query: route.query.ns ? { ns: route.query.ns } : {} } }, { label: name }]">
+  <AppShell :title="name" :breadcrumb="[{ label: 'Infrastructure', to: { name: 'systems', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: name }]">
     <!-- status pill next to the header breadcrumb (the breadcrumb prop renders the trail) -->
     <template #header>
       <span class="flex items-center gap-1.5"><span class="h-2 w-2 rounded-full" :class="statusDot"></span><span class="text-xs font-medium" :class="statusText">{{ statusLabel }}</span></span>

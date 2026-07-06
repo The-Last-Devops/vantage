@@ -13,7 +13,7 @@ pub struct SystemRow {
     pub hostname: Option<String>,
     pub kind: String,
     pub cluster: Option<String>,
-    pub namespace: String,
+    pub workspace: String,
     pub agent_version: Option<String>,
     pub kernel: Option<String>,
     pub cpu_model: Option<String>,
@@ -27,7 +27,7 @@ pub struct SystemRow {
     pub disk_util: Option<f64>,
 }
 
-/// GET /api/systems — each server (in namespaces the caller can see) plus its
+/// GET /api/systems — each server (in workspaces the caller can see) plus its
 /// most recent sample. Latest metric is fetched from the data DB per server
 /// (no cross-DB JOIN). Admins see every server.
 pub async fn list_systems(
@@ -49,9 +49,9 @@ pub async fn list_systems(
     )> = sqlx::query_as(
         "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, n.name, s.agent_version, \
                 s.kernel, s.cpu_model, s.cpu_cores, s.last_seen \
-             FROM systems s JOIN namespaces n ON n.id = s.namespace_id \
-             WHERE $1 OR s.namespace_id IN ( \
-                SELECT namespace_id FROM memberships WHERE user_id = $2) \
+             FROM systems s JOIN workspaces n ON n.id = s.workspace_id \
+             WHERE $1 OR s.workspace_id IN ( \
+                SELECT workspace_id FROM memberships WHERE user_id = $2) \
              ORDER BY s.name",
     )
     .bind(user.can_read_all())
@@ -87,7 +87,7 @@ pub async fn list_systems(
         hostname,
         kind,
         cluster,
-        namespace,
+        workspace,
         agent_version,
         kernel,
         cpu_model,
@@ -106,7 +106,7 @@ pub async fn list_systems(
             hostname,
             kind,
             cluster,
-            namespace,
+            workspace,
             agent_version,
             kernel,
             cpu_model,

@@ -16,9 +16,9 @@ count() { python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if i
 printf '%-28s ' "systems";        g /api/systems | count
 printf '%-28s ' "fleet?range=6h"; g "/api/fleet?range=6h" | python3 -c "import sys,json;d=json.load(sys.stdin);print(len(d.get('hosts',d) if isinstance(d,dict) else d))"
 printf '%-28s ' "monitors";       g /api/monitors | count
-printf '%-28s ' "namespaces";     g /api/namespaces | count
-printf '%-28s ' "channels(ns0)";  NS=$(g /api/namespaces | python3 -c "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')"); [ -n "$NS" ] && g "/api/namespaces/$NS/channels" | count || echo "no ns"
-printf '%-28s ' "alerts(ns0)";    [ -n "$NS" ] && g "/api/namespaces/$NS/alerts" | count || echo "no ns"
+printf '%-28s ' "workspaces";     g /api/workspaces | count
+printf '%-28s ' "channels(ns0)";  WS=$(g /api/workspaces | python3 -c "import sys,json;d=json.load(sys.stdin);print(d[0]['id'] if d else '')"); [ -n "$WS" ] && g "/api/workspaces/$WS/channels" | count || echo "no ws"
+printf '%-28s ' "alerts(ns0)";    [ -n "$WS" ] && g "/api/workspaces/$WS/alerts" | count || echo "no ws"
 printf '%-28s ' "audit";          g /api/audit | count
 printf '%-28s ' "about";          g /api/about | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['version'],d['git_sha'])"
 printf '%-28s ' "admin/data";     g /api/admin/data | python3 -c "import sys,json;d=json.load(sys.stdin);print('size',d['db_size'],'| tiers',len(d['retention']))"

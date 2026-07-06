@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
-// Theme + namespace filter, shared across the shell and pages.
+// Theme + workspace filter, shared across the shell and pages.
 export const useUi = defineStore('ui', {
   state: () => ({
     light: localStorage.getItem('vantage-theme') === 'light',
-    // Set of selected namespace names; empty Set with `allNs` flag = show all.
-    selectedNs: new Set(JSON.parse(localStorage.getItem('vantage-ns') || '[]')),
-    nsTouched: localStorage.getItem('vantage-ns') != null,
+    // Set of selected workspace names; empty Set with `allWs` flag = show all.
+    selectedWs: new Set(JSON.parse(localStorage.getItem('vantage-ws') || '[]')),
+    wsTouched: localStorage.getItem('vantage-ws') != null,
   }),
   actions: {
     applyTheme() {
@@ -17,29 +17,29 @@ export const useUi = defineStore('ui', {
       localStorage.setItem('vantage-theme', this.light ? 'light' : 'dark')
       this.applyTheme()
     },
-    // namespace filter: if untouched, treat as "all"
-    inNs(ns, allNames) {
-      if (!this.nsTouched) return true
-      if (this.selectedNs.size === 0) return false
-      return this.selectedNs.has(ns)
+    // workspace filter: if untouched, treat as "all"
+    inWs(ws, allNames) {
+      if (!this.wsTouched) return true
+      if (this.selectedWs.size === 0) return false
+      return this.selectedWs.has(ws)
     },
-    toggleNs(name, allNames) {
-      if (!this.nsTouched) {
+    toggleWs(name, allNames) {
+      if (!this.wsTouched) {
         // first interaction starts from "all selected"
-        this.selectedNs = new Set(allNames)
-        this.nsTouched = true
+        this.selectedWs = new Set(allNames)
+        this.wsTouched = true
       }
-      this.selectedNs.has(name) ? this.selectedNs.delete(name) : this.selectedNs.add(name)
-      this._persistNs(allNames)
+      this.selectedWs.has(name) ? this.selectedWs.delete(name) : this.selectedWs.add(name)
+      this._persistWs(allNames)
     },
-    toggleAllNs(allNames) {
-      const all = this.nsTouched ? this.selectedNs.size === allNames.length : true
-      this.selectedNs = all ? new Set() : new Set(allNames)
-      this.nsTouched = true
-      this._persistNs(allNames)
+    toggleAllWs(allNames) {
+      const all = this.wsTouched ? this.selectedWs.size === allNames.length : true
+      this.selectedWs = all ? new Set() : new Set(allNames)
+      this.wsTouched = true
+      this._persistWs(allNames)
     },
-    _persistNs() {
-      localStorage.setItem('vantage-ns', JSON.stringify([...this.selectedNs]))
+    _persistWs() {
+      localStorage.setItem('vantage-ws', JSON.stringify([...this.selectedWs]))
     },
   },
 })

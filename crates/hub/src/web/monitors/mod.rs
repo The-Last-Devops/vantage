@@ -27,7 +27,7 @@ pub use detail::monitor_detail;
 pub use events::{monitor_events, monitor_heartbeats, recent_events};
 pub use list::list_monitors;
 
-/// True if the user may view the given monitor; returns its (namespace, name,
+/// True if the user may view the given monitor; returns its (workspace, name,
 /// kind, target, interval, enabled, config) when so.
 #[allow(clippy::type_complexity)]
 pub(super) async fn load_monitor(
@@ -45,9 +45,9 @@ pub(super) async fn load_monitor(
         sqlx::types::Json<serde_json::Value>,
     )> = sqlx::query_as(
         "SELECT n.name, m.name, m.kind::text, m.target, m.interval_secs, m.enabled, m.config \
-             FROM monitors m JOIN namespaces n ON n.id = m.namespace_id \
-             WHERE m.id = $1 AND ($2 OR m.namespace_id IN ( \
-                SELECT namespace_id FROM memberships WHERE user_id = $3))",
+             FROM monitors m JOIN workspaces n ON n.id = m.workspace_id \
+             WHERE m.id = $1 AND ($2 OR m.workspace_id IN ( \
+                SELECT workspace_id FROM memberships WHERE user_id = $3))",
     )
     .bind(id)
     .bind(user.can_read_all())
@@ -55,10 +55,10 @@ pub(super) async fn load_monitor(
     .fetch_optional(&state.config)
     .await
     .map_err(internal)?;
-    let (namespace, name, kind, target, interval_secs, enabled, config) =
+    let (workspace, name, kind, target, interval_secs, enabled, config) =
         row.ok_or(StatusCode::NOT_FOUND)?;
     Ok((
-        namespace,
+        workspace,
         name,
         kind,
         target,
