@@ -146,6 +146,63 @@ pub struct ContainerStat {
     pub net_tx: u64,
 }
 
+/// A Kubernetes cluster-state report, pushed by a **cluster-scoped** agent
+/// (`AGENT_KIND=k8s-cluster`, one per cluster) that reads the kube-apiserver — as
+/// opposed to `MetricsReport`, which a per-node DaemonSet pushes. Carries object
+/// counts/health (namespaces, deployments, pods), not host metrics. Authenticated
+/// with the same `x-api-key` header (the key encodes the RBAC workspace); posted to
+/// `POST /pub/kube` and answered with an `IngestAck` (same interval-ramp contract).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KubeReport {
+    /// Unix epoch seconds when the snapshot was taken on the agent.
+    pub ts: i64,
+    /// Cluster name (from `CLUSTER`); groups the objects in the UI.
+    pub cluster: String,
+    /// Agent binary version (CARGO_PKG_VERSION).
+    #[serde(default)]
+    pub agent_version: String,
+    /// One entry per Kubernetes namespace, with pod-phase tallies.
+    #[serde(default)]
+    pub namespaces: Vec<KubeNamespaceStat>,
+    /// One entry per Deployment, with replica health.
+    #[serde(default)]
+    pub deployments: Vec<KubeDeploymentStat>,
+}
+
+/// Pod tallies for one Kubernetes namespace at snapshot time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KubeNamespaceStat {
+    /// Kubernetes namespace name (NOT the RBAC workspace).
+    pub name: String,
+    /// Namespace lifecycle phase: "Active" or "Terminating".
+    #[serde(default)]
+    pub phase: String,
+    pub pods_total: u32,
+    pub pods_running: u32,
+    pub pods_pending: u32,
+    pub pods_failed: u32,
+    pub pods_succeeded: u32,
+    /// Sum of container restart counts across the namespace's pods.
+    #[serde(default)]
+    pub restarts: u32,
+}
+
+/// Replica health for one Deployment at snapshot time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KubeDeploymentStat {
+    /// Kubernetes namespace the Deployment lives in.
+    pub namespace: String,
+    pub name: String,
+    /// `.spec.replicas` — desired replica count.
+    pub desired: u32,
+    /// `.status.readyReplicas`.
+    pub ready: u32,
+    /// `.status.availableReplicas`.
+    pub available: u32,
+    /// `.status.updatedReplicas`.
+    pub updated: u32,
+}
+
 /// Hub's response to a successful ingest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestAck {

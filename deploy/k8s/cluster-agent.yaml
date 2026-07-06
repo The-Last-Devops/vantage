@@ -1,0 +1,92 @@
+# vantage cluster agent — Deployment (ONE per cluster, reports k8s object stats:
+# namespaces / deployments / pods). Complements agent.yaml (the per-node DaemonSet
+# that reports host metrics) — deploy both for full coverage.
+#
+# It reads the kube-apiserver with the ServiceAccount below, which is granted
+# get/list/watch on namespaces, pods and deployments — READ ONLY, nothing else.
+#
+# Edit the 4 placeholders below, then:  kubectl apply -f cluster-agent.yaml
+#
+#   <HUB_URL>     URL the cluster can reach the hub at (NOT localhost) e.g. https://mon.example.com
+#   <API_KEY>     key from "Add system → Kubernetes" in the UI
+#   <CLUSTER>     cluster name shown in the dashboard, e.g. prod-cluster
+#   <IMAGE>       agent image, e.g. ghcr.io/the-last-devops/vantage-agent:main
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vantage
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vantage-cluster-agent
+  namespace: vantage
+type: Opaque
+stringData:
+  api-key: "<API_KEY>"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vantage-cluster-agent
+  namespace: vantage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vantage-cluster-agent
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vantage-cluster-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vantage-cluster-agent
+subjects:
+  - kind: ServiceAccount
+    name: vantage-cluster-agent
+    namespace: vantage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vantage-cluster-agent
+  namespace: vantage
+  labels: { app: vantage-cluster-agent }
+spec:
+  replicas: 1                        # exactly one collector per cluster
+  selector:
+    matchLabels: { app: vantage-cluster-agent }
+  template:
+    metadata:
+      labels: { app: vantage-cluster-agent }
+    spec:
+      serviceAccountName: vantage-cluster-agent
+      containers:
+        - name: agent
+          image: "<IMAGE>"
+          env:
+            - name: HUB_URL
+              value: "<HUB_URL>"
+            - name: AGENT_KIND
+              value: "k8s-cluster"
+            - name: CLUSTER
+              value: "<CLUSTER>"
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vantage-cluster-agent
+                  key: api-key
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }

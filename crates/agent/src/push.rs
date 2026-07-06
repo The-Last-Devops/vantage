@@ -1,6 +1,7 @@
 //! Pushing reports to the hub: the POST itself, the http→https self-heal on a
 //! redirect, and the graceful-shutdown signal.
 
+use serde::Serialize;
 use shared::{IngestAck, MetricsReport, API_KEY_HEADER};
 
 /// Resolves on the first Ctrl-C or SIGTERM.
@@ -46,6 +47,18 @@ pub async fn send_report(
     url: &str,
     api_key: &str,
     report: &MetricsReport,
+) -> Sent {
+    post_report(client, url, api_key, report).await
+}
+
+/// POST any JSON-serializable report (host `MetricsReport` or `KubeReport`) to the
+/// hub and interpret the response the same way. Both ingest paths answer with an
+/// `IngestAck`, so the redirect/reject/interval-ramp handling is identical.
+pub async fn post_report<T: Serialize>(
+    client: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    report: &T,
 ) -> Sent {
     match client
         .post(url)

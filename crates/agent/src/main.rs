@@ -6,6 +6,7 @@
 //!   INTERVAL     initial report interval, seconds (default 60; hub ramps it live)
 
 mod collect;
+mod kube;
 mod push;
 mod tunnel;
 
@@ -72,6 +73,14 @@ async fn main() -> Result<()> {
         .init();
 
     let cfg = load_config()?;
+
+    // Cluster-scoped Kubernetes collector is a wholly separate loop: it talks to the
+    // kube-apiserver, not sysinfo/Docker. One per cluster (a Deployment), so branch
+    // off before any host-metrics setup and never touch that machinery.
+    if cfg.kind == "k8s-cluster" {
+        return kube::run(&cfg).await;
+    }
+
     // Don't follow redirects: a http→https redirect (301/302) would silently turn
     // our POST into a GET and the hub would answer 405. Surface it instead so the
     // user fixes HUB_URL to https.
