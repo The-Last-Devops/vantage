@@ -9,6 +9,15 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.21] — 2026-07-08
+
+### Fixed
+- **Cluster overlay charts rendered empty (500 error).** The per-group series query bound
+  the time-bucket width as a text parameter (`time_bucket(text, …) does not exist`) instead
+  of inlining the allowlisted constant, so CPU/memory charts on the Cluster page failed.
+  Inlined it, matching the single-series query. Regression-guarded in
+  `scripts/check-kube-stats.sh`.
+
 ## [2.3.20] — 2026-07-08
 
 ### Added

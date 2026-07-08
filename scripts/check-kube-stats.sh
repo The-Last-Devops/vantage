@@ -96,6 +96,17 @@ assert "label app=logger cpu" "$lbl" "30"
 c=$(psql -c "$L SELECT count(*) FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t AND namespace='default';")
 assert "containers ns=default rows" "$c" "2"
 
+# series-by (per-group overlay): the time_bucket()+group query must return rows for
+# each group (regression: time_bucket was once fed a text param and 500'd).
+sb=$(psql -c "SELECT count(*) FROM ( \
+  SELECT tb, grp, avg(scpu)::float8 cpu FROM ( \
+    SELECT time_bucket('1 minute', time) tb, time, \
+           (namespace||' · '||workload_kind||'/'||workload) grp, \
+           sum(cpu_millicores) scpu, sum(mem_bytes) smem \
+    FROM kube_container_stats WHERE system_id='$SID' AND time > now() - interval '1 hour' \
+    GROUP BY tb, time, grp) s GROUP BY tb, grp) x;")
+[ "$sb" -ge 1 ] && echo "  ok: series-by rows ($sb)" || { echo "  FAIL: series-by returned 0 rows"; fail=1; }
+
 # series: >=1 bucket; latest-snapshot total cpu = 250+10+30+100 = 390
 buckets=$(psql -c "SELECT count(*) FROM (SELECT time_bucket('1 minute', time) t, avg(scpu) cpu FROM \
   (SELECT time, sum(cpu_millicores) scpu FROM kube_container_stats WHERE system_id='$SID' GROUP BY time) s GROUP BY 1) x;")

@@ -302,11 +302,12 @@ pub async fn kube_series_by(
     let (_s, _tc, interval, bucket) = chart_tier(&f.range);
 
     // Per (bucket, group): sum per snapshot, then average across snapshots in the bucket.
-    let mut qb = sqlx::QueryBuilder::new(
+    // bucket/interval are constants from chart_tier's allowlist — safe to inline (a bound
+    // text param can't stand in for time_bucket's INTERVAL argument).
+    let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT tb, grp, avg(scpu)::float8 AS cpu, avg(smem)::float8 AS mem FROM ( \
-         SELECT time_bucket(",
-    );
-    qb.push_bind(bucket).push(", time) AS tb, time, ");
+         SELECT time_bucket('{bucket}', time) AS tb, time, "
+    ));
     match by {
         "namespace" => {
             qb.push("namespace AS grp");
