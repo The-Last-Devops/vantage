@@ -127,6 +127,51 @@ pub async fn kube_aggregate(
     }))
 }
 
+#[derive(Serialize, sqlx::FromRow)]
+pub struct KubeSummary {
+    /// Snapshot time (epoch seconds) the totals are computed from; null if no data.
+    pub as_of: Option<i64>,
+    pub cpu_millicores: f64,
+    pub mem_bytes: f64,
+    pub pods: i64,
+    pub pods_running: i64,
+    pub containers: i64,
+    /// Cumulative container restart count across the cluster (not a 24h delta).
+    pub restarts: i64,
+    pub namespaces: i64,
+    pub nodes: i64,
+}
+
+/// GET /api/systems/:id/kube/summary — latest-snapshot cluster roll-up (used by the
+/// Cluster page's KPI strip and the Clusters list cards).
+pub async fn kube_summary(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<KubeSummary>, StatusCode> {
+    if !can_view_system(&state, &user, id).await? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let row: KubeSummary = sqlx::query_as(
+        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = $1) \
+         SELECT extract(epoch FROM max(c.time))::int8 AS as_of, \
+                COALESCE(sum(cpu_millicores),0)::float8 AS cpu_millicores, \
+                COALESCE(sum(mem_bytes),0)::float8 AS mem_bytes, \
+                count(DISTINCT pod)::int8 AS pods, \
+                count(DISTINCT pod) FILTER (WHERE phase = 'Running')::int8 AS pods_running, \
+                count(*)::int8 AS containers, \
+                COALESCE(sum(restarts),0)::int8 AS restarts, \
+                count(DISTINCT namespace)::int8 AS namespaces, \
+                count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
+         FROM kube_container_stats c, latest WHERE c.system_id = $1 AND c.time = latest.t",
+    )
+    .bind(id)
+    .fetch_one(&state.data)
+    .await
+    .map_err(internal)?;
+    Ok(Json(row))
+}
+
 #[derive(Deserialize)]
 pub struct KubeFilter {
     pub ns: Option<String>,

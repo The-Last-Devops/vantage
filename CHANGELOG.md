@@ -9,6 +9,18 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.23] — 2026-07-08
+
+### Changed
+- **Cluster pages reskinned to the design system.** The Clusters list gains an all-cluster
+  roll-up strip (clusters online / nodes / pods / CPU / memory) and richer per-cluster cards
+  (mini-KPI grid, Kubernetes + agent version pills, restart count). The Cluster detail page
+  gains a KPI strip (CPU / memory / pods running / containers / restarts), a segmented
+  group-by control (Namespace / Workload / Label), a workload Kind chip, and a
+  usage-relative CPU bar on each breakdown row. Backed by a new
+  `GET /api/systems/:id/kube/summary` (latest-snapshot cluster totals, incl. distinct nodes
+  and namespaces).
+
 ## [2.3.22] — 2026-07-08
 
 ### Added

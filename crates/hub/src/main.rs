@@ -289,6 +289,7 @@ async fn main() -> Result<()> {
         .route("/api/systems/{id}/temps", get(web::system_temps))
         .route("/api/systems/{id}/gpu", get(web::system_gpu))
         // Kubernetes cluster views (aggregate-on-read of per-container stats)
+        .route("/api/systems/{id}/kube/summary", get(web::kube_summary))
         .route("/api/systems/{id}/kube/aggregate", get(web::kube_aggregate))
         .route(
             "/api/systems/{id}/kube/containers",

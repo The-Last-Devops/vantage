@@ -62,8 +62,12 @@ const agg = ref({ as_of: null, by: 'namespace', groups: [] })
 const seriesBy = ref({ t: [], truncated: false, groups: [] }) // overlay (no focus)
 const seriesOne = ref({ t: [], cpu_millicores: [], mem_bytes: [] }) // focused single
 const containers = ref([])
+const summary = ref(null)
 const err = ref('')
 
+async function loadSummary() {
+  try { summary.value = await api.get(`/api/systems/${id.value}/kube/summary`) } catch { summary.value = null }
+}
 async function loadNamespaces() {
   try {
     const r = await api.get(`/api/systems/${id.value}/kube/aggregate?by=namespace`)
@@ -94,7 +98,7 @@ async function loadContainers() {
 async function reloadAll(first = false) {
   err.value = ''
   try {
-    const tasks = [loadAgg(), loadCharts(), loadContainers()]
+    const tasks = [loadAgg(), loadCharts(), loadContainers(), loadSummary()]
     if (first) tasks.push(loadNamespaces())
     await (first ? minLoad(Promise.all(tasks)) : Promise.all(tasks))
   } catch (e) {
@@ -120,6 +124,14 @@ function fmtBytes(b) {
   return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${u[i]}`
 }
 const color = (i) => `hsl(${(i * 47) % 360} 70% 58%)`
+// CPU bar width is relative to the busiest group in the current view; colour by that
+// relative magnitude (top usage = down, high = warn, else accent) for quick scanning.
+const maxCpu = computed(() => Math.max(1, ...agg.value.groups.map((g) => g.cpu_millicores || 0)))
+const barPct = (mc) => Math.round(((mc || 0) / maxCpu.value) * 100)
+const barColor = (mc) => { const p = barPct(mc); return p >= 90 ? 'rgb(var(--down))' : p >= 70 ? 'rgb(var(--warn))' : 'rgb(var(--accent))' }
+// a "Kind/name" workload group → the kind chip + the name
+const splitKind = (g) => { const i = (g || '').indexOf('/'); return i > 0 ? { kind: g.slice(0, i), name: g.slice(i + 1) } : { kind: '', name: g || '—' } }
+const kCores = (mc) => (mc / 1000).toFixed(mc >= 100000 ? 0 : 1)
 
 // ---- charts (overlay per-group when not focused; single line when focused) ----
 const chartTime = computed(() => (focused.value ? seriesOne.value.t : seriesBy.value.t) || [])
@@ -170,6 +182,30 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         metrics-server not detected in this cluster — CPU/memory read 0. Install metrics-server to populate usage (metadata is still collected).
       </p>
 
+      <!-- KPI strip: cluster roll-up -->
+      <div v-if="summary" class="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-5">
+        <div class="bg-surface px-4 py-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wide text-faint">CPU used</div>
+          <div class="mt-0.5 font-mono text-xl font-extrabold tabular-nums text-accent">{{ kCores(summary.cpu_millicores) }}<span class="text-xs font-semibold text-faint"> cores</span></div>
+        </div>
+        <div class="bg-surface px-4 py-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wide text-faint">Memory used</div>
+          <div class="mt-0.5 font-mono text-xl font-extrabold tabular-nums text-fg">{{ fmtBytes(summary.mem_bytes) }}</div>
+        </div>
+        <div class="bg-surface px-4 py-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wide text-faint">Pods running</div>
+          <div class="mt-0.5 font-mono text-xl font-extrabold tabular-nums text-fg">{{ summary.pods_running }}<span class="text-xs font-semibold text-faint"> / {{ summary.pods }}</span></div>
+        </div>
+        <div class="bg-surface px-4 py-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wide text-faint">Containers</div>
+          <div class="mt-0.5 font-mono text-xl font-extrabold tabular-nums text-fg">{{ summary.containers }}</div>
+        </div>
+        <div class="bg-surface px-4 py-2.5">
+          <div class="text-[10px] font-bold uppercase tracking-wide text-faint">Restarts</div>
+          <div class="mt-0.5 font-mono text-xl font-extrabold tabular-nums" :class="summary.restarts > 0 ? 'text-warn' : 'text-fg'">{{ summary.restarts }}</div>
+        </div>
+      </div>
+
       <!-- charts -->
       <div class="flex flex-wrap items-center gap-2">
         <h2 class="mr-auto text-sm font-semibold text-fg">
@@ -199,7 +235,10 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         <span class="text-xs text-faint">namespace</span>
         <UiSelect :model-value="nsScope" @update:model-value="setNs" :options="nsOptions" />
         <span class="text-xs text-faint">group by</span>
-        <UiSelect :model-value="by" @update:model-value="setBy" :options="BY_OPTS" />
+        <div class="flex gap-1 rounded-lg border border-line bg-surface2 p-0.5">
+          <button v-for="o in BY_OPTS" :key="o.value" @click="setBy(o.value)"
+            class="rounded px-2.5 py-1 text-xs font-medium" :class="by === o.value ? 'bg-accent text-accentfg' : 'text-muted hover:text-fg'">{{ o.label }}</button>
+        </div>
         <input v-if="by === 'label'" :value="labelKey" @change="setLabelKey($event.target.value.trim())"
           placeholder="label key" class="w-36 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
         <span v-if="asOf" class="text-xs text-faint">as of {{ asOf }}</span>
@@ -211,9 +250,17 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         empty="No pods reported yet — is the k8s-cluster agent deployed?"
         @row-click="focusGroup">
         <template #cell-group="{ row }">
-          <span class="font-medium" :class="isFocusedRow(row) ? 'text-accent' : 'text-fg'">{{ row.group ?? '—' }}</span>
+          <div class="flex min-w-0 items-center gap-2">
+            <span v-if="by === 'workload' && splitKind(row.group).kind" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-faint">{{ splitKind(row.group).kind }}</span>
+            <span class="truncate font-mono text-sm" :class="isFocusedRow(row) ? 'text-accent' : 'text-fg'">{{ by === 'workload' ? splitKind(row.group).name : (row.group ?? '—') }}</span>
+          </div>
         </template>
-        <template #cell-cpu_millicores="{ row }">{{ fmtCores(row.cpu_millicores) }}</template>
+        <template #cell-cpu_millicores="{ row }">
+          <div class="flex items-center justify-end gap-2">
+            <span class="hidden h-1.5 w-14 shrink-0 overflow-hidden rounded-full sm:inline-block" style="background:rgb(var(--track))"><span class="block h-full rounded-full" :style="{ width: barPct(row.cpu_millicores) + '%', background: barColor(row.cpu_millicores) }"></span></span>
+            <span class="font-mono tabular-nums">{{ fmtCores(row.cpu_millicores) }}</span>
+          </div>
+        </template>
         <template #cell-mem_bytes="{ row }">{{ fmtBytes(row.mem_bytes) }}</template>
       </DataTable>
 
