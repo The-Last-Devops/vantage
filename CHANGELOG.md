@@ -9,6 +9,14 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.25] — 2026-07-08
+
+### Fixed
+- **Data & retention now lists the Kubernetes tiers.** The backend already tracked
+  `kube_namespace_stats` / `kube_deployment_stats` / `kube_container_stats` (size + retention),
+  but the page grouped tiers by name with no Kubernetes group, so they were filtered out of
+  the display. Added a "Kubernetes" group.
+
 ## [2.3.24] — 2026-07-08
 
 ### Added

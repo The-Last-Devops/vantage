@@ -82,6 +82,7 @@ const GROUPS = [
   { label: 'System metrics', match: (t) => t.table.startsWith('system_metrics') },
   { label: 'Containers', match: (t) => t.table.startsWith('container_metrics') },
   { label: 'Health', match: (t) => t.table === 'heartbeats' },
+  { label: 'Kubernetes', match: (t) => t.table.startsWith('kube_') },
 ]
 const sizeByLabel = computed(() => Object.fromEntries((data.value?.tables || []).map((t) => [t.name, t])))
 // Split the config tables into two columns so the (short) list fills the width.
