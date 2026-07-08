@@ -21,6 +21,21 @@ const capGb = ref(10) // cap limit shown/edited in GB
 const capEnabled = ref(false)
 const msg = ref('')
 
+// Hub-decided push cadence (seconds): host "realtime" + k8s cluster scrape.
+const sampleHost = ref(5)
+const sampleKube = ref(15)
+async function loadIntervals() {
+  try { const r = await api.get('/api/admin/ingest-intervals'); sampleHost.value = r.host; sampleKube.value = r.kube } catch {}
+}
+async function saveIntervals() {
+  msg.value = ''
+  const host = Number(sampleHost.value), kube = Number(sampleKube.value)
+  if (!Number.isFinite(host) || host < 1 || host > 3600) { msg.value = 'Host interval must be 1–3600 seconds.'; return }
+  if (!Number.isFinite(kube) || kube < 5 || kube > 3600) { msg.value = 'Cluster interval must be 5–3600 seconds.'; return }
+  try { await api.post('/api/admin/ingest-intervals', { host, kube }); msg.value = `✓ Sampling: hosts every ${host}s, clusters every ${kube}s (agents apply on their next push).` }
+  catch (e) { msg.value = `Failed (${e.status}).` }
+}
+
 const { loaded, reload: load } = useCached({
   key: () => 'data-retention',
   load: () => api.get('/api/admin/data'),
@@ -35,7 +50,7 @@ const { loaded, reload: load } = useCached({
   },
   onError: () => { page.value = null },
 })
-onMounted(() => { if (isAdmin.value) load() })
+onMounted(() => { if (isAdmin.value) { load(); loadIntervals() } })
 
 // Config-DB log tables that have an auto-cleanup window (editable).
 const configLogTables = computed(() => (config.value?.tables || []).filter((t) => t.retention_days != null))
@@ -153,6 +168,21 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
               </div>
             </div>
             <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />Eviction drops the oldest time chunks first — shrinking how far back history reaches. Raw &amp; rollup tiers are evicted oldest-first regardless of their per-tier window above.</p>
+          </div>
+
+          <!-- sampling cadence (hub-decided push interval) -->
+          <div class="space-y-3 rounded-xl border border-line bg-surface p-4">
+            <div class="text-sm font-semibold text-fg">Sampling cadence</div>
+            <p class="text-xs text-faint">How often agents push metrics — decided here by the hub and applied on each agent's next push (no redeploy). Lower = finer “realtime”, but more raw rows to store.</p>
+            <div class="flex flex-wrap items-end gap-4">
+              <label class="text-xs text-muted">Hosts (seconds)
+                <input v-model.number="sampleHost" type="number" min="1" max="3600" class="mt-1 block w-24 rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
+              </label>
+              <label class="text-xs text-muted">Clusters (seconds)
+                <input v-model.number="sampleKube" type="number" min="5" max="3600" class="mt-1 block w-24 rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
+              </label>
+              <button @click="saveIntervals" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Save</button>
+            </div>
           </div>
 
           <!-- tier tables (grouped, two columns) -->

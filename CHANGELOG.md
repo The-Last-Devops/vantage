@@ -9,7 +9,15 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
-## [2.3.25] — 2026-07-08
+## [2.3.26] — 2026-07-08
+
+### Changed
+- **Push cadence is now hub-decided and tunable** (instead of a fixed local `INTERVAL`).
+  The hub returns the interval in each ingest ack and agents obey it on their next push.
+  New defaults: **hosts every 5s** ("realtime" — previously effectively ~60s, which made
+  the raw tier duplicate the 1-minute rollup), **Kubernetes clusters every 15s** (apiserver
+  scrapes are heavier). Tune both under **Settings → Data & retention → Sampling cadence**
+  (admin) — no agent redeploy needed. Backed by `GET/POST /api/admin/ingest-intervals`.
 
 ### Fixed
 - **Data & retention now lists the Kubernetes tiers.** The backend already tracked

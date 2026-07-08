@@ -152,9 +152,14 @@ pub async fn ingest(
         .await;
     }
 
+    // Push cadence is HUB-decided (a setting, default 5s "realtime"), so ops can retune
+    // it centrally without redeploying agents. Agents obey next_interval_secs each push.
+    let next = crate::settings::get(&state.config, "ingest_interval_secs", 5_i64)
+        .await
+        .clamp(1, 3600) as u64;
     Ok(Json(IngestAck {
         ok: true,
-        next_interval_secs: 0, // 0 => agent keeps its current interval
+        next_interval_secs: next,
         // Advertise the hub's build so `auto`-channel agents can follow it.
         hub_build: Some(env!("GIT_SHA").to_string()),
     }))
@@ -306,9 +311,14 @@ pub async fn ingest_kube(
         }
     }
 
+    // Cluster scrape cadence is hub-decided too, but defaults higher (15s) — hitting the
+    // kube-apiserver + metrics-server every few seconds on a big cluster is expensive.
+    let next = crate::settings::get(&state.config, "kube_interval_secs", 15_i64)
+        .await
+        .clamp(5, 3600) as u64;
     Ok(Json(IngestAck {
         ok: true,
-        next_interval_secs: 0,
+        next_interval_secs: next,
         hub_build: Some(env!("GIT_SHA").to_string()),
     }))
 }

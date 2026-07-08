@@ -145,6 +145,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/users/{id}/memberships", get(api::user_memberships))
         .route("/api/admin/data", get(api::data_stats))
+        .route(
+            "/api/admin/ingest-intervals",
+            get(api::get_ingest_intervals).post(api::set_ingest_intervals),
+        )
         .route("/api/admin/logs", get(api::admin_logs))
         .route("/api/admin/retention", post(api::set_retention))
         .route("/api/admin/data-cap", post(api::set_data_cap))

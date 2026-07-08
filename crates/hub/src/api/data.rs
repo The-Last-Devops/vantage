@@ -21,6 +21,47 @@ pub async fn data_stats(
     }))
 }
 
+/// Hub-decided push cadence (seconds): `host` = node/host metrics ("realtime"),
+/// `kube` = k8s cluster scrape (heavier, so higher). Agents obey these via IngestAck.
+#[derive(Serialize, Deserialize)]
+pub struct IngestIntervals {
+    pub host: i64,
+    pub kube: i64,
+}
+
+pub async fn get_ingest_intervals(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<IngestIntervals>, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(Json(IngestIntervals {
+        host: crate::settings::get(&state.config, "ingest_interval_secs", 5_i64).await,
+        kube: crate::settings::get(&state.config, "kube_interval_secs", 15_i64).await,
+    }))
+}
+
+pub async fn set_ingest_intervals(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Json(req): Json<IngestIntervals>,
+) -> Result<StatusCode, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if !(1..=3600).contains(&req.host) || !(5..=3600).contains(&req.kube) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    crate::settings::set(&state.config, "ingest_interval_secs", &req.host)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::settings::set(&state.config, "kube_interval_secs", &req.kube)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Serialize)]
 pub struct LogsPage {
     lines: Vec<String>,
