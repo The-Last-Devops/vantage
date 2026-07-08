@@ -9,6 +9,16 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.17] — 2026-07-08
+
+### Fixed
+- **Hub self-update on Kubernetes was broken by the workspace rename.** The rename sweep
+  wrongly renamed the pod's ServiceAccount `namespace` file and the apiserver path segment
+  to `workspace(s)` (`/var/run/secrets/…/workspace`, `/apis/apps/v1/workspaces/…`), so the
+  auto-update rollout patch always failed — and with `HUB_DEPLOYMENT_NAME` set it never fell
+  back either, so it was stuck. Restored the real Kubernetes names; the `:auto-update`
+  channel rolls the Deployment again.
+
 ## [2.3.16] — 2026-07-08
 
 ### Fixed

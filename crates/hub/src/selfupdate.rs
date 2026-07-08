@@ -101,7 +101,10 @@ async fn trigger_rollout(digest: &str) -> Option<()> {
         );
         return None;
     };
-    let ws = std::fs::read_to_string(format!("{SA_DIR}/workspace")).ok()?;
+    // The pod's own Kubernetes namespace (NOT an RBAC workspace) — this is the
+    // literal ServiceAccount file + apiserver path, which the workspace rename must
+    // not touch.
+    let namespace = std::fs::read_to_string(format!("{SA_DIR}/namespace")).ok()?;
     let token = std::fs::read_to_string(format!("{SA_DIR}/token")).ok()?;
     let ca = std::fs::read(format!("{SA_DIR}/ca.crt")).ok()?;
     let client = reqwest::Client::builder()
@@ -110,8 +113,8 @@ async fn trigger_rollout(digest: &str) -> Option<()> {
         .build()
         .ok()?;
     let url = format!(
-        "https://{host}:{port}/apis/apps/v1/workspaces/{}/deployments/{deployment}",
-        ws.trim()
+        "https://{host}:{port}/apis/apps/v1/namespaces/{}/deployments/{deployment}",
+        namespace.trim()
     );
     let body = serde_json::json!({
         "spec": { "template": { "metadata": { "annotations": { DIGEST_ANNOTATION: digest } } } }
