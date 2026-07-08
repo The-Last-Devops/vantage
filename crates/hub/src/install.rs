@@ -2,7 +2,8 @@
 //! in "Add system" are fully self-contained against the hub's own domain — no
 //! GHCR chart publish or `git clone` needed.
 //!
-//!   GET /k8s/agent.yaml?key=&cluster=&ns=   → a ready-to-apply DaemonSet manifest
+//!   GET /k8s/agent.yaml?key=&cluster=&ns=   → ready-to-apply manifest: the per-node
+//!                                             DaemonSet + the one-per-cluster collector
 //!   GET /install.sh                          → native-binary installer (curl | sh)
 //!
 //! Both are public (kubectl / curl fetch them without a session); they only echo

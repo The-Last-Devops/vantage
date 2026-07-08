@@ -1,5 +1,9 @@
-# vantage agent — DaemonSet (one pod per node, reports host metrics).
-# Rendered by the hub; apply directly:
+# vantage agent — FULL Kubernetes coverage in one manifest:
+#   • DaemonSet          (one pod per node) → host metrics per node
+#   • Deployment         (one per cluster)  → k8s object + per-container stats
+#                                             (namespaces / deployments / pods /
+#                                              containers with CPU-RAM + labels)
+# Rendered by the hub; apply directly (installs BOTH):
 #   kubectl apply -f "<HUB_URL>/pub/agent.yaml?key=YOUR_KEY&cluster=YOUR_CLUSTER"
 ---
 apiVersion: v1
@@ -68,3 +72,82 @@ spec:
       volumes:
         - name: host-root
           hostPath: { path: / }
+---
+# ── Cluster-scoped collector (ONE per cluster) ───────────────────────────────
+# Reports k8s object + per-container stats (CPU/memory from metrics-server, pod
+# metadata + labels) so the Cluster page can break usage down by namespace /
+# workload / label. Reads the kube-apiserver READ-ONLY via the ServiceAccount
+# below; reuses the same api-key Secret as the DaemonSet above.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vantage-cluster-agent
+  namespace: <NAMESPACE>
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vantage-cluster-agent
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+  # replicasets: resolve a pod's owning workload (pod -> ReplicaSet -> Deployment).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # metrics.k8s.io (metrics-server): per-container CPU/memory. Optional — the agent
+  # degrades gracefully if absent — but grant it so usage populates when installed.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vantage-cluster-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vantage-cluster-agent
+subjects:
+  - kind: ServiceAccount
+    name: vantage-cluster-agent
+    namespace: <NAMESPACE>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vantage-cluster-agent
+  namespace: <NAMESPACE>
+  labels: { app: vantage-cluster-agent }
+spec:
+  replicas: 1                        # exactly one collector per cluster
+  selector:
+    matchLabels: { app: vantage-cluster-agent }
+  template:
+    metadata:
+      labels: { app: vantage-cluster-agent }
+    spec:
+      serviceAccountName: vantage-cluster-agent
+      containers:
+        - name: agent
+          image: "<IMAGE>"
+          imagePullPolicy: Always
+          env:
+            - name: HUB_URL
+              value: "<HUB_URL>"
+            - name: AGENT_KIND
+              value: "k8s-cluster"
+            - name: CLUSTER
+              value: "<CLUSTER>"
+            - name: AUTO_UPDATE
+              value: "<AUTO_UPDATE>"
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vantage-agent
+                  key: api-key
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }

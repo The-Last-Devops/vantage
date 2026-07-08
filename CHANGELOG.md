@@ -9,6 +9,17 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.18] — 2026-07-08
+
+### Changed
+- **`/pub/agent.yaml` now installs full Kubernetes coverage in one manifest** — both the
+  per-node DaemonSet (host metrics) **and** the one-per-cluster collector Deployment
+  (`AGENT_KIND=k8s-cluster`: namespace / deployment / pod / per-container CPU-RAM + labels,
+  with the ServiceAccount + ClusterRole it needs). A single
+  `kubectl apply -f "<hub>/pub/agent.yaml?key=…&cluster=…"` now yields the Cluster page's
+  deployment/pod stats — previously it deployed only the node DaemonSet, so the Cluster
+  view stayed empty until the separate `deploy/k8s/cluster-agent.yaml` was applied by hand.
+
 ## [2.3.17] — 2026-07-08
 
 ### Fixed
