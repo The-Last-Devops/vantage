@@ -9,6 +9,16 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.13] — 2026-07-08
+
+### Fixed
+- **Upgrades no longer break on existing databases.** The 2.3.12 "namespace → workspace"
+  rename rewrote already-applied migrations in place, so a hub with a pre-existing config
+  database refused to start (`migration 1 was previously applied but has been modified`).
+  Migrations `0001`–`0017` are restored to their original form (checksums match again) and
+  the rename now ships as a new forward migration (`config/0027`), so both fresh and
+  existing databases converge on the workspace schema with no manual intervention.
+
 ## [2.3.12] — 2026-07-08
 
 ### Added

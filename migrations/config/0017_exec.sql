@@ -2,8 +2,8 @@
 -- Phase 1: schema only. No exec path exists yet; these columns/tables are inert
 -- until the tunnel + SSH bridge land. Everything defaults to OFF.
 
--- RBAC: a dedicated exec capability, separate from the workspace role.
--- A user may open a shell only if owner of the system's workspace AND can_exec
+-- RBAC: a dedicated exec capability, separate from the namespace role.
+-- A user may open a shell only if owner of the system's namespace AND can_exec
 -- (system admin bypasses). "Edit config" never implies "shell into prod".
 ALTER TABLE memberships
     ADD COLUMN can_exec BOOLEAN NOT NULL DEFAULT false;
@@ -25,7 +25,7 @@ CREATE TABLE exec_sessions (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     system_id     UUID REFERENCES systems(id)    ON DELETE SET NULL,
     system_name   TEXT NOT NULL,                  -- snapshot
-    workspace_id  UUID REFERENCES workspaces(id) ON DELETE SET NULL,
+    namespace_id  UUID REFERENCES namespaces(id) ON DELETE SET NULL,
     user_id       UUID REFERENCES users(id)      ON DELETE SET NULL,
     user_email    TEXT NOT NULL,                  -- snapshot
     transport     TEXT NOT NULL,                  -- 'ssh' (Tier 1) | 'nsenter' (Tier 2)
@@ -36,7 +36,7 @@ CREATE TABLE exec_sessions (
     status        TEXT NOT NULL DEFAULT 'active', -- active | closed | killed | error
     error         TEXT
 );
-CREATE INDEX idx_exec_sessions_workspace ON exec_sessions(workspace_id);
+CREATE INDEX idx_exec_sessions_namespace ON exec_sessions(namespace_id);
 CREATE INDEX idx_exec_sessions_started   ON exec_sessions(started_at DESC);
 CREATE INDEX idx_exec_sessions_status    ON exec_sessions(status);
 
