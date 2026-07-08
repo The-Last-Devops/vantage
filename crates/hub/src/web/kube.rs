@@ -23,6 +23,9 @@ pub struct AggQuery {
     pub by: Option<String>,
     /// Label key to group by when `by=label` (e.g. "app").
     pub label: Option<String>,
+    /// Optional namespace to scope the whole aggregate to (disambiguates workloads
+    /// that share a name across namespaces).
+    pub ns: Option<String>,
 }
 
 #[derive(Serialize, sqlx::FromRow)]
@@ -31,6 +34,9 @@ pub struct AggRow {
     #[sqlx(rename = "grp")]
     #[serde(rename = "group")]
     pub grp: Option<String>,
+    /// The namespace this group belongs to — set for `by=workload` (so same-named
+    /// workloads in different namespaces stay distinct); null otherwise.
+    pub namespace: Option<String>,
     pub cpu_millicores: f64,
     pub mem_bytes: f64,
     pub pods: i64,
@@ -58,14 +64,9 @@ pub async fn kube_aggregate(
         return Err(StatusCode::FORBIDDEN);
     }
     let by = q.by.as_deref().unwrap_or("namespace");
-    // Grouping expressions are chosen from a fixed allowlist — never interpolated
-    // from user input. The label VALUE is bound ($2), not interpolated.
-    let grp_expr = match by {
-        "namespace" => "namespace",
-        "workload" => "CASE WHEN workload = '' THEN '—' ELSE workload_kind || '/' || workload END",
-        "label" => "COALESCE(labels ->> $2, '—')",
-        _ => return Err(StatusCode::BAD_REQUEST),
-    };
+    if !matches!(by, "namespace" | "workload" | "label") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     if by == "label" && q.label.as_deref().unwrap_or("").is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -78,23 +79,46 @@ pub async fn kube_aggregate(
             .map_err(internal)?;
     let as_of_ts = as_of.and_then(|r| r.0).map(|t| t.timestamp());
 
-    let sql = format!(
-        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = $1) \
-         SELECT {grp_expr} AS grp, \
-                sum(cpu_millicores)::float8 AS cpu_millicores, \
-                sum(mem_bytes)::float8 AS mem_bytes, \
-                count(DISTINCT pod)::int8 AS pods, \
-                count(*)::int8 AS containers, \
-                sum(restarts)::int8 AS restarts \
-         FROM kube_container_stats c, latest \
-         WHERE c.system_id = $1 AND c.time = latest.t \
-         GROUP BY grp ORDER BY cpu_millicores DESC NULLS LAST LIMIT 500"
+    // Built with QueryBuilder so the label key + namespace filter are bound, never
+    // interpolated. Grouping columns come from a fixed allowlist above.
+    let mut qb = sqlx::QueryBuilder::new(
+        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = ",
     );
-    let mut query = sqlx::query_as::<_, AggRow>(&sql).bind(id);
-    if by == "label" {
-        query = query.bind(q.label.unwrap_or_default());
+    qb.push_bind(id).push(") SELECT ");
+    match by {
+        "namespace" => {
+            qb.push("namespace AS grp, NULL::text AS namespace");
+        }
+        "workload" => {
+            // Keep same-named workloads in different namespaces distinct.
+            qb.push("(CASE WHEN workload = '' THEN '—' ELSE workload_kind || '/' || workload END) AS grp, namespace AS namespace");
+        }
+        _ => {
+            qb.push("COALESCE(labels ->> ")
+                .push_bind(q.label.clone().unwrap_or_default())
+                .push(", '—') AS grp, NULL::text AS namespace");
+        }
     }
-    let groups = query.fetch_all(&state.data).await.map_err(internal)?;
+    qb.push(
+        ", sum(cpu_millicores)::float8 AS cpu_millicores, sum(mem_bytes)::float8 AS mem_bytes, \
+         count(DISTINCT pod)::int8 AS pods, count(*)::int8 AS containers, sum(restarts)::int8 AS restarts \
+         FROM kube_container_stats c, latest WHERE c.system_id = ",
+    );
+    qb.push_bind(id).push(" AND c.time = latest.t");
+    if let Some(ns) = q.ns.filter(|s| !s.is_empty()) {
+        qb.push(" AND namespace = ").push_bind(ns);
+    }
+    // Group by the display value; workload also groups by namespace so it isn't merged.
+    match by {
+        "workload" => qb.push(" GROUP BY namespace, grp"),
+        _ => qb.push(" GROUP BY grp"),
+    };
+    qb.push(" ORDER BY cpu_millicores DESC NULLS LAST LIMIT 500");
+    let groups = qb
+        .build_query_as::<AggRow>()
+        .fetch_all(&state.data)
+        .await
+        .map_err(internal)?;
 
     Ok(Json(AggResponse {
         as_of: as_of_ts,
@@ -233,4 +257,138 @@ pub async fn kube_series(
         out.mem_bytes.push(r.mem);
     }
     Ok(Json(out))
+}
+
+/// Cap on overlaid series so a big cluster doesn't render hundreds of lines.
+const SERIES_BY_MAX_GROUPS: usize = 16;
+
+#[derive(Serialize)]
+pub struct GroupSeries {
+    pub name: String,
+    /// CPU (millicores) per bucket, aligned to `t`; null where the group had no data.
+    pub cpu_millicores: Vec<Option<f64>>,
+    /// Memory (bytes) per bucket, aligned to `t`.
+    pub mem_bytes: Vec<Option<f64>>,
+}
+
+#[derive(Serialize)]
+pub struct SeriesByResponse {
+    pub t: Vec<i64>,
+    /// True if some low-usage groups were dropped to the top-N cap.
+    pub truncated: bool,
+    pub groups: Vec<GroupSeries>,
+}
+
+/// GET /api/systems/:id/kube/series-by?by=namespace|workload|label&label=&ns=&range=
+/// — one time series **per group** (overlaid on the chart, like the fleet overlay).
+/// Bounded to the top-N groups by total usage so a large cluster stays readable.
+pub async fn kube_series_by(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+    Query(q): Query<AggQuery>,
+    Query(f): Query<KubeFilter>,
+) -> Result<Json<SeriesByResponse>, StatusCode> {
+    if !can_view_system(&state, &user, id).await? {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let by = q.by.as_deref().unwrap_or("namespace");
+    if !matches!(by, "namespace" | "workload" | "label") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if by == "label" && q.label.as_deref().unwrap_or("").is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let (_s, _tc, interval, bucket) = chart_tier(&f.range);
+
+    // Per (bucket, group): sum per snapshot, then average across snapshots in the bucket.
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT tb, grp, avg(scpu)::float8 AS cpu, avg(smem)::float8 AS mem FROM ( \
+         SELECT time_bucket(",
+    );
+    qb.push_bind(bucket).push(", time) AS tb, time, ");
+    match by {
+        "namespace" => {
+            qb.push("namespace AS grp");
+        }
+        "workload" => {
+            // Qualify with namespace so same-named workloads are separate lines.
+            qb.push("(namespace || ' · ' || workload_kind || '/' || workload) AS grp");
+        }
+        _ => {
+            qb.push("COALESCE(labels ->> ")
+                .push_bind(q.label.clone().unwrap_or_default())
+                .push(", '—') AS grp");
+        }
+    }
+    qb.push(", sum(cpu_millicores) AS scpu, sum(mem_bytes) AS smem FROM kube_container_stats WHERE system_id = ");
+    qb.push_bind(id)
+        .push(format!(" AND time > now() - interval '{interval}'"));
+    if let Some(ns) = q.ns.filter(|s| !s.is_empty()) {
+        qb.push(" AND namespace = ").push_bind(ns);
+    }
+    qb.push(" GROUP BY tb, time, grp) s GROUP BY tb, grp ORDER BY tb LIMIT 20000");
+
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        tb: chrono::DateTime<chrono::Utc>,
+        grp: Option<String>,
+        cpu: f64,
+        mem: f64,
+    }
+    let rows = qb
+        .build_query_as::<Row>()
+        .fetch_all(&state.data)
+        .await
+        .map_err(internal)?;
+
+    // Distinct sorted bucket axis + its index.
+    let mut times: Vec<i64> = rows.iter().map(|r| r.tb.timestamp()).collect();
+    times.sort_unstable();
+    times.dedup();
+    let idx: std::collections::HashMap<i64, usize> =
+        times.iter().enumerate().map(|(i, &t)| (t, i)).collect();
+    let n = times.len();
+
+    // Accumulate per group, tracking total for top-N ranking.
+    struct Acc {
+        cpu: Vec<Option<f64>>,
+        mem: Vec<Option<f64>>,
+        total: f64,
+    }
+    let mut groups: std::collections::HashMap<String, Acc> = std::collections::HashMap::new();
+    for r in &rows {
+        let name = r.grp.clone().unwrap_or_else(|| "—".into());
+        let a = groups.entry(name).or_insert_with(|| Acc {
+            cpu: vec![None; n],
+            mem: vec![None; n],
+            total: 0.0,
+        });
+        if let Some(&i) = idx.get(&r.tb.timestamp()) {
+            a.cpu[i] = Some(r.cpu);
+            a.mem[i] = Some(r.mem);
+            a.total += r.cpu;
+        }
+    }
+    let mut ranked: Vec<(String, Acc)> = groups.into_iter().collect();
+    ranked.sort_by(|a, b| {
+        b.1.total
+            .partial_cmp(&a.1.total)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let truncated = ranked.len() > SERIES_BY_MAX_GROUPS;
+    ranked.truncate(SERIES_BY_MAX_GROUPS);
+
+    Ok(Json(SeriesByResponse {
+        t: times,
+        truncated,
+        groups: ranked
+            .into_iter()
+            .map(|(name, a)| GroupSeries {
+                name,
+                cpu_millicores: a.cpu,
+                mem_bytes: a.mem,
+            })
+            .collect(),
+    }))
 }

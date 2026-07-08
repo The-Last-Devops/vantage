@@ -288,6 +288,7 @@ async fn main() -> Result<()> {
             get(web::kube_containers),
         )
         .route("/api/systems/{id}/kube/series", get(web::kube_series))
+        .route("/api/systems/{id}/kube/series-by", get(web::kube_series_by))
         .route("/api/monitors", get(web::list_monitors))
         // SPA: anything not matched above is served from the embedded Vue build.
         .fallback(spa::handler)

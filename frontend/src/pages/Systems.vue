@@ -233,7 +233,9 @@ const fleetCharts = computed(() => {
 const { loaded, reload: load } = useCached({
   key: () => 'systems',
   load: () => api.get('/api/systems'),
-  apply: (list) => { servers.value = list; error.value = '' },
+  // k8s clusters (kind 'k8s-cluster') are NOT hosts — they live on their own
+  // Clusters page (/clusters), not in this fleet list.
+  apply: (list) => { servers.value = list.filter((s) => s.kind !== 'k8s-cluster'); error.value = '' },
   // Keep showing existing data on a transient poll failure; only surface an
   // error before the first successful load.
   onError: () => { if (!servers.value.length) error.value = 'Failed to load systems' },

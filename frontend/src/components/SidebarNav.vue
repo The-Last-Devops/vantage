@@ -29,9 +29,10 @@ const groups = computed(() =>
       key: 'infra', label: 'Infrastructure', icon: 'server',
       // `owns` = extra route names (e.g. detail pages) that belong to this group
       // so it stays highlighted + expanded when you're on them.
-      owns: ['system'],
+      owns: ['system', 'cluster'],
       children: [
         { label: 'All', name: 'systems', icon: 'fleet', owns: ['system'] },
+        { label: 'Clusters', name: 'clusters', icon: 'server', owns: ['cluster'] },
         { label: 'Issues', name: 'attention', icon: 'alert-triangle' },
       ],
     },

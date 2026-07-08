@@ -9,7 +9,21 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
-## [2.3.19] — 2026-07-08
+## [2.3.20] — 2026-07-08
+
+### Added
+- **Clusters page** (`/clusters`, under Infrastructure in the nav) lists Kubernetes clusters
+  separately from hosts — a `k8s-cluster` system no longer clutters Infrastructure → All.
+- **Per-group overlay on the Cluster charts** — with no group focused, CPU/memory draw one
+  line per namespace / workload / label (top 16 by usage, like the fleet host overlay);
+  hover a line for its name, click a table row to focus a single group.
+- **Namespace scope selector** on the Cluster page. Workloads are namespace-qualified so
+  deployments that share a name across namespaces stay distinct (rows carry their namespace,
+  and drill-down filters by namespace + workload).
+
+### Fixed
+- Cluster charts no longer stretch a sparse or empty series across the whole panel — the
+  x-axis now spans the selected time window (like the host charts).
 
 ### Fixed
 - **Re-enrolling a host no longer creates duplicate rows.** Systems were keyed by
