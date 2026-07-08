@@ -9,6 +9,8 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.12] — 2026-07-08
+
 ### Added
 - **Docker Compose auto-update (opt-in)** — a Watchtower service (behind the `autoupdate`
   profile) that recreates the hub/agent containers when their image tag updates.
@@ -16,12 +18,26 @@ Each released version's section is used verbatim as the GitHub Release notes
   `free`-style memory split (available / buffers / cached / free) from `/proc/meminfo`, and
   the node detail view adds a "Memory breakdown" chart and a "Swap" chart (shown when the
   host has swap). Existing "Memory used %" is unchanged.
+- **Kubernetes cluster stats (agent)** — a new cluster-scoped agent collector queries the
+  kube-apiserver (read-only, in-cluster ServiceAccount) and pushes per-namespace and
+  per-deployment stats (pod phases, restarts, replica health) to the hub, which stores them
+  as TimescaleDB hypertables. Cluster dashboards land in a later release.
+
+### Changed
+- **"Namespace" RBAC concept renamed to "Workspace"** across the UI and JSON API — the
+  workspace selector, membership roles, and status-page scoping now read "workspace".
+- **Alerts & notify** — search and New moved into a left toolbar, matching the
+  Infrastructure/Services layout.
+- **Services "Down" view rebuilt** — shows an all-clear banner with 30-day stats when
+  nothing is down, or a Down-now table plus recent downtime otherwise.
 
 ### Fixed
 - About page no longer scrolls a short changelog inside a tiny box (cap raised to 70vh).
 - Auto-update degrades gracefully on raw k8s manifests: when the pod lacks the rollout
   RBAC (`HUB_DEPLOYMENT_NAME` + ServiceAccount), it falls back to an in-place restart
   instead of silently not updating.
+- Byte-unit chart Y-axis labels (e.g. "10.5 M/s") are no longer clipped (wider gutter).
+- Config-stats query no longer mangled by the workspace rename.
 
 ## [2.3.11] — 2026-06-30
 
