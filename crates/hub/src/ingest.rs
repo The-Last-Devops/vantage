@@ -58,12 +58,14 @@ pub async fn ingest(
         None
     };
 
-    // Auto-register / update the system identified by (key, hostname).
+    // Auto-register / update the system identified by (workspace, hostname) — NOT by
+    // key: re-enrolling a host under a new key must update the SAME row, not create a
+    // duplicate. The owning key_id follows the latest report.
     let system: (Uuid,) = sqlx::query_as(
         "INSERT INTO systems (workspace_id, key_id, name, hostname, kernel, cpu_model, cpu_cores, agent_version, kind, cluster, last_seen) \
          VALUES ($1, $2, $3, $3, $4, $5, $6, $7, $8, $9, now()) \
-         ON CONFLICT (key_id, hostname) DO UPDATE SET \
-            last_seen = now(), kernel = $4, cpu_model = $5, cpu_cores = $6, agent_version = $7, kind = $8, cluster = $9 \
+         ON CONFLICT (workspace_id, hostname) DO UPDATE SET \
+            key_id = EXCLUDED.key_id, last_seen = now(), kernel = $4, cpu_model = $5, cpu_cores = $6, agent_version = $7, kind = $8, cluster = $9 \
          RETURNING id",
     )
     .bind(workspace_id)
@@ -176,12 +178,13 @@ pub async fn ingest_kube(
         report.cluster.as_str()
     };
 
-    // Auto-register / update the cluster as a system of kind 'k8s-cluster'.
+    // Auto-register / update the cluster as a system of kind 'k8s-cluster', keyed by
+    // (workspace, cluster-name) so re-enrolling under a new key updates the same row.
     let system: (Uuid,) = sqlx::query_as(
         "INSERT INTO systems (workspace_id, key_id, name, hostname, kind, cluster, agent_version, last_seen) \
          VALUES ($1, $2, $3, $3, 'k8s-cluster', $3, $4, now()) \
-         ON CONFLICT (key_id, hostname) DO UPDATE SET \
-            last_seen = now(), kind = 'k8s-cluster', cluster = $3, agent_version = $4 \
+         ON CONFLICT (workspace_id, hostname) DO UPDATE SET \
+            key_id = EXCLUDED.key_id, last_seen = now(), kind = 'k8s-cluster', cluster = $3, agent_version = $4 \
          RETURNING id",
     )
     .bind(workspace_id)

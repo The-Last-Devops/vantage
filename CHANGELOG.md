@@ -9,6 +9,17 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.19] — 2026-07-08
+
+### Fixed
+- **Re-enrolling a host no longer creates duplicate rows.** Systems were keyed by
+  `(key_id, hostname)`, so re-adding a cluster/host with a freshly-minted enrollment key
+  (the "Add system" flow mints one each time) registered every node again as a NEW row and
+  left the old ones behind as offline ghosts. Systems are now identified by
+  `(workspace_id, hostname)` — a re-enroll updates the existing row and its owning key
+  follows the latest report. Migration `config/0028` collapses existing duplicates (keeps
+  the most-recently-seen row per host).
+
 ## [2.3.18] — 2026-07-08
 
 ### Changed

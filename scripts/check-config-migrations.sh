@@ -63,4 +63,29 @@ for idx in idx_systems_workspace idx_monitors_workspace idx_exec_sessions_worksp
 done
 assert "default workspace row seeded" "$(q "SELECT count(*) FROM workspaces WHERE name='default';")" "1"
 
+# systems identity is now (workspace_id, hostname), not (key_id, hostname) — 0028.
+assert "systems_ws_host index exists" "$(q "SELECT to_regclass('systems_ws_host') IS NOT NULL;")" "t"
+assert "systems_key_host index gone"  "$(q "SELECT to_regclass('systems_key_host') IS NULL;")" "t"
+
+echo "asserting re-enroll under a new key does NOT duplicate the host…"
+docker exec -i "$CID" psql -v ON_ERROR_STOP=1 -q -U vantage -d vantage_config >/dev/null <<'SQL'
+WITH ws AS (SELECT id FROM workspaces WHERE name='default')
+INSERT INTO api_keys (workspace_id, name, key) SELECT ws.id, 'k1', 'secret-k1' FROM ws;
+WITH ws AS (SELECT id FROM workspaces WHERE name='default')
+INSERT INTO api_keys (workspace_id, name, key) SELECT ws.id, 'k2', 'secret-k2' FROM ws;
+-- first enrollment under k1
+INSERT INTO systems (workspace_id, key_id, name, hostname, kind)
+SELECT w.id, k.id, 'node-a', 'node-a', 'node'
+FROM workspaces w, api_keys k WHERE w.name='default' AND k.name='k1'
+ON CONFLICT (workspace_id, hostname) DO UPDATE SET key_id = EXCLUDED.key_id;
+-- re-enroll SAME hostname under k2 (simulates "add again" with a new key)
+INSERT INTO systems (workspace_id, key_id, name, hostname, kind)
+SELECT w.id, k.id, 'node-a', 'node-a', 'node'
+FROM workspaces w, api_keys k WHERE w.name='default' AND k.name='k2'
+ON CONFLICT (workspace_id, hostname) DO UPDATE SET key_id = EXCLUDED.key_id;
+SQL
+assert "no duplicate host row after re-enroll" "$(q "SELECT count(*) FROM systems WHERE hostname='node-a';")" "1"
+assert "host row now owned by the new key (k2)" \
+  "$(q "SELECT k.name FROM systems s JOIN api_keys k ON k.id=s.key_id WHERE s.hostname='node-a';")" "k2"
+
 [ "$fail" = 0 ] && echo "PASS — config migrations converge on workspace schema" || { echo "FAILED"; exit 1; }
