@@ -45,7 +45,7 @@ async function toggleDocker(s) {
   }
 }
 const sortState = reactive({ col: 'name', dir: 'asc' })
-const KIND_LABEL = { node: 'Node', docker: 'Docker', k8s: 'K8s' }
+const KIND_LABEL = { node: 'Node', docker: 'Docker', k8s: 'K8s', 'k8s-cluster': 'Cluster' }
 let timer = null
 
 const r = (x) => Math.round(x || 0)
@@ -242,9 +242,12 @@ onMounted(() => { load(); loadFleet(); loadThresholds(); timer = setInterval(() 
 onUnmounted(() => clearInterval(timer))
 watch(frange, loadFleet)
 
-// a k8s row IS a node → open its node detail (with cluster breadcrumb), not the cluster aggregate
+// A k8s NODE row IS a node → open its node detail (with cluster breadcrumb). A
+// k8s-CLUSTER row is the cluster aggregate → its own Cluster page (namespace /
+// workload / label breakdown, CPU/RAM, pod drill-down).
 const detailLink = (s) => {
   const n = encodeURIComponent(s.name)
+  if (s.kind === 'k8s-cluster') return `/cluster/${s.id}?name=${n}`
   if (s.kind === 'k8s') return `/system/${s.id}?type=node&name=${n}&parent=${encodeURIComponent(s.cluster || '')}&ptype=k8s`
   return `/system/${s.id}?type=${s.kind}&name=${n}`
 }

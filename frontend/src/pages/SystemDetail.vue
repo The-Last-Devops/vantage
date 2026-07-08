@@ -219,7 +219,7 @@ const statusDot = computed(() => (statusUp.value === null ? 'bg-faint animate-pu
 async function reload() {
   error.value = ''
   // a k8s cluster has its own detail page (namespace/workload/label breakdown)
-  if (type.value === 'k8s') { router.replace({ name: 'cluster', params: { id: id.value }, query: { ...route.query } }); return }
+  if (type.value === 'k8s' || type.value === 'k8s-cluster') { router.replace({ name: 'cluster', params: { id: id.value }, query: { ...route.query } }); return }
   if (type.value === 'container' || type.value === 'containers') return loadContainers()
   await loadMetrics()
   if (type.value === 'docker') await loadContainers()

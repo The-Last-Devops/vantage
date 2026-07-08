@@ -9,6 +9,14 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.16] — 2026-07-08
+
+### Fixed
+- **Opening a Kubernetes cluster from Infrastructure now reaches the Cluster page.**
+  A cluster is a system of kind `k8s-cluster`; the list linked it like a plain host
+  (`?type=k8s-cluster`) and the redirect only matched `k8s`, so it fell through to an
+  empty host view. The row now links straight to `/cluster/:id` and is labelled "Cluster".
+
 ## [2.3.15] — 2026-07-08
 
 ### Changed
