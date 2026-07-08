@@ -152,9 +152,12 @@ async fn collect(
     let pod_items: Vec<PodItem> = list_all(client, api_base, token, "/api/v1/pods").await?;
     let deploy_items: Vec<DeployItem> =
         list_all(client, api_base, token, "/apis/apps/v1/deployments").await?;
-    // ReplicaSets let us walk pod → RS → Deployment for the owning workload.
+    // ReplicaSets let us walk pod → RS → Deployment for the owning workload. Soft:
+    // if the ServiceAccount lacks `replicasets` RBAC (e.g. agent upgraded before the
+    // ClusterRole), degrade to showing the ReplicaSet as the workload rather than
+    // failing the whole snapshot.
     let rs_items: Vec<ReplicaSetItem> =
-        list_all(client, api_base, token, "/apis/apps/v1/replicasets").await?;
+        list_soft(client, api_base, token, "/apis/apps/v1/replicasets").await;
     // Per-container CPU/memory from metrics-server. Optional: many clusters don't
     // run it, so treat any failure (404 / not installed) as "no usage" rather than
     // failing the whole snapshot — the metadata is still worth reporting.

@@ -40,9 +40,15 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "pods"]
     verbs: ["get", "list", "watch"]
+  # replicasets: needed to resolve a pod's owning workload (pod -> ReplicaSet -> Deployment).
   - apiGroups: ["apps"]
-    resources: ["deployments"]
+    resources: ["deployments", "replicasets"]
     verbs: ["get", "list", "watch"]
+  # metrics.k8s.io (metrics-server): per-container CPU/memory usage. Optional — the agent
+  # degrades gracefully if it's absent — but grant it so usage populates when installed.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

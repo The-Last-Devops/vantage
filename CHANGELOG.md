@@ -9,6 +9,18 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.15] — 2026-07-08
+
+### Changed
+- **k8s cluster-agent RBAC** (`deploy/k8s/cluster-agent.yaml`) now also grants read on
+  `replicasets` (to resolve pod → ReplicaSet → Deployment) and `metrics.k8s.io/pods`
+  (per-container CPU/memory). Re-apply the manifest when upgrading the cluster agent.
+
+### Fixed
+- The cluster agent degrades gracefully when it lacks `replicasets` RBAC (e.g. the agent
+  is upgraded before the ClusterRole): it falls back to showing the ReplicaSet as the
+  workload instead of failing the whole snapshot. metrics-server was already optional.
+
 ## [2.3.14] — 2026-07-08
 
 ### Added
