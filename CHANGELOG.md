@@ -9,7 +9,19 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
-## [2.3.21] — 2026-07-08
+## [2.3.22] — 2026-07-08
+
+### Added
+- **Logs page** (Settings → Logs, admin-only) — recent hub logs from an in-memory ring
+  buffer (~2000 lines), with a filter box, auto-refresh, and Copy / Download, so you can
+  grab logs to debug from the UI without `kubectl logs`.
+- **Kubernetes server version on the Clusters list** — the cluster agent reads the
+  apiserver `/version` (e.g. `v1.29.4`) and the cluster card shows it, with the Vantage
+  agent version labelled separately (it was previously an unlabelled version badge).
+
+### Changed
+- Hub logs are written without ANSI colour codes (cleaner in `kubectl logs` and the new
+  Logs page).
 
 ### Fixed
 - **Cluster overlay charts rendered empty (500 error).** The per-group series query bound

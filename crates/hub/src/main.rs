@@ -20,6 +20,7 @@ mod db;
 mod exec_crypto;
 mod ingest;
 mod install;
+mod logbuf;
 mod masterkey;
 mod mcp;
 mod net_guard;
@@ -63,11 +64,16 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Tee formatted logs to stdout AND an in-memory ring buffer the admin Logs page
+    // reads (see logbuf.rs). ANSI off so buffered lines are clean text to copy.
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,sqlx=warn".into()),
         )
+        .with_ansi(false)
+        .with_writer(std::io::stdout.and(logbuf::MakeBuf))
         .init();
 
     // CLI subcommands (operational, one-shot — exit instead of serving).
@@ -139,6 +145,7 @@ async fn main() -> Result<()> {
         )
         .route("/api/users/{id}/memberships", get(api::user_memberships))
         .route("/api/admin/data", get(api::data_stats))
+        .route("/api/admin/logs", get(api::admin_logs))
         .route("/api/admin/retention", post(api::set_retention))
         .route("/api/admin/data-cap", post(api::set_data_cap))
         .route(

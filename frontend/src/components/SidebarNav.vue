@@ -60,6 +60,7 @@ const groups = computed(() =>
         { label: 'Workspace', name: 'workspaces', icon: 'globe', owns: ['workspace'] },
         { label: 'Members', name: 'members', icon: 'user', admin: true },
         { label: 'Audit', name: 'audit', icon: 'logs', admin: true },
+        { label: 'Logs', name: 'logs', icon: 'terminal', admin: true },
         { label: 'Data & retention', name: 'data', icon: 'disk', admin: true },
         { label: 'Backup', name: 'backup', icon: 'archive', admin: true },
         { label: 'Security', name: 'security', icon: 'shield' },

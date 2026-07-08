@@ -21,6 +21,22 @@ pub async fn data_stats(
     }))
 }
 
+#[derive(Serialize)]
+pub struct LogsPage {
+    lines: Vec<String>,
+}
+
+/// GET /api/admin/logs — recent hub log lines from the in-memory ring buffer, for
+/// debugging from the UI. Admin-only: logs can reveal operational detail.
+pub async fn admin_logs(user: CurrentUser) -> Result<Json<LogsPage>, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(Json(LogsPage {
+        lines: crate::logbuf::recent(2000),
+    }))
+}
+
 #[derive(Deserialize)]
 pub struct SetCap {
     pub limit_bytes: i64,

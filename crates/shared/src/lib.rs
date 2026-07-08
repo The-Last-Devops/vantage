@@ -161,6 +161,11 @@ pub struct KubeReport {
     /// Agent binary version (CARGO_PKG_VERSION).
     #[serde(default)]
     pub agent_version: String,
+    /// Kubernetes server version from the apiserver `/version` (`gitVersion`, e.g.
+    /// "v1.29.4"). Empty if unavailable. This is the CLUSTER's k8s version, distinct
+    /// from `agent_version`.
+    #[serde(default)]
+    pub k8s_version: String,
     /// One entry per Kubernetes namespace, with pod-phase tallies.
     #[serde(default)]
     pub namespaces: Vec<KubeNamespaceStat>,

@@ -167,7 +167,7 @@ async fn collect(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    Ok(aggregate(
+    let mut report = aggregate(
         ns_items,
         pod_items,
         deploy_items,
@@ -175,7 +175,28 @@ async fn collect(
         metric_items,
         cluster,
         ts,
-    ))
+    );
+    report.k8s_version = fetch_version(client, api_base, token).await;
+    Ok(report)
+}
+
+/// GET the apiserver `/version` → its `gitVersion` (e.g. "v1.29.4"). Soft: returns
+/// "" on any failure, so a version probe never fails the snapshot.
+async fn fetch_version(client: &reqwest::Client, api_base: &str, token: &str) -> String {
+    #[derive(Deserialize, Default)]
+    struct Ver {
+        #[serde(default, rename = "gitVersion")]
+        git_version: String,
+    }
+    let url = format!("{api_base}/version");
+    match client.get(&url).bearer_auth(token).send().await {
+        Ok(r) if r.status().is_success() => r
+            .json::<Ver>()
+            .await
+            .map(|v| v.git_version)
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
 }
 
 /// Fold raw apiserver items into a `KubeReport`. Pure (no I/O) so it's unit-testable.
@@ -255,6 +276,7 @@ fn aggregate(
         ts,
         cluster: cluster.to_string(),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        k8s_version: String::new(), // set by collect() from the apiserver /version
         namespaces: ns.into_values().collect(),
         deployments,
         containers,

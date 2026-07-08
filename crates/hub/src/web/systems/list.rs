@@ -15,6 +15,8 @@ pub struct SystemRow {
     pub cluster: Option<String>,
     pub workspace: String,
     pub agent_version: Option<String>,
+    /// Kubernetes server version — only for `k8s-cluster` systems; null otherwise.
+    pub k8s_version: Option<String>,
     pub kernel: Option<String>,
     pub cpu_model: Option<String>,
     pub cpu_cores: Option<i32>,
@@ -46,9 +48,10 @@ pub async fn list_systems(
         Option<String>,
         Option<i32>,
         Option<chrono::DateTime<chrono::Utc>>,
+        Option<String>,
     )> = sqlx::query_as(
         "SELECT s.id, s.name, s.hostname, s.kind, s.cluster, n.name, s.agent_version, \
-                s.kernel, s.cpu_model, s.cpu_cores, s.last_seen \
+                s.kernel, s.cpu_model, s.cpu_cores, s.last_seen, s.k8s_version \
              FROM systems s JOIN workspaces n ON n.id = s.workspace_id \
              WHERE $1 OR s.workspace_id IN ( \
                 SELECT workspace_id FROM memberships WHERE user_id = $2) \
@@ -93,6 +96,7 @@ pub async fn list_systems(
         cpu_model,
         cpu_cores,
         last_seen,
+        k8s_version,
     ) in servers
     {
         let (cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util) =
@@ -108,6 +112,7 @@ pub async fn list_systems(
             cluster,
             workspace,
             agent_version,
+            k8s_version,
             kernel,
             cpu_model,
             cpu_cores,

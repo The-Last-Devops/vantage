@@ -52,9 +52,11 @@ const open = (s) => router.push({ name: 'cluster', params: { id: s.id }, query: 
             <span class="truncate text-base font-semibold text-fg">{{ c.name }}</span>
             <span class="ml-auto shrink-0 rounded bg-surface2 px-2 py-0.5 text-[11px] text-muted">{{ c.workspace }}</span>
           </div>
-          <div class="flex items-center gap-2 text-xs text-faint">
-            <span>Kubernetes cluster</span>
-            <span v-if="c.agent_version" class="rounded bg-surface2 px-1.5 py-0.5 font-mono">{{ c.agent_version }}</span>
+          <div class="flex flex-wrap items-center gap-2 text-xs text-faint">
+            <span>Kubernetes</span>
+            <span v-if="c.k8s_version" class="rounded bg-surface2 px-1.5 py-0.5 font-mono text-fg" v-tip="'Kubernetes server version'">{{ c.k8s_version }}</span>
+            <span v-else class="text-faint">version unknown</span>
+            <span v-if="c.agent_version" class="ml-auto rounded bg-surface2 px-1.5 py-0.5 font-mono" v-tip="'Vantage agent version'">agent {{ c.agent_version }}</span>
           </div>
         </button>
       </div>

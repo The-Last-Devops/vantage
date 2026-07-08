@@ -30,6 +30,7 @@ import AlertEdit from '../pages/AlertEdit.vue'
 import DataRetention from '../pages/DataRetention.vue'
 import Backup from '../pages/Backup.vue'
 import Audit from '../pages/Audit.vue'
+import Logs from '../pages/Logs.vue'
 import ApiTokens from '../pages/ApiTokens.vue'
 import SshKeys from '../pages/SshKeys.vue'
 import About from '../pages/About.vue'
@@ -64,6 +65,7 @@ const routes = [
   { path: '/data', name: 'data', component: DataRetention, meta: { title: 'Data & retention' } },
   { path: '/backup', name: 'backup', component: Backup, meta: { title: 'Backup & restore' } },
   { path: '/audit', name: 'audit', component: Audit, meta: { title: 'Audit' } },
+  { path: '/logs', name: 'logs', component: Logs, meta: { title: 'Logs' } },
   { path: '/tokens', name: 'tokens', component: ApiTokens, meta: { title: 'API tokens' } },
   { path: '/ssh-keys', name: 'ssh-keys', component: SshKeys, meta: { title: 'SSH keys' } },
   { path: '/about', name: 'about', component: About, meta: { title: 'About' } },

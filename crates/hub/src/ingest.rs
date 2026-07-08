@@ -181,16 +181,17 @@ pub async fn ingest_kube(
     // Auto-register / update the cluster as a system of kind 'k8s-cluster', keyed by
     // (workspace, cluster-name) so re-enrolling under a new key updates the same row.
     let system: (Uuid,) = sqlx::query_as(
-        "INSERT INTO systems (workspace_id, key_id, name, hostname, kind, cluster, agent_version, last_seen) \
-         VALUES ($1, $2, $3, $3, 'k8s-cluster', $3, $4, now()) \
+        "INSERT INTO systems (workspace_id, key_id, name, hostname, kind, cluster, agent_version, k8s_version, last_seen) \
+         VALUES ($1, $2, $3, $3, 'k8s-cluster', $3, $4, $5, now()) \
          ON CONFLICT (workspace_id, hostname) DO UPDATE SET \
-            key_id = EXCLUDED.key_id, last_seen = now(), kind = 'k8s-cluster', cluster = $3, agent_version = $4 \
+            key_id = EXCLUDED.key_id, last_seen = now(), kind = 'k8s-cluster', cluster = $3, agent_version = $4, k8s_version = $5 \
          RETURNING id",
     )
     .bind(workspace_id)
     .bind(key_id)
     .bind(cluster)
     .bind(&report.agent_version)
+    .bind(&report.k8s_version)
     .fetch_one(&state.config)
     .await
     .map_err(|e| {
