@@ -10,9 +10,11 @@ use uuid::Uuid;
 use crate::auth::CurrentUser;
 use crate::AppState;
 
+mod kube;
 mod monitors;
 mod systems;
 
+pub use kube::*;
 pub use monitors::*;
 pub use systems::*;
 

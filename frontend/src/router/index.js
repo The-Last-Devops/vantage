@@ -12,6 +12,7 @@ import FleetOverview from '../pages/FleetOverview.vue'
 import FleetMetrics from '../pages/FleetMetrics.vue'
 import Systems from '../pages/Systems.vue'
 import SystemDetail from '../pages/SystemDetail.vue'
+import ClusterDetail from '../pages/ClusterDetail.vue'
 import Console from '../pages/Console.vue'
 import SecuritySettings from '../pages/SecuritySettings.vue'
 import Workspaces from '../pages/Workspaces.vue'
@@ -42,6 +43,7 @@ const routes = [
   { path: '/metrics', name: 'metrics', component: FleetMetrics, meta: { title: 'Metrics' } },
   { path: '/attention', name: 'attention', component: Systems, meta: { title: 'Issues' } },
   { path: '/system/:id', name: 'system', component: SystemDetail, meta: { title: 'Host' } },
+  { path: '/cluster/:id', name: 'cluster', component: ClusterDetail, meta: { title: 'Cluster' } },
   { path: '/systems/:id/console', name: 'console', component: Console, meta: { title: 'Console' } },
   { path: '/workspaces', name: 'workspaces', component: Workspaces, meta: { title: 'Workspaces' } },
   { path: '/workspace/:id', name: 'workspace', component: WorkspaceDetail, meta: { title: 'Workspace' } },

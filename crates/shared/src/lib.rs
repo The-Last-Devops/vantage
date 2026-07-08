@@ -167,6 +167,10 @@ pub struct KubeReport {
     /// One entry per Deployment, with replica health.
     #[serde(default)]
     pub deployments: Vec<KubeDeploymentStat>,
+    /// One entry per **container** across all pods, with usage + pod metadata.
+    /// The hub aggregates these on read (by namespace / workload / label).
+    #[serde(default)]
+    pub containers: Vec<KubeContainerStat>,
 }
 
 /// Pod tallies for one Kubernetes namespace at snapshot time.
@@ -201,6 +205,52 @@ pub struct KubeDeploymentStat {
     pub available: u32,
     /// `.status.updatedReplicas`.
     pub updated: u32,
+}
+
+/// Per-container resource usage + pod metadata at snapshot time — the granular
+/// unit the cluster agent reports so the hub can aggregate on read by any
+/// dimension (namespace, workload, or label), rather than pre-aggregating.
+///
+/// One entry per **container** (a pod with N containers yields N entries), each
+/// carrying its pod's identity/metadata duplicated. CPU/memory come from
+/// metrics-server (`metrics.k8s.io`); they're 0 when metrics-server is absent
+/// (the metadata is still reported). Optional on the wire (`#[serde(default)]`)
+/// so older agents/hubs interoperate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KubeContainerStat {
+    /// Kubernetes namespace the pod lives in.
+    pub namespace: String,
+    /// Pod name.
+    pub pod: String,
+    /// Container name within the pod.
+    pub container: String,
+    /// Node the pod is scheduled on (`.spec.nodeName`); empty if unscheduled.
+    #[serde(default)]
+    pub node: String,
+    /// Pod lifecycle phase: Running / Pending / Failed / Succeeded / Unknown.
+    #[serde(default)]
+    pub phase: String,
+    /// Resolved top-level controller name (Deployment/StatefulSet/DaemonSet/Job…),
+    /// walking pod → ReplicaSet → Deployment. Empty for bare pods.
+    #[serde(default)]
+    pub workload: String,
+    /// Kind of `workload` (e.g. "Deployment", "StatefulSet", "DaemonSet", "Job",
+    /// "ReplicaSet" when the RS has no controller, or "" for a bare pod).
+    #[serde(default)]
+    pub workload_kind: String,
+    /// Current CPU usage in **millicores** (metrics-server); 0 if unavailable.
+    #[serde(default)]
+    pub cpu_millicores: u64,
+    /// Current memory usage in **bytes** (metrics-server); 0 if unavailable.
+    #[serde(default)]
+    pub mem_bytes: u64,
+    /// Container restart count (`.status.containerStatuses[].restartCount`).
+    #[serde(default)]
+    pub restarts: u32,
+    /// Full pod labels, for aggregating by label (e.g. `app`, `team`). Stored as
+    /// a JSON object; duplicated across the pod's containers.
+    #[serde(default)]
+    pub labels: std::collections::BTreeMap<String, String>,
 }
 
 /// Hub's response to a successful ingest.

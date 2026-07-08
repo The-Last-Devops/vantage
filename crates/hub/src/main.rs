@@ -281,6 +281,13 @@ async fn main() -> Result<()> {
         .route("/api/systems/{id}/containers", get(web::system_containers))
         .route("/api/systems/{id}/temps", get(web::system_temps))
         .route("/api/systems/{id}/gpu", get(web::system_gpu))
+        // Kubernetes cluster views (aggregate-on-read of per-container stats)
+        .route("/api/systems/{id}/kube/aggregate", get(web::kube_aggregate))
+        .route(
+            "/api/systems/{id}/kube/containers",
+            get(web::kube_containers),
+        )
+        .route("/api/systems/{id}/kube/series", get(web::kube_series))
         .route("/api/monitors", get(web::list_monitors))
         // SPA: anything not matched above is served from the embedded Vue build.
         .fallback(spa::handler)

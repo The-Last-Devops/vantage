@@ -10,13 +10,13 @@
 //! It only ever GETs — the ServiceAccount is granted `get/list/watch` and nothing
 //! more (see the RBAC in the install manifest). No cluster mutation, ever.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use shared::{KubeDeploymentStat, KubeNamespaceStat, KubeReport};
+use shared::{KubeContainerStat, KubeDeploymentStat, KubeNamespaceStat, KubeReport};
 
 use crate::push::{self, post_report, shutdown_signal, upgrade_target, Sent};
 use crate::Config;
@@ -152,18 +152,37 @@ async fn collect(
     let pod_items: Vec<PodItem> = list_all(client, api_base, token, "/api/v1/pods").await?;
     let deploy_items: Vec<DeployItem> =
         list_all(client, api_base, token, "/apis/apps/v1/deployments").await?;
+    // ReplicaSets let us walk pod → RS → Deployment for the owning workload.
+    let rs_items: Vec<ReplicaSetItem> =
+        list_all(client, api_base, token, "/apis/apps/v1/replicasets").await?;
+    // Per-container CPU/memory from metrics-server. Optional: many clusters don't
+    // run it, so treat any failure (404 / not installed) as "no usage" rather than
+    // failing the whole snapshot — the metadata is still worth reporting.
+    let metric_items: Vec<PodMetricsItem> =
+        list_soft(client, api_base, token, "/apis/metrics.k8s.io/v1beta1/pods").await;
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    Ok(aggregate(ns_items, pod_items, deploy_items, cluster, ts))
+    Ok(aggregate(
+        ns_items,
+        pod_items,
+        deploy_items,
+        rs_items,
+        metric_items,
+        cluster,
+        ts,
+    ))
 }
 
 /// Fold raw apiserver items into a `KubeReport`. Pure (no I/O) so it's unit-testable.
+#[allow(clippy::too_many_arguments)]
 fn aggregate(
     ns_items: Vec<NsItem>,
     pod_items: Vec<PodItem>,
     deploy_items: Vec<DeployItem>,
+    rs_items: Vec<ReplicaSetItem>,
+    metric_items: Vec<PodMetricsItem>,
     cluster: &str,
     ts: i64,
 ) -> KubeReport {
@@ -185,7 +204,7 @@ fn aggregate(
         );
     }
 
-    for p in pod_items {
+    for p in &pod_items {
         let entry = ns
             .entry(p.metadata.namespace.clone())
             .or_insert_with(|| KubeNamespaceStat {
@@ -227,13 +246,154 @@ fn aggregate(
         .collect();
     deployments.sort_by(|a, b| a.namespace.cmp(&b.namespace).then(a.name.cmp(&b.name)));
 
+    let containers = build_containers(&pod_items, &rs_items, &metric_items);
+
     KubeReport {
         ts,
         cluster: cluster.to_string(),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
         namespaces: ns.into_values().collect(),
         deployments,
+        containers,
     }
+}
+
+/// Fold pods + ReplicaSets + metrics-server usage into per-container rows, each
+/// carrying its pod's metadata (node, phase, labels) and resolved owning workload
+/// (pod → ReplicaSet → Deployment). Pure (no I/O) so it's unit-testable.
+fn build_containers(
+    pods: &[PodItem],
+    rs_items: &[ReplicaSetItem],
+    metrics: &[PodMetricsItem],
+) -> Vec<KubeContainerStat> {
+    // ReplicaSet -> owning workload (usually a Deployment), keyed by (namespace, rs).
+    let mut rs_workload: HashMap<(String, String), (String, String)> = HashMap::new();
+    for rs in rs_items {
+        let wl = controller_ref(&rs.metadata.owner_references)
+            .map(|o| (o.kind.clone(), o.name.clone()))
+            .unwrap_or_else(|| ("ReplicaSet".to_string(), rs.metadata.name.clone()));
+        rs_workload.insert(
+            (rs.metadata.namespace.clone(), rs.metadata.name.clone()),
+            wl,
+        );
+    }
+
+    // (namespace, pod, container) -> (cpu_millicores, mem_bytes) from metrics-server.
+    let mut usage: HashMap<(String, String, String), (u64, u64)> = HashMap::new();
+    for m in metrics {
+        for c in &m.containers {
+            usage.insert(
+                (
+                    m.metadata.namespace.clone(),
+                    m.metadata.name.clone(),
+                    c.name.clone(),
+                ),
+                (
+                    parse_cpu_millicores(&c.usage.cpu),
+                    parse_mem_bytes(&c.usage.memory),
+                ),
+            );
+        }
+    }
+
+    let mut out = Vec::new();
+    for p in pods {
+        let ns = &p.metadata.namespace;
+        let pod = &p.metadata.name;
+        // Resolve the top-level workload: pod's controller, hopping RS -> Deployment.
+        let (workload_kind, workload) = match controller_ref(&p.metadata.owner_references) {
+            Some(o) if o.kind == "ReplicaSet" => rs_workload
+                .get(&(ns.clone(), o.name.clone()))
+                .cloned()
+                .unwrap_or_else(|| ("ReplicaSet".to_string(), o.name.clone())),
+            Some(o) => (o.kind.clone(), o.name.clone()),
+            None => (String::new(), String::new()),
+        };
+        for cs in &p.status.container_statuses {
+            let (cpu_millicores, mem_bytes) = usage
+                .get(&(ns.clone(), pod.clone(), cs.name.clone()))
+                .copied()
+                .unwrap_or((0, 0));
+            out.push(KubeContainerStat {
+                namespace: ns.clone(),
+                pod: pod.clone(),
+                container: cs.name.clone(),
+                node: p.spec.node_name.clone(),
+                phase: p.status.phase.clone(),
+                workload: workload.clone(),
+                workload_kind: workload_kind.clone(),
+                cpu_millicores,
+                mem_bytes,
+                restarts: cs.restart_count,
+                labels: p.metadata.labels.clone(),
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        a.namespace
+            .cmp(&b.namespace)
+            .then(a.pod.cmp(&b.pod))
+            .then(a.container.cmp(&b.container))
+    });
+    out
+}
+
+/// The controlling ownerReference (`controller: true`), else the first one
+/// (older objects don't always set the flag). None for a bare pod/RS.
+fn controller_ref(refs: &[OwnerRef]) -> Option<&OwnerRef> {
+    refs.iter()
+        .find(|o| o.controller == Some(true))
+        .or_else(|| refs.first())
+}
+
+/// Parse a Kubernetes CPU quantity into **millicores**. Accepts nanocores (`n`),
+/// microcores (`u`), millicores (`m`), or whole cores (no suffix).
+fn parse_cpu_millicores(s: &str) -> u64 {
+    let s = s.trim();
+    if s.is_empty() {
+        return 0;
+    }
+    let (num, per_milli) = if let Some(v) = s.strip_suffix('n') {
+        (v, 1e6) // nanocores  -> /1e6 = millicores
+    } else if let Some(v) = s.strip_suffix('u') {
+        (v, 1e3) // microcores -> /1e3
+    } else if let Some(v) = s.strip_suffix('m') {
+        (v, 1.0) // already millicores
+    } else {
+        (s, 0.001) // cores -> /0.001 = *1000
+    };
+    (num.trim().parse::<f64>().unwrap_or(0.0) / per_milli).round() as u64
+}
+
+/// Parse a Kubernetes memory quantity into **bytes**. Accepts binary suffixes
+/// (Ki/Mi/Gi/Ti/Pi/Ei), decimal SI (k/M/G/T/P/E), or a plain byte count.
+fn parse_mem_bytes(s: &str) -> u64 {
+    let s = s.trim();
+    if s.is_empty() {
+        return 0;
+    }
+    // Two-letter binary suffixes first so "Mi" isn't shadowed by "M".
+    const SUFFIXES: &[(&str, f64)] = &[
+        ("Ki", 1024.0),
+        ("Mi", 1_048_576.0),
+        ("Gi", 1_073_741_824.0),
+        ("Ti", 1_099_511_627_776.0),
+        ("Pi", 1_125_899_906_842_624.0),
+        ("Ei", 1_152_921_504_606_846_976.0),
+        ("k", 1e3),
+        ("M", 1e6),
+        ("G", 1e9),
+        ("T", 1e12),
+        ("P", 1e15),
+        ("E", 1e18),
+    ];
+    for (suf, mult) in SUFFIXES {
+        if let Some(v) = s.strip_suffix(suf) {
+            return (v.trim().parse::<f64>().unwrap_or(0.0) * mult).round() as u64;
+        }
+    }
+    s.parse::<u64>()
+        .unwrap_or_else(|_| s.parse::<f64>().unwrap_or(0.0).round() as u64)
 }
 
 /// GET a list endpoint, following the `continue` token so large clusters aren't
@@ -275,6 +435,37 @@ async fn list_all<T: DeserializeOwned>(
     Ok(out)
 }
 
+/// Single-page GET for an OPTIONAL list API, returning an empty Vec (never an
+/// error) when it's unavailable — e.g. `metrics.k8s.io` 404s on clusters without
+/// metrics-server. No pagination: the metrics API doesn't chunk, and one missing
+/// add-on must not fail the whole snapshot.
+async fn list_soft<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    api_base: &str,
+    token: &str,
+    path: &str,
+) -> Vec<T> {
+    let url = format!("{api_base}{path}");
+    let resp = match client.get(&url).bearer_auth(token).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::debug!(error = %e, path, "optional kube API request failed — skipping");
+            return Vec::new();
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::debug!(status = %resp.status(), path, "optional kube API unavailable — skipping");
+        return Vec::new();
+    }
+    match resp.json::<List<T>>().await {
+        Ok(page) => page.items,
+        Err(e) => {
+            tracing::debug!(error = %e, path, "decode of optional kube API failed — skipping");
+            Vec::new()
+        }
+    }
+}
+
 // --- minimal apiserver JSON shapes (only the fields we tally) ---
 
 #[derive(Deserialize)]
@@ -297,6 +488,21 @@ struct Meta {
     name: String,
     #[serde(default)]
     namespace: String,
+    #[serde(default)]
+    labels: BTreeMap<String, String>,
+    #[serde(default, rename = "ownerReferences")]
+    owner_references: Vec<OwnerRef>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct OwnerRef {
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    name: String,
+    /// Kubernetes marks the managing controller with `controller: true`.
+    #[serde(default)]
+    controller: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -318,7 +524,15 @@ struct PodItem {
     #[serde(default)]
     metadata: Meta,
     #[serde(default)]
+    spec: PodSpec,
+    #[serde(default)]
     status: PodStatus,
+}
+
+#[derive(Deserialize, Default)]
+struct PodSpec {
+    #[serde(default, rename = "nodeName")]
+    node_name: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -331,8 +545,44 @@ struct PodStatus {
 
 #[derive(Deserialize, Default)]
 struct ContainerStatus {
+    #[serde(default)]
+    name: String,
     #[serde(default, rename = "restartCount")]
     restart_count: u32,
+}
+
+#[derive(Deserialize)]
+struct ReplicaSetItem {
+    #[serde(default)]
+    metadata: Meta,
+}
+
+// --- metrics.k8s.io (metrics-server) shapes ---
+
+#[derive(Deserialize)]
+struct PodMetricsItem {
+    #[serde(default)]
+    metadata: Meta,
+    #[serde(default)]
+    containers: Vec<ContainerMetrics>,
+}
+
+#[derive(Deserialize, Default)]
+struct ContainerMetrics {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    usage: Usage,
+}
+
+#[derive(Deserialize, Default)]
+struct Usage {
+    /// CPU quantity, e.g. "250m", "1", "500000000n".
+    #[serde(default)]
+    cpu: String,
+    /// Memory quantity, e.g. "134217728", "128Mi".
+    #[serde(default)]
+    memory: String,
 }
 
 #[derive(Deserialize)]
@@ -396,6 +646,8 @@ mod tests {
             items::<NsItem>(NS_JSON),
             items::<PodItem>(POD_JSON),
             items::<DeployItem>(DEPLOY_JSON),
+            Vec::new(),
+            Vec::new(),
             "prod",
             1234,
         );
@@ -427,6 +679,83 @@ mod tests {
         assert_eq!(rep.deployments[1].name, "web");
         assert_eq!(rep.deployments[1].desired, 3);
         assert_eq!(rep.deployments[1].ready, 2);
+    }
+
+    #[test]
+    fn parses_cpu_quantities_to_millicores() {
+        assert_eq!(parse_cpu_millicores("250m"), 250);
+        assert_eq!(parse_cpu_millicores("1"), 1000); // 1 core
+        assert_eq!(parse_cpu_millicores("2"), 2000);
+        assert_eq!(parse_cpu_millicores("500000000n"), 500); // 5e8 nanocores = 500m
+        assert_eq!(parse_cpu_millicores("1500u"), 2); // 1500 microcores ≈ 1.5m -> 2
+        assert_eq!(parse_cpu_millicores(""), 0);
+        assert_eq!(parse_cpu_millicores("garbage"), 0);
+    }
+
+    #[test]
+    fn parses_memory_quantities_to_bytes() {
+        assert_eq!(parse_mem_bytes("128Mi"), 128 * 1024 * 1024);
+        assert_eq!(parse_mem_bytes("1Gi"), 1024 * 1024 * 1024);
+        assert_eq!(parse_mem_bytes("512Ki"), 512 * 1024);
+        assert_eq!(parse_mem_bytes("134217728"), 134_217_728); // plain bytes
+        assert_eq!(parse_mem_bytes("1M"), 1_000_000); // decimal SI
+        assert_eq!(parse_mem_bytes(""), 0);
+    }
+
+    #[test]
+    fn build_containers_resolves_workload_and_joins_usage() {
+        // web pod -> ReplicaSet web-abc -> Deployment web; a bare DaemonSet pod;
+        // metrics-server usage present for web's container only.
+        let pods: Vec<PodItem> = items(
+            r#"{"items":[
+            {"metadata":{"name":"web-abc-1","namespace":"default","labels":{"app":"web"},
+                "ownerReferences":[{"kind":"ReplicaSet","name":"web-abc","controller":true}]},
+             "spec":{"nodeName":"node-1"},
+             "status":{"phase":"Running","containerStatuses":[
+                {"name":"app","restartCount":2},{"name":"sidecar","restartCount":0}]}},
+            {"metadata":{"name":"log-1","namespace":"kube-system","labels":{"app":"logger"},
+                "ownerReferences":[{"kind":"DaemonSet","name":"logger","controller":true}]},
+             "spec":{"nodeName":"node-2"},
+             "status":{"phase":"Running","containerStatuses":[{"name":"log","restartCount":0}]}}
+        ]}"#,
+        );
+        let rs: Vec<ReplicaSetItem> = items(
+            r#"{"items":[
+            {"metadata":{"name":"web-abc","namespace":"default",
+                "ownerReferences":[{"kind":"Deployment","name":"web","controller":true}]}}
+        ]}"#,
+        );
+        let metrics: Vec<PodMetricsItem> = items(
+            r#"{"items":[
+            {"metadata":{"name":"web-abc-1","namespace":"default","containers":[]},
+             "containers":[
+                {"name":"app","usage":{"cpu":"250m","memory":"128Mi"}},
+                {"name":"sidecar","usage":{"cpu":"10m","memory":"16Mi"}}]}
+        ]}"#,
+        );
+        let out = build_containers(&pods, &rs, &metrics);
+        // Sorted by (namespace, pod, container): default/web-abc-1/{app,sidecar}, then kube-system/log-1/log.
+        assert_eq!(out.len(), 3);
+
+        let app = &out[0];
+        assert_eq!(app.container, "app");
+        assert_eq!(app.workload_kind, "Deployment"); // hopped RS -> Deployment
+        assert_eq!(app.workload, "web");
+        assert_eq!(app.node, "node-1");
+        assert_eq!(app.cpu_millicores, 250);
+        assert_eq!(app.mem_bytes, 128 * 1024 * 1024);
+        assert_eq!(app.restarts, 2);
+        assert_eq!(app.labels.get("app").map(String::as_str), Some("web"));
+
+        let side = &out[1];
+        assert_eq!(side.container, "sidecar");
+        assert_eq!(side.cpu_millicores, 10);
+
+        let log = &out[2];
+        assert_eq!(log.workload_kind, "DaemonSet");
+        assert_eq!(log.workload, "logger");
+        assert_eq!(log.cpu_millicores, 0); // no metrics for this pod -> 0
+        assert_eq!(log.mem_bytes, 0);
     }
 
     #[test]

@@ -9,6 +9,19 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.14] — 2026-07-08
+
+### Added
+- **Kubernetes cluster monitoring — CPU/memory per container, aggregated on read.**
+  The cluster agent now also queries metrics-server (`metrics.k8s.io`) and reports one
+  row **per container** with full pod metadata (namespace, node, phase, owning workload
+  resolved pod → ReplicaSet → Deployment, restart count, and all pod labels). The hub
+  stores these in a new `kube_container_stats` hypertable and **aggregates on read**, so
+  a new **Cluster** page (`/cluster/:id`) can break usage down by **namespace, workload,
+  or any label**, chart CPU/memory over time for the whole cluster or a selected group,
+  and drill down to individual pods/containers. Usage reads 0 (metadata still collected)
+  on clusters without metrics-server.
+
 ## [2.3.13] — 2026-07-08
 
 ### Fixed

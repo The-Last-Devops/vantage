@@ -245,6 +245,63 @@ pub async fn ingest_kube(
         }
     }
 
+    // Per-container usage + pod metadata. Potentially hundreds of rows per push,
+    // so insert them in ONE statement via UNNEST (parallel arrays) instead of a
+    // row-per-round-trip loop. `labels` is passed as JSON text[] and cast to jsonb.
+    if !report.containers.is_empty() {
+        let n = report.containers.len();
+        let mut ns = Vec::with_capacity(n);
+        let mut pod = Vec::with_capacity(n);
+        let mut container = Vec::with_capacity(n);
+        let mut node = Vec::with_capacity(n);
+        let mut phase = Vec::with_capacity(n);
+        let mut workload = Vec::with_capacity(n);
+        let mut workload_kind = Vec::with_capacity(n);
+        let mut cpu = Vec::with_capacity(n);
+        let mut mem = Vec::with_capacity(n);
+        let mut restarts = Vec::with_capacity(n);
+        let mut labels = Vec::with_capacity(n);
+        for c in &report.containers {
+            ns.push(c.namespace.clone());
+            pod.push(c.pod.clone());
+            container.push(c.container.clone());
+            node.push(c.node.clone());
+            phase.push(c.phase.clone());
+            workload.push(c.workload.clone());
+            workload_kind.push(c.workload_kind.clone());
+            cpu.push(c.cpu_millicores as i64);
+            mem.push(c.mem_bytes as i64);
+            restarts.push(c.restarts as i32);
+            labels.push(serde_json::to_string(&c.labels).unwrap_or_else(|_| "{}".into()));
+        }
+        if let Err(e) = sqlx::query(
+            "INSERT INTO kube_container_stats \
+             (time, system_id, namespace, pod, container, node, phase, workload, workload_kind, cpu_millicores, mem_bytes, restarts, labels) \
+             SELECT $1, $2, t.ns, t.pod, t.container, t.node, t.phase, t.workload, t.workload_kind, t.cpu, t.mem, t.restarts, t.labels::jsonb \
+             FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bigint[], $11::bigint[], $12::int[], $13::text[]) \
+                  AS t(ns, pod, container, node, phase, workload, workload_kind, cpu, mem, restarts, labels)",
+        )
+        .bind(ts)
+        .bind(system_id)
+        .bind(&ns)
+        .bind(&pod)
+        .bind(&container)
+        .bind(&node)
+        .bind(&phase)
+        .bind(&workload)
+        .bind(&workload_kind)
+        .bind(&cpu)
+        .bind(&mem)
+        .bind(&restarts)
+        .bind(&labels)
+        .execute(&state.data)
+        .await
+        {
+            tracing::error!(error = %e, "kube container insert");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
     Ok(Json(IngestAck {
         ok: true,
         next_interval_secs: 0,

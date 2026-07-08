@@ -3509,7 +3509,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "2.3.13"
+version = "2.3.14"
 dependencies = [
  "chrono",
  "serde",
@@ -4483,7 +4483,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vantage-agent"
-version = "2.3.13"
+version = "2.3.14"
 dependencies = [
  "anyhow",
  "bollard",
@@ -4504,7 +4504,7 @@ dependencies = [
 
 [[package]]
 name = "vantage-hub"
-version = "2.3.13"
+version = "2.3.14"
 dependencies = [
  "anyhow",
  "argon2",

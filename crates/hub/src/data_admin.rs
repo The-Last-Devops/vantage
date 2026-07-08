@@ -171,9 +171,14 @@ pub async fn setup(data: &PgPool) {
     );
     stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
 
-    // Kubernetes cluster-state series: modest volume (one push/min per cluster), so
-    // keep raw a year with daily chunks + compression, no rollup ladder for now.
-    for tbl in ["kube_namespace_stats", "kube_deployment_stats"] {
+    // Kubernetes cluster-state series: keep raw a year with daily chunks +
+    // compression, no rollup ladder for now. kube_container_stats is per-container
+    // (higher volume) but compresses hard (labels/metadata repeat per snapshot).
+    for tbl in [
+        "kube_namespace_stats",
+        "kube_deployment_stats",
+        "kube_container_stats",
+    ] {
         stmts.push(format!(
             "SELECT set_chunk_time_interval('{tbl}', INTERVAL '1 day')"
         ));
@@ -319,6 +324,7 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
         ("heartbeats", "Heartbeats"),
         ("kube_namespace_stats", "K8s namespaces"),
         ("kube_deployment_stats", "K8s deployments"),
+        ("kube_container_stats", "K8s containers"),
     ];
     let mut tables = Vec::with_capacity(tiers.len());
     for (table, label) in tiers {
@@ -624,6 +630,7 @@ const RETENTION_TABLES: &[&str] = &[
     "heartbeats",
     "kube_namespace_stats",
     "kube_deployment_stats",
+    "kube_container_stats",
 ];
 
 /// `value` is interpreted in the tier's unit (hours for the raw tier, days else).
