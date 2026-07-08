@@ -30,10 +30,22 @@ const tfa = ref({ enabled: false })
 const passkeys = ref([])
 const dataStats = ref(null) // { data: { db_size, … }, config } from /api/admin/data (admin only)
 const memberCount = ref(null) // user count (admin only)
+const clusterSums = ref({}) // k8s-cluster system id -> kube/summary roll-up
 let timer = null
 
 const thrOf = (s) => thresholds.value[s.workspace] || DEFAULT_THR
-const hosts = computed(() => systems.value.filter(inWs))
+// Hosts excludes k8s clusters — those are counted in their own Clusters tiles.
+const hosts = computed(() => systems.value.filter(inWs).filter((s) => s.kind !== 'k8s-cluster'))
+const clusterList = computed(() => systems.value.filter(inWs).filter((s) => s.kind === 'k8s-cluster'))
+const clusterAgg = computed(() => {
+  const a = { total: clusterList.value.length, online: 0, nodes: 0, pods: 0, cpu: 0 }
+  for (const c of clusterList.value) {
+    if (online(c)) a.online++
+    const s = clusterSums.value[c.id]
+    if (s) { a.nodes += s.nodes; a.pods += s.pods_running; a.cpu += s.cpu_millicores }
+  }
+  return a
+})
 const wsMonitors = computed(() => monitors.value.filter(inWs).filter((m) => m.enabled))
 
 // ---- counts ----
@@ -113,6 +125,17 @@ const sections = computed(() => [
       { label: 'Warning', value: host.value.warn, icon: 'alert-triangle', to: { name: 'attention', query: { ...nsq.value, status: 'warn' } }, bad: host.value.warn > 0, color: 'warn' },
     ],
   },
+  ...(clusterAgg.value.total > 0
+    ? [{
+        title: 'Clusters',
+        items: [
+          { label: 'Clusters', value: clusterAgg.value.total, sub: `${clusterAgg.value.online} online`, icon: 'server', to: { name: 'clusters', query: nsq.value }, good: clusterAgg.value.total > 0 && clusterAgg.value.online === clusterAgg.value.total },
+          { label: 'Nodes', value: clusterAgg.value.nodes || '—', icon: 'fleet', to: { name: 'clusters', query: nsq.value } },
+          { label: 'Pods running', value: clusterAgg.value.pods || '—', icon: 'pulse', to: { name: 'clusters', query: nsq.value } },
+          { label: 'CPU used', value: clusterAgg.value.cpu ? `${Math.round(clusterAgg.value.cpu / 1000)} cores` : '—', icon: 'cpu', to: { name: 'clusters', query: nsq.value } },
+        ],
+      }]
+    : []),
   {
     title: 'Services',
     items: [
@@ -170,13 +193,19 @@ const { loaded, reload: load } = useCached({
       admin ? api.get('/api/admin/data').catch(() => null) : Promise.resolve(null),
       admin ? api.get('/api/users').catch(() => []) : Promise.resolve([]),
     ])
-    return { sys, mons, evs, thr, alerts: alertLists.flat(), bk, t2, pks, ds, users }
+    // Cluster roll-up: one summary per k8s-cluster system (few; parallel).
+    const cl = sys.filter((s) => s.kind === 'k8s-cluster')
+    const sumArr = await Promise.all(cl.map((c) => api.get(`/api/systems/${c.id}/kube/summary`).then((s) => [c.id, s]).catch(() => null)))
+    const csums = {}
+    for (const x of sumArr) if (x) csums[x[0]] = x[1]
+    return { sys, mons, evs, thr, alerts: alertLists.flat(), bk, t2, pks, ds, users, csums }
   },
   apply: (d) => {
     systems.value = d.sys; monitors.value = d.mons; events.value = d.evs
     thresholds.value = d.thr || {}; alerts.value = d.alerts
     backup.value = d.bk; tfa.value = d.t2 || { enabled: false }; passkeys.value = d.pks || []
     dataStats.value = d.ds; memberCount.value = Array.isArray(d.users) ? d.users.length : null
+    clusterSums.value = d.csums || {}
   },
 })
 

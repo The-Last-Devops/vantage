@@ -9,6 +9,14 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [2.3.24] — 2026-07-08
+
+### Added
+- **Cluster stats on the Overview dashboard** — a Clusters tile group (clusters online,
+  nodes, pods running, CPU cores used, rolled up across the selected workspaces) appears
+  whenever a Kubernetes cluster is present. Clusters are no longer double-counted in the
+  Hosts tiles.
+
 ## [2.3.23] — 2026-07-08
 
 ### Changed
