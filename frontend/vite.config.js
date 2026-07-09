@@ -12,5 +12,13 @@ export default defineConfig({
       '/api': { target: 'http://localhost:8080', changeOrigin: true },
     },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      // Split the uPlot charting vendor into its own chunk so it caches independently
+      // of app code. Routes stay eagerly imported (no lazy chunks — see router header).
+      output: { manualChunks: { uplot: ['uplot'] } },
+    },
+  },
 })

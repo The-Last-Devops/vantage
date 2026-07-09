@@ -60,6 +60,19 @@ pub struct AppState {
     pub passkey: std::sync::Arc<Option<passkey::PasskeyState>>,
     /// Per-account login brute-force throttle (in-memory). See `auth.rs`.
     pub login_throttle: std::sync::Arc<auth::LoginThrottle>,
+    /// Cached hub-decided push intervals (host, kube) so ingest doesn't hit the DB
+    /// per push at a fast cadence. See `ingest::IntervalCache`.
+    pub intervals: std::sync::Arc<ingest::IntervalCache>,
+}
+
+/// Readiness probe: OK only when the config DB is reachable.
+async fn readyz(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> axum::http::StatusCode {
+    match sqlx::query("SELECT 1").execute(&state.config).await {
+        Ok(_) => axum::http::StatusCode::OK,
+        Err(_) => axum::http::StatusCode::SERVICE_UNAVAILABLE,
+    }
 }
 
 #[tokio::main]
@@ -100,7 +113,11 @@ async fn main() -> Result<()> {
 
     use axum::routing::{delete, patch, post, put};
     let app = Router::new()
+        // Liveness: process is up (static — a DB blip must NOT restart the hub).
         .route("/healthz", get(|| async { "ok" }))
+        // Readiness: also reachable to the DB, so a pod with a broken DB link is pulled
+        // from the Service instead of serving 500s.
+        .route("/readyz", get(readyz))
         // Everything machines hit (no human session) lives under /pub so a single
         // Cloudflare Access "bypass" rule on /pub covers them all. They self-auth:
         // ingest by api-key; install assets only echo caller-supplied values.
@@ -293,6 +310,7 @@ async fn main() -> Result<()> {
         .route("/api/systems/{id}/temps", get(web::system_temps))
         .route("/api/systems/{id}/gpu", get(web::system_gpu))
         // Kubernetes cluster views (aggregate-on-read of per-container stats)
+        .route("/api/kube/summaries", get(web::kube_summaries))
         .route("/api/systems/{id}/kube/summary", get(web::kube_summary))
         .route("/api/systems/{id}/kube/aggregate", get(web::kube_aggregate))
         .route(

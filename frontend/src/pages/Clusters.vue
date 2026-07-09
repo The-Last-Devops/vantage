@@ -37,11 +37,12 @@ async function load(first = false) {
   err.value = ''
   try {
     rows.value = await api.get('/api/systems')
-    // fetch each cluster's summary in parallel (few clusters)
-    const cl = rows.value.filter((s) => s.kind === 'k8s-cluster')
-    const got = await Promise.all(cl.map((c) => api.get(`/api/systems/${c.id}/kube/summary`).then((s) => [c.id, s]).catch(() => null)))
+    // one batch roll-up call for all clusters (not one per cluster)
     const m = {}
-    for (const g of got) if (g) m[g[0]] = g[1]
+    if (rows.value.some((s) => s.kind === 'k8s-cluster')) {
+      const arr = await api.get('/api/kube/summaries').catch(() => [])
+      for (const s of arr) m[s.system_id] = s
+    }
     sums.value = m
   } catch (e) { err.value = `Failed to load (${e.status || '?'}).` }
   finally { if (first) loaded.value = true }

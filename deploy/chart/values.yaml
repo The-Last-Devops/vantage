@@ -4,13 +4,14 @@
 
 image:
   hub: ghcr.io/the-last-devops/vantage-hub   # repository (no tag)
-  tag: main              # rolling latest; pin :X.Y.Z and IfNotPresent for production
-  pullPolicy: Always     # rolling tags are mutable → Always so a redeploy pulls the new build
+  tag: "3.0.0"           # pinned release for reproducible installs
+  pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]
 # Auto-update: when true, run the :auto-update hub image — when a newer build is
 # published the hub triggers a rolling redeploy of itself (new pod up → old pod drains,
-# zero downtime; needs the ServiceAccount this chart creates). Default false = manual.
+# zero downtime; needs the ServiceAccount this chart creates). It also flips the image
+# to the mutable :auto-update tag with pullPolicy: Always. Default false = pinned/manual.
 autoUpdate: false
 
 # First admin: leave password empty to create the admin on first login (the UI
@@ -21,24 +22,49 @@ admin:
 
 # Two separate in-cluster Postgres instances (config + data), each its own PVC.
 # Set enabled=false to use external databases (hub.configDatabaseUrl/dataDatabaseUrl).
+# NOTE: the external "data" DB MUST have the TimescaleDB extension available (Timescale
+# Cloud or a TS-enabled instance) — plain RDS/Cloud SQL will fail the data migration.
+# Both databases (vantage_config, vantage_data) must be pre-created when external.
 timescaledb:
   enabled: true
-  image: timescale/timescaledb:latest-pg18   # data DB (metrics/heartbeat hypertables)
-  configImage: postgres:18-alpine            # config DB (plain Postgres)
+  image: timescale/timescaledb:2.17.2-pg16   # data DB — pinned (a moving :latest can force a PG major bump that breaks the data dir)
+  configImage: postgres:16.6-alpine          # config DB (plain Postgres) — pinned
   password: ""                        # leave empty — auto-generated, stable across upgrades
   storageClass: ""                    # "" = cluster default; applies to both DBs
   configStorage: 1Gi                  # config DB volume (small: users/config/rules)
   dataStorage: 5Gi                    # data DB volume (grows with metrics history)
+  # Resource requests/limits for each DB pod.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
 
 hub:
   replicas: 1
-  # App secret that encrypts SSH-key master keys at rest. Set a stable high-entropy value
-  # in production (e.g. `openssl rand -base64 32`) and BACK IT UP — losing it makes stored
-  # SSH keys unrecoverable. Empty = password-only protection (the hub logs a warning).
+  # App secret that encrypts SSH-key master keys at rest. Two modes:
+  #   - set a value here (e.g. `openssl rand -base64 32`) → used verbatim.
+  #   - leave empty + hub.autoAppSecret=true → the chart generates one and persists it in
+  #     the release Secret (stable across upgrades), so the exec feature is protected by
+  #     default. BACK IT UP — losing it makes stored SSH keys unrecoverable.
   appSecret: ""
+  autoAppSecret: true
   # Used only when timescaledb.enabled=false:
   configDatabaseUrl: ""
   dataDatabaseUrl: ""
+  # Resource requests/limits for the hub pod.
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  # Container hardening. NET_RAW is required for ICMP "ping" monitors (the hub opens a
+  # raw socket); the hub image sets the file capability so a non-root process keeps it.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_RAW"]
+  # The hub image is amd64-only (agent is multi-arch) — keep it off arm64 nodes.
+  nodeSelector:
+    kubernetes.io/arch: amd64
   service:
     type: ClusterIP                   # NodePort/LoadBalancer to expose the UI
   # Point a domain at the hub: just set host and the chart creates an Ingress
@@ -48,4 +74,21 @@ hub:
     className: nginx
     host: ""                          # e.g. mon.example.com — setting this enables the Ingress
     annotations: {}                   # e.g. cert-manager.io/cluster-issuer: letsencrypt
-    tls: false                        # true → terminate HTTPS using <release>-tls secret
+    tls: false                        # true → terminate HTTPS using <release>-tls secret (also sets the passkey/PUBLIC_URL scheme to https)
+
+# Default-deny NetworkPolicy + hub→DB allow (only when the bundled DBs are used).
+networkPolicy:
+  enabled: false
+
+# PodDisruptionBudget for the hub (relevant with replicas > 1 to survive node drains).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Optional pg_dump backup CronJob for both databases → a PVC (or adapt to object storage).
+backup:
+  enabled: false
+  schedule: "0 3 * * *"               # daily 03:00
+  keepDays: 7
+  storage: 5Gi
+  storageClass: ""

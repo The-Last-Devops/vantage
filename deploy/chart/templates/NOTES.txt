@@ -1,0 +1,36 @@
+vantage {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+1. Reach the UI:
+{{- if .Values.hub.ingress.host }}
+   {{ include "vantage.scheme" . }}://{{ .Values.hub.ingress.host }}
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "vantage.hub" . }} 8080:8080
+   then open http://localhost:8080
+{{- end }}
+
+2. First admin:
+{{- if .Values.admin.password }}
+   pre-seeded as {{ .Values.admin.email }} (password from your values).
+{{- else }}
+   create it on the one-time setup screen at first load.
+{{- end }}
+
+3. Add hosts/clusters: in the UI → Add System → Kubernetes, copy the api-key, then
+   `kubectl apply -f "<hub-url>/pub/agent.yaml?key=YOUR_KEY&cluster=YOUR_CLUSTER"`
+   (installs the per-node DaemonSet + the one-per-cluster collector).
+
+{{- if not (include "vantage.appSecretEnabled" .) }}
+
+⚠️  hub.appSecret / hub.autoAppSecret are BOTH off → SSH-key master keys are protected
+    by password ONLY. Set hub.autoAppSecret=true (recommended) or hub.appSecret=<value>
+    before using the exec/SSH feature in production.
+{{- else if .Values.hub.autoAppSecret }}
+
+🔐 EXEC_APP_SECRET was auto-generated into Secret "{{ include "vantage.name" . }}" (key
+    app-secret). BACK IT UP — losing it makes stored SSH keys unrecoverable.
+{{- end }}
+{{- if not .Values.backup.enabled }}
+
+💾 No DB backup is configured. Set backup.enabled=true (pg_dump CronJob) or snapshot the
+    PVCs — the bundled databases are the only copy of users, RBAC, rules and metrics.
+{{- end }}

@@ -171,26 +171,29 @@ pub async fn setup(data: &PgPool) {
     );
     stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
 
-    // Kubernetes cluster-state series: keep raw a year with daily chunks +
-    // compression, no rollup ladder for now. kube_container_stats is per-container
-    // (higher volume) but compresses hard (labels/metadata repeat per snapshot).
-    for tbl in [
-        "kube_namespace_stats",
-        "kube_deployment_stats",
-        "kube_container_stats",
+    // Kubernetes cluster-state series. namespace/deployment are low-volume (one row
+    // per object per snapshot) → keep a year. kube_container_stats is per-CONTAINER
+    // (high volume at a 15s cadence: a 300-pod cluster ≈ 630M rows/yr) with no rollup
+    // ladder, so keep raw only ~14 days and compress after 2 — enough for the Cluster
+    // page's short ranges, and it stops the data-cap evicting host metrics to hold a
+    // year of container rows. (Overridable per-table from the Data & retention UI.)
+    for (tbl, keep, compress_after) in [
+        ("kube_namespace_stats", "365 days", "7 days"),
+        ("kube_deployment_stats", "365 days", "7 days"),
+        ("kube_container_stats", "14 days", "2 days"),
     ] {
         stmts.push(format!(
             "SELECT set_chunk_time_interval('{tbl}', INTERVAL '1 day')"
         ));
         stmts.push(format!(
-            "SELECT add_retention_policy('{tbl}', INTERVAL '365 days')"
+            "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}')"
         ));
         stmts.push(format!(
             "ALTER TABLE {tbl} SET (timescaledb.compress, \
                 timescaledb.compress_segmentby = 'system_id', timescaledb.compress_orderby = 'time DESC')"
         ));
         stmts.push(format!(
-            "SELECT add_compression_policy('{tbl}', INTERVAL '7 days')"
+            "SELECT add_compression_policy('{tbl}', INTERVAL '{compress_after}')"
         ));
     }
 

@@ -3,18 +3,21 @@
 
 image:
   repository: ghcr.io/the-last-devops/vantage-agent
-  tag: main              # rolling latest (redeploy to update); pin :X.Y.Z for a stable version
+  tag: "3.0.0"           # pinned release; set autoUpdate=true for the rolling channel
 # Auto-update: when true, run the :auto-update image so each agent self-restarts to
 # follow the hub (k8s re-pulls). Overrides image.tag. Default false = manual updates.
 autoUpdate: false
 # Interactive shell/console: when true the agent opens a reverse tunnel so the hub can
-# SSH into this host (via the node's sshd on 127.0.0.1). **On by default** for convenience
-# — set false to opt out. Opening the tunnel is just a byte-pipe to localhost:sshd; actual
-# access is still gated by RBAC (owner + exec capability), a step-up password, and the
-# host's own SSH auth (each user uses their own account/key). The node must run sshd.
-# See docs/exec-design.md.
-allowShell: true
-pullPolicy: Always       # rolling tags are mutable → Always so a redeploy pulls the new build
+# SSH into this host (via the node's sshd on 127.0.0.1). **OFF by default** (opt-in) per
+# the two-sided-consent exec design. Even when on, access is still gated by RBAC
+# (owner + exec capability), a step-up password, and the host's own SSH auth. The node
+# must run sshd. See docs/exec-design.md.
+allowShell: false
+# One-per-cluster collector (k8s object + per-container stats → the Cluster page). Deploys
+# a Deployment + read-only ClusterRole alongside the per-node DaemonSet.
+clusterAgent:
+  enabled: true
+pullPolicy: IfNotPresent
 pullSecrets: []          # e.g. [ghcr] for private packages
 
 # Where the hub is reachable from inside this cluster.

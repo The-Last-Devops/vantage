@@ -37,6 +37,10 @@ spec:
       containers:
         - name: db
           image: {{ $image }}
+          {{- with $.Values.timescaledb.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - { name: POSTGRES_USER, value: vantage }
             - { name: POSTGRES_PASSWORD, value: {{ include "vantage.dbPassword" $ | quote }} }

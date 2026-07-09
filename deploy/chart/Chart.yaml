@@ -2,5 +2,5 @@ apiVersion: v2
 name: vantage
 description: vantage hub + its config/data databases (agents deploy separately)
 type: application
-version: 0.1.0
-appVersion: "main"
+version: 3.0.0
+appVersion: "3.0.0"

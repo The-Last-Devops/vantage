@@ -5,18 +5,31 @@ use sqlx::postgres::PgPoolOptions;
 
 use crate::AppState;
 
+/// Read a positive u32 from env, falling back to `default` when unset/invalid.
+fn env_u32(key: &str, default: u32) -> u32 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(default)
+}
+
 pub async fn connect() -> Result<AppState> {
     let config_url =
         std::env::var("CONFIG_DATABASE_URL").context("CONFIG_DATABASE_URL is required")?;
     let data_url = std::env::var("DATA_DATABASE_URL").context("DATA_DATABASE_URL is required")?;
 
+    // Pool sizes are env-tunable — a real fleet at a fast push cadence needs more than
+    // a handful of connections (ingest fan-in + probes + dashboards + MCP all share these).
+    let cfg_max = env_u32("CONFIG_DB_MAX_CONNS", 25);
+    let data_max = env_u32("DATA_DB_MAX_CONNS", 25);
     let config = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(cfg_max)
         .connect(&config_url)
         .await
         .context("connecting to config DB")?;
     let data = PgPoolOptions::new()
-        .max_connections(10)
+        .max_connections(data_max)
         .connect(&data_url)
         .await
         .context("connecting to data DB")?;
@@ -40,6 +53,7 @@ pub async fn connect() -> Result<AppState> {
         app_secrets: std::sync::Arc::new(app_secrets),
         passkey: std::sync::Arc::new(crate::passkey::PasskeyState::from_env()),
         login_throttle: std::sync::Arc::new(crate::auth::LoginThrottle::new()),
+        intervals: std::sync::Arc::new(crate::ingest::IntervalCache::new()),
     })
 }
 

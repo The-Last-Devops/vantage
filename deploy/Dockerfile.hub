@@ -46,10 +46,16 @@ RUN cargo build --release -p vantage-hub && cp target/release/vantage-hub /usr/l
 
 FROM debian:bookworm-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 libcap2-bin \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 -g nogroup app
 COPY --from=build /usr/local/bin/vantage-hub /usr/local/bin/vantage-hub
+# ICMP "ping" monitors open a raw socket. Grant the binary CAP_NET_RAW as a file
+# capability so the non-root user keeps it (the k8s securityContext adds NET_RAW to
+# the bounding set; the file cap makes it effective without running as root).
+RUN setcap cap_net_raw+ep /usr/local/bin/vantage-hub
 # Migrations are read at runtime via Migrator::new("migrations/...").
 COPY migrations ./migrations
 EXPOSE 8080
+USER 10001
 CMD ["vantage-hub"]

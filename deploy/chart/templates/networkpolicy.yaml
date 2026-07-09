@@ -1,0 +1,23 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.timescaledb.enabled }}
+# Lock the bundled databases down to hub-only access: default-deny ingress to the DB
+# pods, then allow just the hub. (Only meaningful with the in-cluster DBs.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "vantage.name" . }}-db
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [{{ include "vantage.dbConfig" . }}, {{ include "vantage.dbData" . }}]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app: {{ include "vantage.hub" . }} }
+      ports:
+        - { protocol: TCP, port: 5432 }
+{{- end }}
+{{- end }}

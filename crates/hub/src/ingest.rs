@@ -11,9 +11,47 @@ use axum::{
 };
 use serde::Deserialize;
 use shared::{IngestAck, KubeReport, MetricsReport, API_KEY_HEADER};
+use std::sync::RwLock;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::AppState;
+
+/// Cache for the hub-decided push intervals (host, kube). Read on EVERY ingest, so
+/// we don't hit the config DB per push at a 5s cadence — refreshed from `settings`
+/// at most every `TTL`. A settings change takes effect within a minute.
+pub struct IntervalCache {
+    inner: RwLock<Option<(u64, u64, Instant)>>,
+}
+impl Default for IntervalCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl IntervalCache {
+    const TTL: Duration = Duration::from_secs(30);
+    pub fn new() -> Self {
+        Self {
+            inner: RwLock::new(None),
+        }
+    }
+    /// Returns (host_secs, kube_secs), refreshing from `settings` when stale.
+    pub async fn get(&self, config: &sqlx::PgPool) -> (u64, u64) {
+        if let Some((h, k, at)) = *self.inner.read().unwrap() {
+            if at.elapsed() < Self::TTL {
+                return (h, k);
+            }
+        }
+        let host = crate::settings::get(config, "ingest_interval_secs", 5_i64)
+            .await
+            .clamp(1, 3600) as u64;
+        let kube = crate::settings::get(config, "kube_interval_secs", 15_i64)
+            .await
+            .clamp(5, 3600) as u64;
+        *self.inner.write().unwrap() = Some((host, kube, Instant::now()));
+        (host, kube)
+    }
+}
 
 /// Resolve the `x-api-key` header to `(key_id, workspace_id)`. Reusable keys enroll
 /// many systems, so this is the single auth check every push path starts with.
@@ -135,28 +173,45 @@ pub async fn ingest(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Per-container stats (best-effort).
-    for c in &report.containers {
-        let _ = sqlx::query(
+    // Per-container stats — one UNNEST batch insert (was a row-per-round-trip loop,
+    // painful for a many-container docker host at the fast cadence).
+    if !report.containers.is_empty() {
+        let n = report.containers.len();
+        let mut names = Vec::with_capacity(n);
+        let mut cpu = Vec::with_capacity(n);
+        let mut mem = Vec::with_capacity(n);
+        let mut rx = Vec::with_capacity(n);
+        let mut tx = Vec::with_capacity(n);
+        for c in &report.containers {
+            names.push(c.name.clone());
+            cpu.push(c.cpu_percent as f64);
+            mem.push(c.mem_used as i64);
+            rx.push(c.net_rx as i64);
+            tx.push(c.net_tx as i64);
+        }
+        if let Err(e) = sqlx::query(
             "INSERT INTO container_metrics (time, system_id, name, cpu_percent, mem_used, net_rx, net_tx) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7)",
+             SELECT $1, $2, t.name, t.cpu, t.mem, t.rx, t.tx \
+             FROM unnest($3::text[], $4::float8[], $5::bigint[], $6::bigint[], $7::bigint[]) \
+                  AS t(name, cpu, mem, rx, tx)",
         )
         .bind(ts)
         .bind(system_id)
-        .bind(&c.name)
-        .bind(c.cpu_percent as f64)
-        .bind(c.mem_used as i64)
-        .bind(c.net_rx as i64)
-        .bind(c.net_tx as i64)
+        .bind(&names)
+        .bind(&cpu)
+        .bind(&mem)
+        .bind(&rx)
+        .bind(&tx)
         .execute(&state.data)
-        .await;
+        .await
+        {
+            tracing::warn!(error = %e, "container_metrics batch insert");
+        }
     }
 
-    // Push cadence is HUB-decided (a setting, default 5s "realtime"), so ops can retune
-    // it centrally without redeploying agents. Agents obey next_interval_secs each push.
-    let next = crate::settings::get(&state.config, "ingest_interval_secs", 5_i64)
-        .await
-        .clamp(1, 3600) as u64;
+    // Push cadence is HUB-decided (settings; default 5s "realtime"), cached so a 5s
+    // fleet doesn't hit the config DB every push. Agents obey next_interval each push.
+    let (next, _) = state.intervals.get(&state.config).await;
     Ok(Json(IngestAck {
         ok: true,
         next_interval_secs: next,
@@ -311,11 +366,8 @@ pub async fn ingest_kube(
         }
     }
 
-    // Cluster scrape cadence is hub-decided too, but defaults higher (15s) — hitting the
-    // kube-apiserver + metrics-server every few seconds on a big cluster is expensive.
-    let next = crate::settings::get(&state.config, "kube_interval_secs", 15_i64)
-        .await
-        .clamp(5, 3600) as u64;
+    // Cluster scrape cadence (cached; defaults higher — apiserver scrapes are heavier).
+    let (_, next) = state.intervals.get(&state.config).await;
     Ok(Json(IngestAck {
         ok: true,
         next_interval_secs: next,

@@ -42,6 +42,9 @@ pub struct AggRow {
     pub pods: i64,
     pub containers: i64,
     pub restarts: i64,
+    /// Snapshot time (epoch seconds) — same on every row; surfaced once in the response.
+    #[serde(skip)]
+    pub as_of: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -71,16 +74,9 @@ pub async fn kube_aggregate(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let as_of: Option<(Option<chrono::DateTime<chrono::Utc>>,)> =
-        sqlx::query_as("SELECT max(time) FROM kube_container_stats WHERE system_id = $1")
-            .bind(id)
-            .fetch_optional(&state.data)
-            .await
-            .map_err(internal)?;
-    let as_of_ts = as_of.and_then(|r| r.0).map(|t| t.timestamp());
-
     // Built with QueryBuilder so the label key + namespace filter are bound, never
-    // interpolated. Grouping columns come from a fixed allowlist above.
+    // interpolated. Grouping columns come from a fixed allowlist above. `as_of` rides
+    // the same query (the latest snapshot time) — no separate round-trip.
     let mut qb = sqlx::QueryBuilder::new(
         "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = ",
     );
@@ -101,7 +97,8 @@ pub async fn kube_aggregate(
     }
     qb.push(
         ", sum(cpu_millicores)::float8 AS cpu_millicores, sum(mem_bytes)::float8 AS mem_bytes, \
-         count(DISTINCT pod)::int8 AS pods, count(*)::int8 AS containers, sum(restarts)::int8 AS restarts \
+         count(DISTINCT pod)::int8 AS pods, count(*)::int8 AS containers, sum(restarts)::int8 AS restarts, \
+         extract(epoch FROM (SELECT t FROM latest))::int8 AS as_of \
          FROM kube_container_stats c, latest WHERE c.system_id = ",
     );
     qb.push_bind(id).push(" AND c.time = latest.t");
@@ -121,7 +118,7 @@ pub async fn kube_aggregate(
         .map_err(internal)?;
 
     Ok(Json(AggResponse {
-        as_of: as_of_ts,
+        as_of: groups.first().and_then(|g| g.as_of),
         by: by.to_string(),
         groups,
     }))
@@ -170,6 +167,62 @@ pub async fn kube_summary(
     .await
     .map_err(internal)?;
     Ok(Json(row))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+pub struct ClusterSummary {
+    pub system_id: Uuid,
+    pub as_of: Option<i64>,
+    pub cpu_millicores: f64,
+    pub mem_bytes: f64,
+    pub pods: i64,
+    pub pods_running: i64,
+    pub containers: i64,
+    pub restarts: i64,
+    pub namespaces: i64,
+    pub nodes: i64,
+}
+
+/// GET /api/kube/summaries — latest-snapshot roll-up for EVERY k8s-cluster the caller
+/// can see, in one config query (viewable cluster ids) + one data query. Replaces the
+/// N per-cluster /kube/summary calls the Overview + Clusters pages used to fan out.
+pub async fn kube_summaries(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<Vec<ClusterSummary>>, StatusCode> {
+    // Cluster systems the caller may view (admins/read-all see all; else by membership).
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM systems WHERE kind = 'k8s-cluster' AND ($1 OR workspace_id IN \
+         (SELECT workspace_id FROM memberships WHERE user_id = $2))",
+    )
+    .bind(user.can_read_all())
+    .bind(user.id)
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
+    if ids.is_empty() {
+        return Ok(Json(vec![]));
+    }
+    let rows: Vec<ClusterSummary> = sqlx::query_as(
+        "WITH latest AS (SELECT system_id, max(time) AS t FROM kube_container_stats \
+                         WHERE system_id = ANY($1) GROUP BY system_id) \
+         SELECT c.system_id, extract(epoch FROM max(c.time))::int8 AS as_of, \
+                COALESCE(sum(cpu_millicores),0)::float8 AS cpu_millicores, \
+                COALESCE(sum(mem_bytes),0)::float8 AS mem_bytes, \
+                count(DISTINCT pod)::int8 AS pods, \
+                count(DISTINCT pod) FILTER (WHERE phase = 'Running')::int8 AS pods_running, \
+                count(*)::int8 AS containers, \
+                COALESCE(sum(restarts),0)::int8 AS restarts, \
+                count(DISTINCT namespace)::int8 AS namespaces, \
+                count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
+         FROM kube_container_stats c JOIN latest l ON l.system_id = c.system_id AND c.time = l.t \
+         GROUP BY c.system_id",
+    )
+    .bind(&ids)
+    .fetch_all(&state.data)
+    .await
+    .map_err(internal)?;
+    Ok(Json(rows))
 }
 
 #[derive(Deserialize)]

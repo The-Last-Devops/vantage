@@ -1,0 +1,57 @@
+{{- if and .Values.backup.enabled .Values.timescaledb.enabled }}
+# Nightly pg_dump of both databases to a PVC. The config DB (users/RBAC/rules) is the
+# irreplaceable one; the data DB dump is best-effort (Timescale restore needs its own
+# pre/post steps — see docs). Adapt the container command to push to object storage.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "vantage.name" . }}-backup
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.backup.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.backup.storage }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "vantage.name" . }}-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          nodeSelector: { kubernetes.io/arch: amd64 }
+          containers:
+            - name: pgdump
+              image: {{ .Values.timescaledb.configImage }}
+              env:
+                - { name: PGPASSWORD, value: {{ include "vantage.dbPassword" . | quote }} }
+                - { name: KEEP_DAYS, value: {{ .Values.backup.keepDays | quote }} }
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  ts=$(date +%Y%m%d-%H%M%S)
+                  echo "backing up config DB…"
+                  pg_dump -h {{ include "vantage.dbConfig" . }} -U vantage -d vantage_config | gzip > /backup/config-$ts.sql.gz
+                  echo "backing up data DB (best-effort)…"
+                  pg_dump -h {{ include "vantage.dbData" . }} -U vantage -d vantage_data | gzip > /backup/data-$ts.sql.gz || echo "data DB dump failed (Timescale) — config backup kept"
+                  echo "pruning backups older than ${KEEP_DAYS}d…"
+                  find /backup -name '*.sql.gz' -mtime +${KEEP_DAYS} -delete
+                  echo "done"; ls -lh /backup
+              volumeMounts:
+                - { name: backup, mountPath: /backup }
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ include "vantage.name" . }}-backup
+{{- end }}

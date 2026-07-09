@@ -193,11 +193,12 @@ const { loaded, reload: load } = useCached({
       admin ? api.get('/api/admin/data').catch(() => null) : Promise.resolve(null),
       admin ? api.get('/api/users').catch(() => []) : Promise.resolve([]),
     ])
-    // Cluster roll-up: one summary per k8s-cluster system (few; parallel).
-    const cl = sys.filter((s) => s.kind === 'k8s-cluster')
-    const sumArr = await Promise.all(cl.map((c) => api.get(`/api/systems/${c.id}/kube/summary`).then((s) => [c.id, s]).catch(() => null)))
+    // Cluster roll-up: one batch call for all clusters (not one per cluster).
     const csums = {}
-    for (const x of sumArr) if (x) csums[x[0]] = x[1]
+    if (sys.some((s) => s.kind === 'k8s-cluster')) {
+      const arr = await api.get('/api/kube/summaries').catch(() => [])
+      for (const s of arr) csums[s.system_id] = s
+    }
     return { sys, mons, evs, thr, alerts: alertLists.flat(), bk, t2, pks, ds, users, csums }
   },
   apply: (d) => {

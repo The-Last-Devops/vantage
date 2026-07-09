@@ -1,0 +1,71 @@
+{{- if .Values.clusterAgent.enabled }}
+{{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate }}
+# One-per-cluster collector — reports k8s object + per-container stats (the Cluster page).
+# Reuses the api-key Secret created by the DaemonSet. Read-only ClusterRole.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-cluster
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-cluster
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-cluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-cluster
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-cluster
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-cluster
+  labels: { app: {{ .Release.Name }}-cluster }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: {{ .Release.Name }}-cluster }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }}-cluster }
+    spec:
+      serviceAccountName: {{ .Release.Name }}-cluster
+      {{- with .Values.pullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          env:
+            - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
+            - { name: AGENT_KIND, value: "k8s-cluster" }
+            - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
+            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
+            - name: API_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Release.Name }}, key: api-key } }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

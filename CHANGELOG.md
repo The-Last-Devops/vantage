@@ -9,6 +9,44 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-07-09
+
+First GA release — production-hardened, with the Kubernetes cluster monitoring built out
+over the 2.3.x line.
+
+### ⚠️ Breaking
+- **Migrations are squashed into a single consolidated schema per database** (config + data).
+  This resets migration history, so **v3 requires a FRESH database** — do NOT point it at an
+  existing 2.x database (sqlx will refuse: "migration 1 … has been modified"). New installs
+  only. The consolidated schema is byte-for-byte the end state of the old chain (verified by
+  `scripts/squash-migrations.sh`), minus the create-then-drop churn (app_settings, data_cap,
+  exec_credentials, dropped columns, the namespace→workspace rename).
+- **Helm chart is versioned + images are pinned** (`image.tag: 3.0.0`, `pullPolicy: IfNotPresent`;
+  DB images pinned). Set `autoUpdate: true` for the rolling `:auto-update` channel.
+
+### Added
+- **DB backup CronJob** (`backup.enabled`), **NetworkPolicy** (`networkPolicy.enabled`),
+  **PodDisruptionBudget** (`podDisruptionBudget.enabled`), and a Helm **NOTES.txt**.
+- **Cluster agent in the Helm agent chart** (`clusterAgent.enabled`, default on) — a Helm
+  agent install now gets the Cluster page's data, not just per-node host metrics.
+- **`GET /api/kube/summaries`** — one batched cluster roll-up (Overview + Clusters call it
+  once instead of one `/kube/summary` per cluster).
+- Readiness probe **`/readyz`** that checks DB reachability (liveness stays static `/healthz`).
+
+### Changed / Hardened
+- Hub container: **non-root** (uid 10001) with `CAP_NET_RAW` as a file capability (ICMP ping
+  keeps working), resource requests/limits, a liveness probe, and `nodeSelector` amd64.
+- **EXEC_APP_SECRET auto-generated and persisted** by the chart (`hub.autoAppSecret`, default
+  on) so SSH-key encryption is protected out of the box. Back up the release Secret.
+- Agent **`ALLOW_SHELL` defaults OFF** (opt-in), matching the two-sided-consent exec design.
+- **Kubernetes container stats**: raw retention cut to **14 days** (compress after 2) — no
+  rollup ladder, so this bounds storage and stops the data-cap evicting host metrics; Cluster
+  chart ranges capped to 7d.
+- **Ingest hot path** at the 5s cadence: push interval cached (no per-push DB query), docker
+  container metrics inserted in one UNNEST batch, DB pool sizes raised + env-configurable
+  (`CONFIG_DB_MAX_CONNS` / `DATA_DB_MAX_CONNS`).
+- Frontend: uPlot split into its own cached chunk.
+
 ## [2.3.26] — 2026-07-08
 
 ### Changed
