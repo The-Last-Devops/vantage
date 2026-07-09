@@ -106,6 +106,11 @@ docker compose up -d --build          # Postgres/TimescaleDB + hub (:8080) + Adm
 Open **http://localhost:8080**. On first run you create the admin account (or set
 `ADMIN_EMAIL` / `ADMIN_PASSWORD`). A bundled agent reports the Docker host out of the box.
 
+> **Production (Kubernetes):** see [deploy/README.md](deploy/README.md) — Helm chart with
+> pinned images, non-root hub, auto-generated app secret, backups, and the k8s agents
+> (per-node DaemonSet + one-per-cluster collector). **v3 requires a fresh database** —
+> migrations were squashed at v3.0.0, so it won't start against an existing 2.x DB.
+
 > Want sizeable test data? `bash scripts/sim-agents.sh` spins up many simulated
 > node / docker / k8s hosts pushing realistic metrics.
 

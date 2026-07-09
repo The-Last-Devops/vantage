@@ -121,7 +121,12 @@ docker compose up -d
 - Agent ↔ hub wire types belong in `crates/shared` — change them there, never duplicate.
 - Metrics/time-series writes target the `data` pool; everything else targets the `config` pool.
 - Migrations are split per database (`migrations/config/`, `migrations/data/`); only the
-  `data` DB runs `CREATE EXTENSION timescaledb`.
+  `data` DB runs `CREATE EXTENSION timescaledb`. **Append-only from v3.0.0 on:** they were
+  squashed to a single consolidated `0001` per DB for the fresh v3 GA install — NEVER edit
+  `0001` again (a running DB has it applied; editing it makes sqlx refuse to start). Add a
+  new numbered forward migration (`0002+`) instead. `scripts/squash-migrations.sh` regenerates
+  the consolidated `0001` (verified by schema-diff) if you ever need to re-squash for a fresh
+  baseline — fresh DBs only, never against a live one.
 - **Checks/smoke-tests go in a committed `scripts/*.sh`, then run with `bash scripts/<name>.sh` —
   never ad-hoc one-liners (no inline `curl | python`, piped greps, etc.).** Write the check into a
   script, run it yourself, and don't ask for permission to run it. New checks should be idempotent
