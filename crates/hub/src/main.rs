@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
     db::migrate(&state).await?;
     auth::bootstrap_admin(&state.config).await?;
     db::bootstrap_local_server(&state.config).await?;
-    data_admin::setup(&state.data).await;
+    data_admin::setup(&state.config, &state.data).await;
 
     // Background engines.
     probe::spawn(state.clone());

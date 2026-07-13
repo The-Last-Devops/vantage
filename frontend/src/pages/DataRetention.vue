@@ -106,10 +106,30 @@ const configHalves = computed(() => {
   const mid = Math.ceil(t.length / 2)
   return [t.slice(0, mid), t.slice(mid)]
 })
+// Bytes for a tier (via its joined size row) — used for sorting + colouring.
+const tierBytes = (t) => sizeByLabel.value[t.label]?.size_bytes ?? 0
 const tierGroups = computed(() => {
   const r = data.value?.retention || []
-  return GROUPS.map((g) => ({ label: g.label, tiers: r.filter(g.match) })).filter((g) => g.tiers.length)
+  return GROUPS.map((g) => ({
+    // Biggest tier first within each group so the space hogs are obvious.
+    label: g.label,
+    tiers: r.filter(g.match).slice().sort((a, b) => tierBytes(b) - tierBytes(a)),
+  })).filter((g) => g.tiers.length)
 })
+// pg_size_pretty gives "1929 MB" — group the number part so it reads "1,929 MB".
+function withCommas(s) {
+  if (!s || s === '—') return s
+  const m = String(s).match(/^([\d.]+)\s*(.*)$/)
+  if (!m) return s
+  const num = m[1].includes('.') ? m[1] : Number(m[1]).toLocaleString()
+  return m[2] ? `${num} ${m[2]}` : num
+}
+// Colour the size so large tiers stand out: red ≥ 1 GiB, amber ≥ 256 MiB.
+function sizeClass(bytes) {
+  if (bytes >= 2 ** 30) return 'text-down'
+  if (bytes >= 256 * 2 ** 20) return 'text-warn'
+  return 'text-fg'
+}
 // Lay the tier groups out in two columns (left: System metrics; right: the rest).
 const tierColumns = computed(() => {
   const g = tierGroups.value
@@ -205,7 +225,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                         <div class="whitespace-nowrap text-xs text-faint">{{ t.label }}</div>
                       </td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
-                      <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ sizeByLabel[t.label]?.size ?? '—' }}</td>
+                      <td class="px-4 py-2.5 text-right font-mono font-semibold tabular-nums" :class="sizeClass(sizeByLabel[t.label]?.size_bytes ?? 0)">{{ withCommas(sizeByLabel[t.label]?.size ?? '—') }}</td>
                       <td class="px-4 py-2.5">
                         <div class="flex items-center gap-1.5">
                           <input v-model.number="draft[t.table]" type="number" min="1" class="w-20 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
@@ -277,7 +297,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                       <div v-if="t.note" class="mt-0.5 text-xs text-faint">{{ t.note }}</div>
                     </td>
                     <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ t.rows.toLocaleString() }}</td>
-                    <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ t.size }}</td>
+                    <td class="px-4 py-2.5 text-right font-mono tabular-nums" :class="sizeClass(t.size_bytes ?? 0)">{{ withCommas(t.size) }}</td>
                   </tr>
                 </tbody>
               </table>

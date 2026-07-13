@@ -136,7 +136,7 @@ pub async fn set_retention(
     if !user.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-    crate::data_admin::set_retention(&state.data, &req.table, req.value)
+    crate::data_admin::set_retention(&state.config, &state.data, &req.table, req.value)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     Ok(StatusCode::NO_CONTENT)

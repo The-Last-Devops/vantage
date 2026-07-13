@@ -63,7 +63,15 @@ const COMPRESS_AFTER: &[(&str, &str)] = &[
     ("1h", "14 days"),
 ];
 
-pub async fn setup(data: &PgPool) {
+pub async fn setup(config: &PgPool, data: &PgPool) {
+    // Tables whose retention an admin has changed from the UI — setup() must NOT reset
+    // these to the built-in default on restart, only the ones the admin never touched.
+    // (This is what lets the intended kube_container_stats default actually converge:
+    // `add_retention_policy` silently no-ops when a policy already exists, so without
+    // this an old/over-large policy would persist forever.)
+    let overrides: Vec<String> =
+        crate::settings::get(config, "retention_overrides", Vec::<String>::new()).await;
+    let is_override = |t: &str| overrides.iter().any(|o| o == t);
     // Pre-ladder schema had only _1m/_1h rollups (8 columns, _1h sourced from raw).
     // If the _5m tier is absent we're upgrading (or fresh): drop the old rollup chain
     // so it's recreated with the full column set + hierarchical sources, and reset
@@ -141,15 +149,22 @@ pub async fn setup(data: &PgPool) {
                     schedule_interval => INTERVAL '{bucket}')"
             ));
         }
-        // retention + compression per tier
+        // retention + compression per tier. Force the built-in default (remove + re-add)
+        // unless the admin overrode this table in the UI; then just ensure a policy
+        // exists (if_not_exists) so we never clobber their choice.
         for (suffix, keep) in RETENTION {
             let tbl = if suffix.is_empty() {
                 table_base.to_string()
             } else {
                 format!("{table_base}_{suffix}")
             };
+            if !is_override(&tbl) {
+                stmts.push(format!(
+                    "SELECT remove_retention_policy('{tbl}', if_exists => true)"
+                ));
+            }
             stmts.push(format!(
-                "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}')"
+                "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}', if_not_exists => true)"
             ));
         }
         for (suffix, after) in COMPRESS_AFTER {
@@ -163,7 +178,13 @@ pub async fn setup(data: &PgPool) {
     }
 
     // Heartbeats: kept a year so uptime history + incidents span long ranges.
-    stmts.push("SELECT add_retention_policy('heartbeats', INTERVAL '365 days')".into());
+    if !is_override("heartbeats") {
+        stmts.push("SELECT remove_retention_policy('heartbeats', if_exists => true)".into());
+    }
+    stmts.push(
+        "SELECT add_retention_policy('heartbeats', INTERVAL '365 days', if_not_exists => true)"
+            .into(),
+    );
     stmts.push(
         "ALTER TABLE heartbeats SET (timescaledb.compress, \
             timescaledb.compress_segmentby = 'monitor_id', timescaledb.compress_orderby = 'time DESC')"
@@ -185,8 +206,13 @@ pub async fn setup(data: &PgPool) {
         stmts.push(format!(
             "SELECT set_chunk_time_interval('{tbl}', INTERVAL '1 day')"
         ));
+        if !is_override(tbl) {
+            stmts.push(format!(
+                "SELECT remove_retention_policy('{tbl}', if_exists => true)"
+            ));
+        }
         stmts.push(format!(
-            "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}')"
+            "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}', if_not_exists => true)"
         ));
         stmts.push(format!(
             "ALTER TABLE {tbl} SET (timescaledb.compress, \
@@ -209,6 +235,9 @@ pub async fn setup(data: &PgPool) {
 pub struct TableStat {
     pub name: String,
     pub size: String,
+    /// On-disk size in bytes — lets the UI sort by size and colour the big tiers
+    /// (the pretty `size` string can't be compared numerically).
+    pub size_bytes: i64,
     pub rows: i64,
     /// What the table is for (config DB only; None for the data-DB tiers).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -262,20 +291,23 @@ pub struct DataDbStats {
 }
 
 async fn hypertable_stat(data: &PgPool, name: &str, label: &str) -> TableStat {
-    let size: Option<(String,)> = sqlx::query_as("SELECT pg_size_pretty(hypertable_size($1))")
-        .bind(name)
-        .fetch_optional(data)
-        .await
-        .ok()
-        .flatten();
+    let size: Option<(i64, String)> =
+        sqlx::query_as("SELECT hypertable_size($1), pg_size_pretty(hypertable_size($1))")
+            .bind(name)
+            .fetch_optional(data)
+            .await
+            .ok()
+            .flatten();
     let rows: Option<(i64,)> = sqlx::query_as(&format!("SELECT count(*) FROM {name}"))
         .fetch_optional(data)
         .await
         .ok()
         .flatten();
+    let (size_bytes, size) = size.unwrap_or_else(|| (0, "—".into()));
     TableStat {
         name: label.to_string(),
-        size: size.map(|(s,)| s).unwrap_or_else(|| "—".into()),
+        size,
+        size_bytes,
         rows: rows.map(|(r,)| r).unwrap_or(0),
         note: None,
         retention_days: None,
@@ -373,8 +405,8 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
     .map(|(s,)| s)
     .unwrap_or_else(|_| "—".into());
     // Table name + exact on-disk size from the catalog, biggest first.
-    let metas: Vec<(String, String)> = sqlx::query_as(
-        "SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid)) \
+    let metas: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT c.relname, pg_total_relation_size(c.oid), pg_size_pretty(pg_total_relation_size(c.oid)) \
          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
          WHERE n.nspname = 'public' AND c.relkind = 'r' \
          ORDER BY pg_total_relation_size(c.oid) DESC",
@@ -390,7 +422,7 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
         }
     }
     let mut tables = Vec::with_capacity(metas.len());
-    for (name, size) in metas {
+    for (name, size_bytes, size) in metas {
         // Names come from pg_catalog (our own schema); double-quote defensively.
         let rows = sqlx::query_as::<_, (i64,)>(&format!(
             "SELECT count(*) FROM \"{}\"",
@@ -405,6 +437,7 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
         tables.push(TableStat {
             name,
             size,
+            size_bytes,
             rows,
             note,
             retention_days,
@@ -553,11 +586,20 @@ pub fn spawn_enforce(config: PgPool, data: PgPool) {
     });
 }
 
+/// Upper bound on chunk drops per enforcement pass — a runaway-loop backstop, set far
+/// above any realistic need (e.g. a year of daily heartbeat chunks + several tiers).
+const MAX_DROPS_PER_PASS: u32 = 2000;
+
 /// One enforcement pass. Reads the cap from the config DB; if enabled and the Data DB
-/// is over its limit, drops the globally-oldest time chunks (every hypertable, oldest
-/// history first) until back under the limit, a chunk can't be found, no space is
-/// freed, or a safety floor (~50 drops) is hit. Never touches the config DB; only ever
-/// calls `drop_chunks` on the Data DB's hypertables. No-op when disabled.
+/// is over its limit, drops the oldest time chunks (oldest history first, across the
+/// user hypertables) until back under the limit, nothing more can be dropped, or the
+/// safety cap is hit. Never touches the config DB; only ever calls `drop_chunks` on the
+/// Data DB's hypertables. No-op when disabled.
+///
+/// Progress is judged by **how many chunks `drop_chunks` actually removed**, NOT by a
+/// before/after `pg_database_size` comparison: under a fast ingest cadence, concurrent
+/// writes can grow the DB between the two size reads faster than a small chunk frees,
+/// which made the old size-delta guard `break` after ~one drop and never converge.
 pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
     let limit = crate::settings::get(config, "data_cap_limit_bytes", 10_737_418_240_i64).await;
     let enabled = crate::settings::get(config, "data_cap_enabled", false).await;
@@ -569,13 +611,21 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
         return;
     }
     let mut used = start;
-    for _ in 0..50 {
-        if used <= limit {
+    let mut dropped_total: u32 = 0;
+    while used > limit {
+        if dropped_total >= MAX_DROPS_PER_PASS {
+            tracing::warn!(
+                dropped_total,
+                "data cap: hit the per-pass drop cap while still over limit — will resume next pass"
+            );
             break;
         }
-        // Oldest chunk across ALL hypertables (oldest history first, any tier).
+        // Oldest chunk among the real (public) hypertables — raw/heartbeat/kube tables.
+        // Continuous-aggregate rollups live under `_timescaledb_internal` and are dropped
+        // via their view, not by chunk name, so we skip them here (they're small anyway).
         let oldest: Option<(String, DateTime<Utc>)> = sqlx::query_as(
             "SELECT hypertable_name, range_end FROM timescaledb_information.chunks \
+             WHERE hypertable_schema = 'public' AND range_end IS NOT NULL \
              ORDER BY range_end ASC LIMIT 1",
         )
         .fetch_optional(data)
@@ -585,20 +635,22 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
         let Some((ht, range_end)) = oldest else {
             break; // nothing left to drop
         };
-        if let Err(e) = sqlx::query("SELECT drop_chunks(format('%I', $1), older_than => $2)")
-            .bind(&ht)
-            .bind(range_end)
-            .execute(data)
-            .await
-        {
-            tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
-            break;
+        // drop_chunks returns one row per chunk it removed — count them for progress.
+        let dropped: Result<Vec<(String,)>, _> =
+            sqlx::query_as("SELECT drop_chunks(format('%I', $1), older_than => $2)::text")
+                .bind(&ht)
+                .bind(range_end)
+                .fetch_all(data)
+                .await;
+        match dropped {
+            Ok(rows) if !rows.is_empty() => dropped_total += rows.len() as u32,
+            Ok(_) => break, // the oldest chunk couldn't be dropped — avoid a tight loop
+            Err(e) => {
+                tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
+                break;
+            }
         }
-        let after = db_size_bytes(data).await;
-        if after >= used {
-            break; // no progress (chunk freed nothing reclaimable yet) — avoid a tight loop
-        }
-        used = after;
+        used = db_size_bytes(data).await;
     }
     if used < start {
         let msg = format!(
@@ -637,7 +689,14 @@ const RETENTION_TABLES: &[&str] = &[
 ];
 
 /// `value` is interpreted in the tier's unit (hours for the raw tier, days else).
-pub async fn set_retention(data: &PgPool, table: &str, value: i64) -> Result<(), String> {
+/// Records the table as a user override (config DB) so `setup()` won't reset it to
+/// the built-in default on the next restart.
+pub async fn set_retention(
+    config: &PgPool,
+    data: &PgPool,
+    table: &str,
+    value: i64,
+) -> Result<(), String> {
     if !RETENTION_TABLES.contains(&table) {
         return Err("invalid table".into());
     }
@@ -657,5 +716,12 @@ pub async fn set_retention(data: &PgPool, table: &str, value: i64) -> Result<(),
     .execute(data)
     .await
     .map_err(|e| e.to_string())?;
+    // Remember this as an admin override (best-effort — the policy change already took).
+    let mut overrides: Vec<String> =
+        crate::settings::get(config, "retention_overrides", Vec::<String>::new()).await;
+    if !overrides.iter().any(|t| t == table) {
+        overrides.push(table.to_string());
+        let _ = crate::settings::set(config, "retention_overrides", &overrides).await;
+    }
     Ok(())
 }
