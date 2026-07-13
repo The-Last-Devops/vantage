@@ -37,8 +37,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 # rust-embed reads crates/hub/../../frontend/dist at compile time.
 COPY --from=web /web/dist ./frontend/dist
-# Build id + release channel baked via build.rs (About page + auto-update). Set per
-# CI build: GIT_SHA=<commit>, VANTAGE_CHANNEL=auto for :auto-update, else stable/dev.
+# Build id + release channel baked via build.rs (About page metadata). Set per
+# CI build: GIT_SHA=<commit>, VANTAGE_CHANNEL=main/stable/dev.
 ARG GIT_SHA=""
 ARG VANTAGE_CHANNEL=dev
 ENV GIT_SHA=$GIT_SHA VANTAGE_CHANNEL=$VANTAGE_CHANNEL

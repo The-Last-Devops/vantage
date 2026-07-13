@@ -102,18 +102,15 @@ jobs:
       matrix:
         component: [hub, agent]
         arch: [amd64, arm64]
-        # main  → :main / :sha   (channel "main", never self-updates)
-        # auto  → :auto-update   (channel "auto", self-restarts under k8s)
-        channel: [main, auto]
+        # main → :main / :sha (rolling build from main; updates are driven externally).
+        channel: [main]
         exclude:
           - component: hub
             arch: arm64
     env:
       IMAGE: ghcr.io/the-last-devops/vantage-${{ matrix.component }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      # The :auto-update channel always rebuilds BOTH components so hub & agent
-      # share one build id (the agent follows the hub's id; skew would crash-loop).
-      CHANGED: ${{ matrix.channel == 'auto' && 'true' || needs.changes.outputs[matrix.component] }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
     steps:
       - uses: actions/checkout@v4
       - name: Docker Hub login (reliable buildkit image pull)
@@ -155,9 +152,8 @@ jobs:
           path: /tmp/digests/*
           retention-days: 1
 
-  # Stitch the per-arch digests into multi-arch tags — :main/:sha for the "main"
-  # channel, :auto-update for the "auto" channel. imagetools is a pure registry op —
-  # no builder/buildkit pull needed, so no Docker Hub dep here.
+  # Stitch the per-arch digests into multi-arch :main/:sha tags. imagetools is a pure
+  # registry op — no builder/buildkit pull needed, so no Docker Hub dep here.
   manifest:
     name: Manifest (${{ matrix.component }})
     if: github.event_name == 'push'
@@ -169,12 +165,10 @@ jobs:
     strategy:
       matrix:
         component: [hub, agent]
-        channel: [main, auto]
+        channel: [main]
     env:
       IMAGE: ghcr.io/the-last-devops/vantage-${{ matrix.component }}
-      # The :auto-update channel always rebuilds BOTH components so hub & agent
-      # share one build id (the agent follows the hub's id; skew would crash-loop).
-      CHANGED: ${{ matrix.channel == 'auto' && 'true' || needs.changes.outputs[matrix.component] }}
+      CHANGED: ${{ needs.changes.outputs[matrix.component] }}
     steps:
       - uses: actions/download-artifact@v4
         if: env.CHANGED == 'true'
@@ -194,9 +188,8 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=main,enable=${{ matrix.channel == 'main' }}
-            type=sha,enable=${{ matrix.channel == 'main' }}
-            type=raw,value=auto-update,enable=${{ matrix.channel == 'auto' }}
+            type=raw,value=main
+            type=sha
       - name: Create manifest list
         if: env.CHANGED == 'true'
         working-directory: /tmp/digests
@@ -208,4 +201,4 @@ jobs:
           DOCKER_METADATA_OUTPUT_JSON: ${{ steps.meta.outputs.json }}
       - name: Inspect
         if: env.CHANGED == 'true'
-        run: docker buildx imagetools inspect "$IMAGE:${{ matrix.channel == 'auto' && 'auto-update' || 'main' }}"
+        run: docker buildx imagetools inspect "$IMAGE:main"

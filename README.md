@@ -215,10 +215,9 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` flag on the session cookie (local **http** dev only). |
 | `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918/ULA) outbound targets for probes / notify / backup (SSRF hardening). |
 | `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server enrolled with this key (lets the bundled compose agent report out of the box). |
-| `AUTO_UPDATE` | — | — | On the `:auto-update` channel under k8s, opt the hub into self-update. |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing` / `env_filter`). |
 
-> `GIT_SHA` / `VANTAGE_CHANNEL` are **build-time** args (set by CI, baked via `build.rs`) for the About page + auto-update channel — not runtime config.
+> `GIT_SHA` / `VANTAGE_CHANNEL` are **build-time** args (set by CI, baked via `build.rs`) for the About page build metadata — not runtime config. Updates are driven externally (bump the image tag + redeploy).
 
 ### Agent (`vantage-agent`)
 
@@ -233,7 +232,6 @@ A **Helm chart** for the hub and a DaemonSet manifest for agents live in [deploy
 | `CLUSTER` | — | — | Cluster label for grouping (Kubernetes). |
 | `DISK_PATH` | — | `/` | Filesystem path to report disk usage for (use `/host` when mounting the host root into a container). |
 | `NODE_NAME` | — | (k8s downward API) | The Kubernetes node name when running as a DaemonSet. |
-| `AUTO_UPDATE` | — | — | Opt the agent into self-update on the auto-update channel. |
 
 ## Development
 

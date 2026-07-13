@@ -15,7 +15,7 @@ const isNewer = computed(() => {
   const tag = latest.value.tag.replace(/^v/, '')
   return cmp(tag, cur) > 0
 })
-// We're running a build NEWER than the latest GitHub release (an :auto-update /
+// We're running a build NEWER than the latest GitHub release (a :main /
 // pre-release dev build). Don't claim "you're behind".
 const isAhead = computed(() => {
   if (!about.value || !latest.value) return false

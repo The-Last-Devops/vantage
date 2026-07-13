@@ -84,7 +84,11 @@ Production hardening (opt-in):
 - **Backups**: `--set backup.enabled=true` (nightly pg_dump of both DBs → a PVC).
 - **NetworkPolicy** (lock the bundled DBs to the hub): `--set networkPolicy.enabled=true`.
 - **PodDisruptionBudget** (with `hub.replicas>1`): `--set podDisruptionBudget.enabled=true`.
-- **Auto-update** (rolling `:auto-update` channel, self-redeploys): `--set autoUpdate=true`.
+
+**Updates** are driven externally — there's no in-cluster self-updater. Bump `image.tag`
+(or point it at a moving tag like `:latest` / `:main` with `--set image.pullPolicy=Always`)
+and `helm upgrade`, or let your GitOps tool roll it. The hub's `RollingUpdate` strategy
+keeps redeploys gap-free even at `replicas: 1`.
 
 ### Expose the UI
 - Domain (nginx ingress by default): `--set hub.ingress.host=monitor.senprints.net` (host alone enables it)
@@ -107,6 +111,9 @@ One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cl
 kubectl apply -f "https://monitor.senprints.net/pub/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
 ```
 The hub fills in its own URL, the key, and the cluster — no clone, no chart registry.
+Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.0` (pinned) to
+choose another. To update, re-apply with the tag you want (or run `:latest`/`:main` with
+`imagePullPolicy: Always`, already set in the served manifest, and restart the pods).
 
 The served manifest installs BOTH the per-node DaemonSet (host metrics) and the
 one-per-cluster collector (namespace / deployment / pod / **per-container CPU-RAM** —
@@ -131,9 +138,8 @@ For a single host outside k8s: `curl -fsSL https://monitor.senprints.net/pub/ins
 
 ## Images
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.0`) + `:latest`; `:main` is the rolling build from `main`; `:auto-update`
-is the self-updating channel. The chart pins `:3.0.0` by default. If the packages are
-private:
+(e.g. `:3.0.0`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+`:3.0.0` by default. If the packages are private:
 ```bash
 kubectl -n vantage create secret docker-registry ghcr \
   --docker-server=ghcr.io --docker-username=<gh-user> --docker-password=<PAT read:packages>

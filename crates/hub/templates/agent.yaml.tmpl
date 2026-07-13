@@ -49,8 +49,6 @@ spec:
               value: "k8s"
             - name: CLUSTER
               value: "<CLUSTER>"
-            - name: AUTO_UPDATE        # 1 = self-restart to follow the hub (auto-update channel)
-              value: "<AUTO_UPDATE>"
             - name: ALLOW_SHELL        # 1 = open the reverse shell tunnel (opt-in; set 1 to enable exec/SSH)
               value: "0"
             - name: DISK_PATH
@@ -141,8 +139,6 @@ spec:
               value: "k8s-cluster"
             - name: CLUSTER
               value: "<CLUSTER>"
-            - name: AUTO_UPDATE
-              value: "<AUTO_UPDATE>"
             - name: API_KEY
               valueFrom:
                 secretKeyRef:

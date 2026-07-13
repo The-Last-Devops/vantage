@@ -264,10 +264,10 @@ pub struct IngestAck {
     pub ok: bool,
     /// Suggested interval (seconds) for the agent's next report.
     pub next_interval_secs: u64,
-    /// Hub's build id (short git sha). Agents on the `auto` release channel compare
-    /// this to their own build and self-restart (so k8s re-pulls `:auto-update`)
-    /// when it differs — letting the fleet follow the hub. Optional for wire
-    /// back-compat: older hubs omit it, older agents ignore it.
+    /// Hub's build id (short git sha), advertised for diagnostics. Retained for wire
+    /// back-compat; agents no longer act on it (updates are driven externally now,
+    /// not by the agent self-restarting to follow the hub). Optional: older hubs omit
+    /// it, agents ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hub_build: Option<String>,
 }

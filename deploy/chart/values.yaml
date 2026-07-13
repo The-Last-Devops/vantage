@@ -8,11 +8,9 @@ image:
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]
-# Auto-update: when true, run the :auto-update hub image — when a newer build is
-# published the hub triggers a rolling redeploy of itself (new pod up → old pod drains,
-# zero downtime; needs the ServiceAccount this chart creates). It also flips the image
-# to the mutable :auto-update tag with pullPolicy: Always. Default false = pinned/manual.
-autoUpdate: false
+# Updates are driven externally: bump image.tag (or repoint it at a moving tag like
+# :latest with pullPolicy: Always) and `helm upgrade` / let your GitOps tool roll it.
+# The RollingUpdate strategy keeps redeploys gap-free even at replicas: 1.
 
 # First admin: leave password empty to create the admin on first login (the UI
 # shows a one-time setup screen). Set both to pre-seed it instead.

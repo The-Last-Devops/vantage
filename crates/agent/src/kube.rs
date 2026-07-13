@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use shared::{KubeContainerStat, KubeDeploymentStat, KubeNamespaceStat, KubeReport};
 
-use crate::push::{self, post_report, shutdown_signal, upgrade_target, Sent};
+use crate::push::{post_report, shutdown_signal, upgrade_target, Sent};
 use crate::Config;
 
 /// Where kubelet mounts the pod's ServiceAccount credentials.
@@ -95,21 +95,9 @@ pub async fn run(cfg: &Config) -> Result<()> {
                     }
                 }
                 match outcome {
-                    Sent::Ok { next, hub_build } => {
+                    Sent::Ok { next } => {
                         if let Some(secs) = next {
                             interval = Duration::from_secs(secs);
-                        }
-                        if push::should_self_update(hub_build.as_deref()) {
-                            let jit = push::restart_jitter(&cluster, 300);
-                            tracing::warn!(
-                                jitter_secs = jit.as_secs(),
-                                "newer hub build — will restart for auto-update"
-                            );
-                            tokio::select! {
-                                _ = tokio::time::sleep(jit) => {}
-                                _ = &mut shutdown => {}
-                            }
-                            std::process::exit(0);
                         }
                     }
                     Sent::Redirect(loc) => {

@@ -188,30 +188,12 @@ async fn main() -> Result<()> {
             }
         }
         match outcome {
-            Sent::Ok { next, hub_build } => {
+            Sent::Ok { next } => {
                 if let Some(secs) = next {
                     interval = Duration::from_secs(secs);
                 }
-                // Auto-update channel: if the hub advertises a newer build, restart
-                // (after per-host jitter) so k8s re-pulls the :auto-update image.
-                if push::should_self_update(hub_build.as_deref()) {
-                    let host = if report.hostname.is_empty() {
-                        "agent"
-                    } else {
-                        report.hostname.as_str()
-                    };
-                    let jit = push::restart_jitter(host, 300);
-                    tracing::warn!(
-                        hub = ?hub_build, ours = env!("GIT_SHA"), jitter_secs = jit.as_secs(),
-                        "newer build on the auto-update channel — will restart so k8s re-pulls"
-                    );
-                    tokio::select! {
-                        _ = tokio::time::sleep(jit) => {}
-                        _ = &mut shutdown => {}
-                    }
-                    tracing::info!("exiting for auto-update (k8s will pull the new image)");
-                    std::process::exit(0);
-                }
+                // Updates are driven externally (GitOps / rolling the image tag);
+                // the agent no longer self-restarts on a newer hub build.
                 tracing::debug!(cpu = report.cpu_percent, "report sent");
             }
             Sent::Redirect(loc) => tracing::warn!(

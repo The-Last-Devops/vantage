@@ -33,15 +33,12 @@ spec:
         - operator: Exists
       containers:
         - name: agent
-          {{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate }}
-          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.pullPolicy }}
           env:
             - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
             - { name: AGENT_KIND, value: "k8s" }
             - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
-            # 1 = self-restart to follow the hub (auto-update); 0 = pinned/manual.
-            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
             # 1 = open the reverse shell tunnel so the hub can SSH into this host via
             # 127.0.0.1:<sshd>. Off by default; the node must run sshd (hostNetwork=true
             # makes the agent's localhost:22 the node's sshd).

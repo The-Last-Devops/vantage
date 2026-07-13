@@ -28,7 +28,6 @@ mod notify;
 mod passkey;
 mod probe;
 mod rbac;
-mod selfupdate;
 mod settings;
 mod spa;
 mod totp;
@@ -109,7 +108,6 @@ async fn main() -> Result<()> {
     backup::spawn(state.clone());
     data_admin::spawn_enforce(state.config.clone(), state.data.clone()); // Data-DB cap eviction
     data_admin::spawn_config_prune(state.config.clone()); // config-DB log retention
-    selfupdate::spawn(); // no-op unless on the :auto-update channel under k8s
 
     use axum::routing::{delete, patch, post, put};
     let app = Router::new()

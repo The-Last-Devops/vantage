@@ -17,9 +17,26 @@ use axum::{
 };
 use serde::Deserialize;
 
-const AGENT_IMAGE: &str = "ghcr.io/the-last-devops/vantage-agent:main";
-// The rolling auto-update channel — the agent self-restarts to follow the hub.
-const AGENT_IMAGE_AUTO: &str = "ghcr.io/the-last-devops/vantage-agent:auto-update";
+const AGENT_IMAGE_REPO: &str = "ghcr.io/the-last-devops/vantage-agent";
+/// Image tag used when the caller doesn't pick one.
+const DEFAULT_AGENT_TAG: &str = "latest";
+
+/// Accept only a safe image tag (it's substituted straight into the served YAML).
+/// Docker tags are `[A-Za-z0-9_][A-Za-z0-9._-]{0,127}` — reject anything else so a
+/// crafted `?tag=` can't inject manifest content. Empty/invalid → the default tag.
+fn sanitize_tag(tag: Option<&str>) -> &str {
+    match tag {
+        Some(t)
+            if !t.is_empty()
+                && t.len() <= 128
+                && t.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')) =>
+        {
+            t
+        }
+        _ => DEFAULT_AGENT_TAG,
+    }
+}
 
 /// Reconstruct the hub's public base URL from the request the caller hit, so the
 /// agent reports back to the same domain (works behind an ingress / TLS).
@@ -50,10 +67,11 @@ pub struct AgentParams {
     /// k8s namespace to install the DaemonSet into (NOT the RBAC workspace, which
     /// the API key already encodes). Defaults to `vantage`.
     ns: Option<String>,
-    /// `1`/`true` → use the rolling `:auto-update` image so the agent self-updates.
-    /// Anything else (default) pins the `:main` build (manual updates).
+    /// Image tag to run (e.g. `latest`, `main`, `3.0.0`). Sanitized; anything
+    /// invalid falls back to the default. Updates are driven by re-applying with a
+    /// new tag (or `imagePullPolicy: Always` on a moving tag) — no in-agent updater.
     #[serde(default)]
-    autoupdate: Option<String>,
+    tag: Option<String>,
 }
 
 const AGENT_MANIFEST: &str = include_str!("../templates/agent.yaml.tmpl");
@@ -69,19 +87,13 @@ pub async fn k8s_agent_yaml(headers: HeaderMap, Query(p): Query<AgentParams>) ->
         p.ns.as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or("vantage");
-    let auto = matches!(p.autoupdate.as_deref(), Some("1") | Some("true"));
-    let (image, auto_env) = if auto {
-        (AGENT_IMAGE_AUTO, "1")
-    } else {
-        (AGENT_IMAGE, "0")
-    };
+    let image = format!("{AGENT_IMAGE_REPO}:{}", sanitize_tag(p.tag.as_deref()));
     let body = AGENT_MANIFEST
         .replace("<HUB_URL>", &base_url(&headers))
         .replace("<API_KEY>", &p.key)
         .replace("<CLUSTER>", cluster)
         .replace("<NAMESPACE>", ns)
-        .replace("<IMAGE>", image)
-        .replace("<AUTO_UPDATE>", auto_env);
+        .replace("<IMAGE>", &image);
     Response::builder()
         .header(header::CONTENT_TYPE, "application/yaml")
         .header(header::CACHE_CONTROL, "no-store")
@@ -99,4 +111,33 @@ pub async fn install_sh() -> Response {
         .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(INSTALL_SH))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_tag_when_absent_or_empty() {
+        assert_eq!(sanitize_tag(None), DEFAULT_AGENT_TAG);
+        assert_eq!(sanitize_tag(Some("")), DEFAULT_AGENT_TAG);
+    }
+
+    #[test]
+    fn accepts_valid_tags() {
+        assert_eq!(sanitize_tag(Some("latest")), "latest");
+        assert_eq!(sanitize_tag(Some("main")), "main");
+        assert_eq!(sanitize_tag(Some("3.0.0")), "3.0.0");
+        assert_eq!(sanitize_tag(Some("v3.0.0-rc.1")), "v3.0.0-rc.1");
+    }
+
+    #[test]
+    fn rejects_injection_and_out_of_range() {
+        // Anything that could break out of the image ref / inject YAML falls back.
+        for bad in ["a b", "a/b", "a:b", "a\nb", "a\"b", "тест", "a b"] {
+            assert_eq!(sanitize_tag(Some(bad)), DEFAULT_AGENT_TAG, "tag {bad:?}");
+        }
+        let too_long = "a".repeat(129);
+        assert_eq!(sanitize_tag(Some(&too_long)), DEFAULT_AGENT_TAG);
+    }
 }

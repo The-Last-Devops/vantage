@@ -15,9 +15,8 @@ fn main() {
         let _ = fs::write(&keep, b"");
     }
 
-    // Build metadata for the About page + the auto-update build id. Prefer a
-    // GIT_SHA build-arg (Docker images have no .git), else read git locally,
-    // else "unknown".
+    // Build metadata for the About page. Prefer a GIT_SHA build-arg (Docker images
+    // have no .git), else read git locally, else "unknown".
     let git_sha = std::env::var("GIT_SHA")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -33,8 +32,8 @@ fn main() {
     println!("cargo:rustc-env=GIT_SHA={git_sha}");
     println!("cargo:rerun-if-env-changed=GIT_SHA");
 
-    // Release channel: "auto" (the :auto-update rolling tag) self-updates; anything
-    // else never does. Set via Docker build-arg; defaults to "dev" for local builds.
+    // Release channel label baked as build metadata (main/stable/dev). No longer
+    // gates behavior — updates are external. Set via Docker build-arg; defaults to "dev".
     let channel = std::env::var("VANTAGE_CHANNEL").unwrap_or_else(|_| "dev".into());
     println!("cargo:rustc-env=VANTAGE_CHANNEL={channel}");
     println!("cargo:rerun-if-env-changed=VANTAGE_CHANNEL");

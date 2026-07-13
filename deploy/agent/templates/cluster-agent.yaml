@@ -1,5 +1,4 @@
 {{- if .Values.clusterAgent.enabled }}
-{{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate }}
 # One-per-cluster collector — reports k8s object + per-container stats (the Cluster page).
 # Reuses the api-key Secret created by the DaemonSet. Read-only ClusterRole.
 apiVersion: v1
@@ -57,13 +56,12 @@ spec:
       {{- end }}
       containers:
         - name: agent
-          image: "{{ .Values.image.repository }}:{{ $tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.pullPolicy }}
           env:
             - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
             - { name: AGENT_KIND, value: "k8s-cluster" }
             - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
-            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
             - name: API_KEY
               valueFrom: { secretKeyRef: { name: {{ .Release.Name }}, key: api-key } }
           resources:

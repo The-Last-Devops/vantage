@@ -3,10 +3,7 @@
 
 image:
   repository: ghcr.io/the-last-devops/vantage-agent
-  tag: "3.0.0"           # pinned release; set autoUpdate=true for the rolling channel
-# Auto-update: when true, run the :auto-update image so each agent self-restarts to
-# follow the hub (k8s re-pulls). Overrides image.tag. Default false = manual updates.
-autoUpdate: false
+  tag: "3.0.0"           # pinned release; bump it (or point at :latest) and helm upgrade to update
 # Interactive shell/console: when true the agent opens a reverse tunnel so the hub can
 # SSH into this host (via the node's sshd on 127.0.0.1). **OFF by default** (opt-in) per
 # the two-sided-consent exec design. Even when on, access is still gated by RBAC

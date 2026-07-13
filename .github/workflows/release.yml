@@ -129,7 +129,7 @@ jobs:
           file: deploy/Dockerfile.${{ matrix.component }}
           platforms: linux/${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          # Pinned release images are the "stable" channel — they never self-update.
+          # Pinned release images are the "stable" channel (build metadata only).
           build-args: |
             VANTAGE_CHANNEL=stable
             GIT_SHA=${{ github.sha }}

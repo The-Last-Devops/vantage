@@ -1,4 +1,3 @@
-{{- $tag := ternary "auto-update" .Values.image.tag .Values.autoUpdate -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,8 +5,8 @@ metadata:
 spec:
   replicas: {{ .Values.hub.replicas }}
   # Zero-downtime rollouts: never drop below the desired count — surge a new pod, wait
-  # for its readiness probe, then terminate the old one. This is what makes auto-update
-  # (and any redeploy) gap-free even at replicas: 1.
+  # for its readiness probe, then terminate the old one. This keeps any redeploy
+  # (e.g. an external image-tag bump) gap-free even at replicas: 1.
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
@@ -18,10 +17,6 @@ spec:
       labels: { app: {{ include "vantage.hub" . }} }
     spec:
       {{- include "vantage.pullSecrets" . | nindent 6 }}
-      {{- if .Values.autoUpdate }}
-      # SA grants the hub get/patch on its own Deployment so it can trigger the rollout.
-      serviceAccountName: {{ include "vantage.hub" . }}
-      {{- end }}
       # Give in-flight requests time to drain on SIGTERM (the hub shuts down gracefully).
       terminationGracePeriodSeconds: 30
       {{- with .Values.hub.nodeSelector }}
@@ -30,7 +25,7 @@ spec:
       {{- end }}
       containers:
         - name: hub
-          image: "{{ .Values.image.hub }}:{{ $tag }}"
+          image: "{{ .Values.image.hub }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- with .Values.hub.securityContext }}
           securityContext:
@@ -47,10 +42,6 @@ spec:
               exec: { command: ["sleep", "5"] }
           env:
             - { name: BIND_ADDR, value: "0.0.0.0:8080" }
-            # 1 = roll the Deployment when a newer :auto-update image is published; 0 = manual.
-            - { name: AUTO_UPDATE, value: {{ ternary "1" "0" .Values.autoUpdate | quote }} }
-            # Lets the self-updater patch the right Deployment to trigger the rollout.
-            - { name: HUB_DEPLOYMENT_NAME, value: {{ include "vantage.hub" . | quote }} }
             - { name: CONFIG_DATABASE_URL, value: {{ include "vantage.configUrl" . | quote }} }
             - { name: DATA_DATABASE_URL, value: {{ include "vantage.dataUrl" . | quote }} }
             {{- if .Values.admin.password }}
