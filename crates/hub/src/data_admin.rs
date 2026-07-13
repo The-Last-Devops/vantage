@@ -575,7 +575,7 @@ fn human_bytes(n: i64) -> String {
 }
 
 /// Spawn the background cap enforcer: every 5 minutes, if the cap is enabled and the
-/// Data DB exceeds it, drop the oldest chunks until back under (or no progress).
+/// Data DB exceeds it, evict until back under (or no progress).
 pub fn spawn_enforce(config: PgPool, data: PgPool) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(300));
@@ -590,72 +590,92 @@ pub fn spawn_enforce(config: PgPool, data: PgPool) {
 /// above any realistic need (e.g. a year of daily heartbeat chunks + several tiers).
 const MAX_DROPS_PER_PASS: u32 = 2000;
 
-/// One enforcement pass. Reads the cap from the config DB; if enabled and the Data DB
-/// is over its limit, drops the oldest time chunks (oldest history first, across the
-/// user hypertables) until back under the limit, nothing more can be dropped, or the
-/// safety cap is hit. Never touches the config DB; only ever calls `drop_chunks` on the
-/// Data DB's hypertables. No-op when disabled.
+/// Outcome of one enforcement pass (also returned by the manual "evict now" endpoint).
+#[derive(Serialize)]
+pub struct EvictionResult {
+    pub enabled: bool,
+    pub limit_bytes: i64,
+    /// DB size after the pass (== before, when nothing was evicted).
+    pub used_bytes: i64,
+    pub freed_bytes: i64,
+    pub dropped_chunks: u32,
+}
+
+/// One enforcement pass. Reads the cap from the config DB; if enabled and the Data DB is
+/// over its limit, reclaims space **from the largest hypertable first** — dropping that
+/// tier's oldest chunks — and re-evaluates which tier is largest each round, until back
+/// under the limit, nothing more can be dropped, or the safety cap is hit. Never touches
+/// the config DB; only ever calls `drop_chunks` on the Data DB's hypertables.
+///
+/// Largest-first (not globally-oldest-first) is deliberate: one runaway tier is usually
+/// the whole overage (e.g. per-container k8s stats), and globally-oldest would instead
+/// delete a year of tiny, valuable heartbeat/rollup chunks while barely denting the DB.
 ///
 /// Progress is judged by **how many chunks `drop_chunks` actually removed**, NOT by a
 /// before/after `pg_database_size` comparison: under a fast ingest cadence, concurrent
 /// writes can grow the DB between the two size reads faster than a small chunk frees,
 /// which made the old size-delta guard `break` after ~one drop and never converge.
-pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
+pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
     let limit = crate::settings::get(config, "data_cap_limit_bytes", 10_737_418_240_i64).await;
     let enabled = crate::settings::get(config, "data_cap_enabled", false).await;
-    if !enabled {
-        return;
-    }
     let start = db_size_bytes(data).await;
-    if start <= limit {
-        return;
-    }
     let mut used = start;
     let mut dropped_total: u32 = 0;
-    while used > limit {
-        if dropped_total >= MAX_DROPS_PER_PASS {
-            tracing::warn!(
-                dropped_total,
-                "data cap: hit the per-pass drop cap while still over limit — will resume next pass"
-            );
-            break;
-        }
-        // Oldest chunk among the real (public) hypertables — raw/heartbeat/kube tables.
-        // Continuous-aggregate rollups live under `_timescaledb_internal` and are dropped
-        // via their view, not by chunk name, so we skip them here (they're small anyway).
-        let oldest: Option<(String, DateTime<Utc>)> = sqlx::query_as(
-            "SELECT hypertable_name, range_end FROM timescaledb_information.chunks \
-             WHERE hypertable_schema = 'public' AND range_end IS NOT NULL \
-             ORDER BY range_end ASC LIMIT 1",
-        )
-        .fetch_optional(data)
-        .await
-        .ok()
-        .flatten();
-        let Some((ht, range_end)) = oldest else {
-            break; // nothing left to drop
-        };
-        // drop_chunks returns one row per chunk it removed — count them for progress.
-        let dropped: Result<Vec<(String,)>, _> =
-            sqlx::query_as("SELECT drop_chunks(format('%I', $1), older_than => $2)::text")
-                .bind(&ht)
-                .bind(range_end)
-                .fetch_all(data)
-                .await;
-        match dropped {
-            Ok(rows) if !rows.is_empty() => dropped_total += rows.len() as u32,
-            Ok(_) => break, // the oldest chunk couldn't be dropped — avoid a tight loop
-            Err(e) => {
-                tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
+    if enabled && start > limit {
+        while used > limit {
+            if dropped_total >= MAX_DROPS_PER_PASS {
+                tracing::warn!(
+                    dropped_total,
+                    "data cap: hit the per-pass drop cap while still over limit — will resume next pass"
+                );
                 break;
             }
+            // Oldest chunk of the LARGEST real (public) hypertable. Continuous-aggregate
+            // rollups live under `_timescaledb_internal` and are dropped via their view,
+            // not by chunk name, so we skip them here (they're small anyway).
+            let target: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+                "SELECT c.hypertable_name, \
+                        (SELECT ch.range_end FROM timescaledb_information.chunks ch \
+                         WHERE ch.hypertable_schema = 'public' \
+                           AND ch.hypertable_name = c.hypertable_name \
+                           AND ch.range_end IS NOT NULL \
+                         ORDER BY ch.range_end ASC LIMIT 1) \
+                 FROM timescaledb_information.hypertables c \
+                 WHERE c.hypertable_schema = 'public' \
+                 ORDER BY hypertable_size(format('%I.%I', c.hypertable_schema, c.hypertable_name)::regclass) DESC NULLS LAST \
+                 LIMIT 1",
+            )
+            .fetch_optional(data)
+            .await
+            .ok()
+            .flatten();
+            let Some((ht, range_end)) = target else {
+                break; // no hypertable / no droppable chunk left
+            };
+            // drop_chunks returns one row per chunk it removed — count them for progress.
+            let dropped: Result<Vec<(String,)>, _> =
+                sqlx::query_as("SELECT drop_chunks(format('%I', $1), older_than => $2)::text")
+                    .bind(&ht)
+                    .bind(range_end)
+                    .fetch_all(data)
+                    .await;
+            match dropped {
+                Ok(rows) if !rows.is_empty() => dropped_total += rows.len() as u32,
+                Ok(_) => break, // couldn't drop the chosen chunk — avoid a tight loop
+                Err(e) => {
+                    tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
+                    break;
+                }
+            }
+            used = db_size_bytes(data).await;
         }
-        used = db_size_bytes(data).await;
     }
-    if used < start {
+    let freed = (start - used).max(0);
+    if freed > 0 {
         let msg = format!(
-            "data cap eviction: freed {}, now {} / limit {}",
-            human_bytes(start - used),
+            "data cap eviction: freed {} ({} chunks), now {} / limit {}",
+            human_bytes(freed),
+            dropped_total,
             human_bytes(used),
             human_bytes(limit)
         );
@@ -667,6 +687,13 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) {
         .bind(&msg)
         .execute(config)
         .await;
+    }
+    EvictionResult {
+        enabled,
+        limit_bytes: limit,
+        used_bytes: used,
+        freed_bytes: freed,
+        dropped_chunks: dropped_total,
     }
 }
 

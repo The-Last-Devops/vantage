@@ -68,17 +68,37 @@ async function saveCfg(t) {
 }
 
 // ---- cap meter ----
+// True usage ratio (can exceed 100%) for the label; the bar width is clamped to 100%.
 const usedPct = computed(() => {
   const c = data.value?.cap
   if (!c || !c.limit_bytes) return 0
-  return Math.min(100, (c.used_bytes / c.limit_bytes) * 100)
+  return (c.used_bytes / c.limit_bytes) * 100
 })
-const meterColor = computed(() => (usedPct.value > 90 ? 'bg-down' : usedPct.value >= 70 ? 'bg-warn' : 'bg-accent'))
+const barPct = computed(() => Math.min(100, usedPct.value))
+const overCap = computed(() => usedPct.value > 100)
+// How far over the limit, e.g. "3.0×", shown when over cap.
+const overFactor = computed(() => {
+  const c = data.value?.cap
+  return c && c.limit_bytes ? (c.used_bytes / c.limit_bytes).toFixed(1) : '0'
+})
+const meterColor = computed(() => (usedPct.value >= 90 ? 'bg-down' : usedPct.value >= 70 ? 'bg-warn' : 'bg-accent'))
 const fmtBytes = (n) => {
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
   let v = n, i = 0
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
   return `${v.toFixed(1)} ${u[i]}`
+}
+
+const evicting = ref(false)
+async function enforceNow() {
+  msg.value = ''
+  evicting.value = true
+  try {
+    const r = await api.post('/api/admin/data-cap/enforce', {})
+    msg.value = `✓ Evicted ${fmtBytes(r.freed_bytes)} — now ${fmtBytes(r.used_bytes)} / ${fmtBytes(r.limit_bytes)}.`
+    await load()
+  } catch (e) { msg.value = `Evict failed (${e.status}).` }
+  finally { evicting.value = false }
 }
 
 async function saveCap() {
@@ -168,11 +188,14 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
           <!-- cap card -->
           <div class="space-y-3 rounded-xl border border-line bg-surface p-4">
             <div class="flex items-center justify-between gap-3">
-              <div class="text-sm font-semibold text-fg">Storage cap</div>
-              <div class="font-mono text-xs text-faint">{{ fmtBytes(data.cap.used_bytes) }} of {{ fmtBytes(data.cap.limit_bytes) }} used · {{ usedPct.toFixed(1) }}%</div>
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-fg">Storage cap</span>
+                <span v-if="overCap" class="rounded-pill bg-down/15 px-2 py-0.5 text-micro font-bold uppercase tracking-wide text-down">Over cap · {{ overFactor }}×</span>
+              </div>
+              <div class="font-mono text-xs" :class="overCap ? 'text-down' : 'text-faint'">{{ fmtBytes(data.cap.used_bytes) }} of {{ fmtBytes(data.cap.limit_bytes) }} used · {{ usedPct.toFixed(1) }}%</div>
             </div>
             <div class="h-2 overflow-hidden rounded bg-line">
-              <div class="h-full transition-all" :class="meterColor" :style="{ width: usedPct + '%' }"></div>
+              <div class="h-full transition-all" :class="meterColor" :style="{ width: barPct + '%' }"></div>
             </div>
             <div class="flex flex-wrap items-center justify-between gap-3">
               <label class="flex cursor-pointer items-center gap-3">
@@ -181,13 +204,14 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                 <span class="text-sm text-fg">Auto-evict oldest data when over cap</span>
               </label>
               <div class="flex items-end gap-2">
+                <button v-if="overCap" @click="enforceNow" :disabled="evicting" class="rounded-lg border border-down/50 bg-down/10 px-3.5 py-2 text-sm font-semibold text-down hover:bg-down/20 disabled:opacity-50">{{ evicting ? 'Evicting…' : 'Evict now' }}</button>
                 <label class="text-xs text-muted">Limit (GB)
                   <input v-model.number="capGb" type="number" min="0.25" max="1024" step="0.25" class="mt-1 block w-24 rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />
                 </label>
                 <button @click="saveCap" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Save</button>
               </div>
             </div>
-            <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />Eviction drops the oldest time chunks first — shrinking how far back history reaches. Raw &amp; rollup tiers are evicted oldest-first regardless of their per-tier window above.</p>
+            <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />When over cap, eviction reclaims space from the <strong>largest tier first</strong>, dropping its oldest chunks — so a runaway tier shrinks before the rest. This can drop data newer than a tier's Keep-for window above.</p>
           </div>
 
           <!-- sampling cadence (hub-decided push interval) -->

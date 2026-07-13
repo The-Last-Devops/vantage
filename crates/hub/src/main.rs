@@ -167,6 +167,7 @@ async fn main() -> Result<()> {
         .route("/api/admin/logs", get(api::admin_logs))
         .route("/api/admin/retention", post(api::set_retention))
         .route("/api/admin/data-cap", post(api::set_data_cap))
+        .route("/api/admin/data-cap/enforce", post(api::enforce_data_cap))
         .route(
             "/api/admin/config-retention",
             post(api::set_config_retention),

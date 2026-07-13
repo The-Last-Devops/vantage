@@ -120,6 +120,20 @@ pub async fn set_data_cap(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// POST /api/admin/data-cap/enforce — run one eviction pass now and report what it freed.
+/// A no-op (freed 0) when the cap is disabled or the DB is already under the limit.
+pub async fn enforce_data_cap(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> Result<Json<crate::data_admin::EvictionResult>, StatusCode> {
+    if !user.is_admin {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(Json(
+        crate::data_admin::enforce_cap(&state.config, &state.data).await,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct SetRetention {
     pub table: String,
