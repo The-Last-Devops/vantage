@@ -55,6 +55,31 @@ behind a TLS reverse proxy in production). Then **Add System** to install agents
 Upgrade with `docker compose pull && docker compose up -d`. The hub image is **amd64-only**;
 the agent image is multi-arch.
 
+#### Hub environment variables (Docker / any deployment)
+
+Set on the `hub` container. Required unless noted; the rest have safe defaults.
+
+| Variable | Required | Default | Purpose |
+|---|:---:|---|---|
+| `CONFIG_DATABASE_URL` | ✅ | — | Postgres URL for the **config** DB (users, workspaces, monitors, rules). |
+| `DATA_DATABASE_URL` | ✅ | — | Postgres URL for the **data** DB — must have the **TimescaleDB** extension. |
+| `ADMIN_EMAIL` | — | `admin@local` | First admin's email. Only used to pre-seed; skip to create the admin on the first-visit setup screen. |
+| `ADMIN_PASSWORD` | — | — | First admin's password. Set with `ADMIN_EMAIL` to pre-seed; leave unset to use the setup screen. |
+| `BIND_ADDR` | — | `0.0.0.0:8080` | Listen address. |
+| `PUBLIC_URL` | — | auto-detected | Externally-reachable base URL (e.g. `https://mon.example.com`); auto-detected from request headers — set only to override (used by passkeys + the exposure self-check). |
+| `EXEC_APP_SECRET` | — | — | Encrypts stored SSH-key material at rest (needed for the shell/exec feature). **Back it up** — losing it makes stored keys unrecoverable. |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` | — | derived from request | Pin the passkey relying-party ID / origin; optional (derived per request otherwise). |
+| `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` cookie flag for **local http dev only**. |
+| `EGRESS_POLICY` | — | allow private | Set `strict` to also block private (RFC1918/ULA) outbound targets (SSRF hardening). |
+| `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server with this key (lets a bundled agent report out of the box). |
+| `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing`/`env_filter`). |
+
+Container-level bits the compose file above sets: `ports: ["8080:8080"]`, `cap_add: [NET_RAW]`
+(for ICMP "ping" monitors), a DB volume, and `restart: unless-stopped`.
+
+The **agent** container/binary is configured by its own env — see the agent table in
+§3 below.
+
 ## 1. Install the hub (Helm)
 `deploy/chart` installs the hub plus its two databases (config on plain Postgres,
 data on TimescaleDB), each with its own PVC.
@@ -69,6 +94,67 @@ helm install lm ./deploy/chart \
   --set hub.ingress.host=monitor.senprints.net \
   --set timescaledb.storageClass=sp-hostpath
 ```
+
+#### Hub chart values (`deploy/chart`)
+
+Override any of these with `--set key=value` (or a `-f my-values.yaml`). Nothing is
+required — the defaults give a working single-node hub with bundled databases.
+
+**Image**
+| Key | Default | Purpose |
+|---|---|---|
+| `image.hub` | `ghcr.io/the-last-devops/vantage-hub` | Hub image repository (no tag). |
+| `image.tag` | `3.0.0` | Pinned release tag. Bump + `helm upgrade` to update; or set a moving tag (`latest`/`main`) with `image.pullPolicy=Always`. |
+| `image.pullPolicy` | `IfNotPresent` | Set `Always` when tracking a moving tag. |
+| `image.pullSecrets` | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
+
+**First admin**
+| Key | Default | Purpose |
+|---|---|---|
+| `admin.email` | `admin@local` | Pre-seed admin email (only used if `admin.password` is set). |
+| `admin.password` | `""` | Pre-seed admin password. Empty → create the admin on the first-visit setup screen. |
+
+**Databases** (bundled TimescaleDB + Postgres; each gets a PVC)
+| Key | Default | Purpose |
+|---|---|---|
+| `timescaledb.enabled` | `true` | `false` → use an external DB (set `hub.configDatabaseUrl`/`hub.dataDatabaseUrl`; the data DB **must** have TimescaleDB). |
+| `timescaledb.image` | `timescale/timescaledb:2.17.2-pg16` | Data DB image (pinned — a moving tag can force a breaking PG major bump). |
+| `timescaledb.configImage` | `postgres:16.6-alpine` | Config DB image (plain Postgres). |
+| `timescaledb.password` | `""` | Leave empty — auto-generated and kept stable across `helm upgrade`. |
+| `timescaledb.storageClass` | `""` | StorageClass for both DB PVCs (`""` = cluster default). |
+| `timescaledb.configStorage` | `1Gi` | Config DB volume size (small). |
+| `timescaledb.dataStorage` | `5Gi` | Data DB volume size (grows with metrics history). |
+| `timescaledb.resources` | `100m/256Mi req, 1Gi limit` | Per-DB pod resources. |
+
+**Hub pod**
+| Key | Default | Purpose |
+|---|---|---|
+| `hub.replicas` | `1` | Hub replica count. |
+| `hub.appSecret` | `""` | `EXEC_APP_SECRET` verbatim; empty + `autoAppSecret=true` auto-generates one. |
+| `hub.autoAppSecret` | `true` | Auto-generate + persist the app secret in the release Secret. **Back it up** — losing it makes stored SSH keys unrecoverable. |
+| `hub.configDatabaseUrl` | `""` | External config DB URL (only when `timescaledb.enabled=false`). |
+| `hub.dataDatabaseUrl` | `""` | External data DB URL (TimescaleDB required). |
+| `hub.resources` | `100m/128Mi req, 512Mi limit` | Hub pod resources. |
+| `hub.securityContext` | non-root uid 10001, drop ALL, add `NET_RAW` | `NET_RAW` is needed for ICMP ping monitors. |
+| `hub.nodeSelector` | `kubernetes.io/arch: amd64` | Hub image is amd64-only — keep it off arm64 nodes. |
+| `hub.service.type` | `ClusterIP` | `NodePort`/`LoadBalancer` to expose the UI without an Ingress. |
+| `hub.ingress.host` | `""` | Set a hostname → creates an Ingress (enables it implicitly). |
+| `hub.ingress.className` | `nginx` | Ingress controller class (e.g. `traefik`). |
+| `hub.ingress.tls` | `false` | `true` → terminate HTTPS via the `<release>-tls` secret (also sets passkey/`PUBLIC_URL` scheme to https). |
+| `hub.ingress.annotations` | `{}` | e.g. `cert-manager.io/cluster-issuer: letsencrypt`. |
+| `hub.ingress.enabled` | `false` | Usually left implied by `hub.ingress.host`. |
+
+**Production hardening** (opt-in)
+| Key | Default | Purpose |
+|---|---|---|
+| `backup.enabled` | `false` | Nightly `pg_dump` of both DBs → a PVC. |
+| `backup.schedule` | `0 3 * * *` | Backup CronJob schedule. |
+| `backup.keepDays` | `7` | Days of dumps to retain. |
+| `backup.storage` | `5Gi` | Backup PVC size. |
+| `backup.storageClass` | `""` | Backup PVC StorageClass. |
+| `networkPolicy.enabled` | `false` | Default-deny + hub→DB allow (only meaningful with bundled DBs). |
+| `podDisruptionBudget.enabled` | `false` | PDB for the hub (relevant with `hub.replicas>1`). |
+| `podDisruptionBudget.minAvailable` | `1` | Minimum available hub pods during disruptions. |
 
 Sensible defaults (nothing required):
 - **First admin** is created from the UI on first visit (one-time setup screen).
@@ -132,6 +218,37 @@ helm install vantage-agent ./deploy/agent \
 # opt into the reverse SSH tunnel (off by default): --set allowShell=true
 # per-node host metrics only (skip the cluster collector): --set clusterAgent.enabled=false
 ```
+
+#### Agent chart values (`deploy/agent`)
+
+| Key | Required | Default | Purpose |
+|---|:---:|---|---|
+| `hubUrl` | ✅ | `""` | Where the hub is reachable **from inside this cluster**. Same cluster as hub → `http://<release>-hub.<ns>:8080`; else the hub's public URL. |
+| `apiKey` | ✅ | `""` | Enrollment key from the UI (**Add System**). |
+| `cluster` | — | `my-cluster` | Label grouping this cluster's nodes in the UI (**Kubernetes › \<cluster\>**). |
+| `image.repository` | — | `ghcr.io/the-last-devops/vantage-agent` | Agent image repository. |
+| `image.tag` | — | `3.0.0` | Pinned tag; bump + `helm upgrade` (or a moving tag + `pullPolicy=Always`) to update. |
+| `pullPolicy` | — | `IfNotPresent` | Set `Always` when tracking a moving tag. |
+| `pullSecrets` | — | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
+| `clusterAgent.enabled` | — | `true` | Also deploy the one-per-cluster collector (Deployment + read-only ClusterRole) for the **Clusters** page. `false` = per-node host metrics only. |
+| `allowShell` | — | `false` | Open the reverse SSH tunnel so the hub can console into nodes (opt-in; still gated by RBAC + step-up + host SSH auth). See `docs/exec-design.md`. |
+| `resources` | — | `20m/32Mi req, 128Mi limit` | Agent pod resources. |
+
+#### Agent environment variables (Docker / binary / served manifest)
+
+The DaemonSet/Compose/binary agent reads these directly:
+
+| Variable | Required | Default | Purpose |
+|---|:---:|---|---|
+| `HUB_URL` | ✅ | — | Base URL of the hub the agent pushes to. |
+| `API_KEY` | ✅ | — | Per-server enrollment key (sent as `x-api-key`); the hub maps it to a workspace. |
+| `AGENT_KIND` | — | auto-detect | Force `node` / `docker` / `k8s` / `k8s-cluster` instead of auto-detecting. |
+| `CLUSTER` | — | — | Cluster label for grouping (Kubernetes). |
+| `ALLOW_SHELL` | — | `0` (charts) | `1` opens the reverse SSH tunnel (see `allowShell`). |
+| `INTERVAL` | — | hub-controlled | Optional push-cadence override (seconds); normally the hub decides. |
+| `HOSTNAME_OVERRIDE` | — | system hostname | Name this host reports as. |
+| `DISK_PATH` | — | `/` | Filesystem to report disk usage for (`/host` when the host root is mounted into a container). |
+| `NODE_NAME` | — | (k8s downward API) | Node name when running as a DaemonSet. |
 
 For a single host outside k8s: `curl -fsSL https://monitor.senprints.net/pub/install.sh | HUB_URL=… API_KEY=… sh`
 (native binary + systemd), or run the agent container directly.
