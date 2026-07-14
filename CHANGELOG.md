@@ -9,6 +9,42 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ## [Unreleased]
 
+### ⚠️ Breaking / Removed
+- **Removed the `:auto-update` image channel and the in-cluster self-updater** (hub
+  self-patch + agent self-restart). Updates are now driven **externally**: bump `image.tag`
+  (or track a moving tag like `:latest`/`:main` with `pullPolicy: Always`) and `helm upgrade`
+  / let GitOps roll it. The chart's `autoUpdate` value, the self-patch ServiceAccount/RBAC,
+  and `deploy/autoupdate-*.yaml` are gone; the hub's `RollingUpdate` keeps redeploys gap-free.
+
+### Added
+- **Install Helm charts from the public OCI registry — no `git clone`**:
+  `helm install lm oci://ghcr.io/the-last-devops/charts/vantage --version <ver>` (hub) and
+  `…/vantage-agent` (agent). Published per release tag.
+- **Manual "Evict now"** — `POST /api/admin/data-cap/enforce` runs one eviction pass on
+  demand (+ a button on Data & retention when over cap).
+- **Parameter tables in `deploy/README.md`** for every Helm value (hub + agent) and every
+  hub/agent environment variable, plus a Docker Compose env table.
+
+### Changed
+- **Data-cap eviction is size-aware**: reclaims from the **largest tier's oldest chunks
+  first** (re-evaluated each round) instead of globally-oldest — so a runaway tier (e.g.
+  per-container k8s stats) shrinks before a year of tiny heartbeat/rollup chunks.
+- **Served `/pub/agent.yaml`** takes an image `tag` param (default `:latest`) instead of an
+  auto-update toggle; the Add-System UI shows a tag selector.
+- **Data & retention UI**: tiers sorted by size (desc) within each group, sizes get thousands
+  separators, large tiers are coloured (red ≥ 1 GiB, amber ≥ 256 MiB), and the storage-cap
+  meter shows the **true** over-cap ratio (was clamped to 100%, hiding a 3× overage).
+- Example hosts in docs/templates use a neutral `vantage.example.com` (no company domains).
+
+### Fixed
+- **Auto-evict never converged when over cap**: the enforcer judged progress by a before/after
+  `pg_database_size` compare, which fast concurrent ingest defeated — it bailed after ~1 drop
+  while multiples over the limit. It now counts chunks actually dropped.
+- **`kube_container_stats` (and other tiers') retention could stay stuck at an over-large
+  window**: `add_retention_policy` silently no-ops when a policy exists, so old defaults
+  persisted. `setup()` now converges the built-in default for any tier the admin hasn't
+  overridden (UI overrides are recorded and respected).
+
 ## [3.0.0] — 2026-07-09
 
 First GA release — production-hardened, with the Kubernetes cluster monitoring built out
