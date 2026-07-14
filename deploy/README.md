@@ -81,19 +81,25 @@ The **agent** container/binary is configured by its own env — see the agent ta
 §3 below.
 
 ## 1. Install the hub (Helm)
-`deploy/chart` installs the hub plus its two databases (config on plain Postgres,
-data on TimescaleDB), each with its own PVC.
+The chart installs the hub plus its two databases (config on plain Postgres, data on
+TimescaleDB), each with its own PVC. It's published as a **public OCI artifact on GHCR**,
+so you install straight from the registry — **no `git clone` needed** (Helm ≥ 3.8):
 
 > **v3 needs a FRESH database.** Migrations were squashed into a single consolidated
 > schema at v3.0.0, so v3 will NOT start against an existing 2.x database (sqlx refuses
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install lm ./deploy/chart \
+helm install lm oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.0 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=monitor.senprints.net \
   --set timescaledb.storageClass=sp-hostpath
 ```
+
+> Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.0`
+> prints the full defaults. Working from a checkout instead? swap the ref for the local
+> path: `helm install lm ./deploy/chart …`.
 
 #### Hub chart values (`deploy/chart`)
 
@@ -206,10 +212,11 @@ one-per-cluster collector (namespace / deployment / pod / **per-container CPU-RA
 the **Clusters** page). Container CPU/RAM needs **metrics-server** in the cluster;
 without it the metadata still populates and usage reads 0.
 
-**Helm** (if you prefer a release you manage) — `deploy/agent` installs the DaemonSet
-**and** the cluster-agent (Deployment + read-only ClusterRole):
+**Helm** (if you prefer a release you manage) — the agent chart installs the DaemonSet
+**and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
+no clone needed:
 ```bash
-helm install vantage-agent ./deploy/agent \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.0 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://monitor.senprints.net \
   --set apiKey=<api-key-from-Add-System> \
@@ -217,6 +224,7 @@ helm install vantage-agent ./deploy/agent \
 # same cluster as the hub? use the in-cluster Service: --set hubUrl=http://vantage-hub.vantage:8080
 # opt into the reverse SSH tunnel (off by default): --set allowShell=true
 # per-node host metrics only (skip the cluster collector): --set clusterAgent.enabled=false
+# from a checkout instead of the registry: helm install vantage-agent ./deploy/agent …
 ```
 
 #### Agent chart values (`deploy/agent`)
@@ -253,10 +261,16 @@ The DaemonSet/Compose/binary agent reads these directly:
 For a single host outside k8s: `curl -fsSL https://monitor.senprints.net/pub/install.sh | HUB_URL=… API_KEY=… sh`
 (native binary + systemd), or run the agent container directly.
 
-## Images
+## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
 (e.g. `:3.0.0`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
-`:3.0.0` by default. If the packages are private:
+`:3.0.0` by default.
+
+Helm **charts** ship the same way — public OCI artifacts published per release tag:
+`oci://ghcr.io/the-last-devops/charts/vantage` (hub) and `…/vantage-agent` (agent), each
+at the release version. That's why the install commands above need no `git clone`.
+
+If the packages are private:
 ```bash
 kubectl -n vantage create secret docker-registry ghcr \
   --docker-server=ghcr.io --docker-username=<gh-user> --docker-password=<PAT read:packages>
