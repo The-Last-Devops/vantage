@@ -5,7 +5,7 @@
 # Requires root (writes /usr/local/bin and a systemd unit). Linux x86_64/arm64.
 set -eu
 
-: "${HUB_URL:?set HUB_URL, e.g. HUB_URL=https://monitor.senprints.net}"
+: "${HUB_URL:?set HUB_URL, e.g. HUB_URL=https://monitor.example.com}"
 : "${API_KEY:?set API_KEY (from Add System in the UI)}"
 
 REPO="The-Last-Devops/vantage"

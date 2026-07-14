@@ -1,4 +1,4 @@
-{{- if not .Values.hubUrl }}{{ fail "set hubUrl to where the hub is reachable (e.g. --set hubUrl=https://monitor.senprints.net)" }}{{- end }}
+{{- if not .Values.hubUrl }}{{ fail "set hubUrl to where the hub is reachable (e.g. --set hubUrl=https://monitor.example.com)" }}{{- end }}
 {{- if not .Values.apiKey }}{{ fail "set apiKey to an API key created in the UI under Add System (--set apiKey=...)" }}{{- end }}
 apiVersion: v1
 kind: Secret

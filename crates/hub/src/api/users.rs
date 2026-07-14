@@ -280,7 +280,7 @@ mod email_tests {
 
     #[test]
     fn accepts_normal_emails() {
-        assert!(valid_email("kien@senprints.com"));
+        assert!(valid_email("user@example.com"));
         assert!(valid_email("a.b+tag_1%x@sub.example.co"));
         assert!(valid_email("ci-pipeline@svc.internal.net"));
     }

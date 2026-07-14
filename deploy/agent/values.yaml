@@ -19,7 +19,7 @@ pullSecrets: []          # e.g. [ghcr] for private packages
 
 # Where the hub is reachable from inside this cluster.
 #  - same cluster as the hub:  http://<release>-hub.<hub-namespace>:8080
-#  - different cluster:         the hub's public URL, e.g. https://monitor.senprints.net
+#  - different cluster:         the hub's public URL, e.g. https://monitor.example.com
 hubUrl: ""
 
 # API key from the UI (Add System). Required.
