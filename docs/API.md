@@ -5,7 +5,7 @@ This is a hand-maintained reference; treat the running hub as the source of trut
 
 ## Base & format
 
-- Base URL: your hub origin, e.g. `https://monitor.example.com`.
+- Base URL: your hub origin, e.g. `https://vantage.example.com`.
 - Requests/responses are JSON (`Content-Type: application/json`).
 - Errors use HTTP status codes: `400` invalid input · `401` unauthenticated ·
   `403` insufficient role · `404` not found · `409` conflict · `5xx` server error.
@@ -28,7 +28,7 @@ create a dedicated *service-account* user with membership in only the workspaces
 then issue the PAT as that user.
 
 ```bash
-curl -H "Authorization: Bearer $LM_TOKEN" https://monitor.example.com/api/systems
+curl -H "Authorization: Bearer $LM_TOKEN" https://vantage.example.com/api/systems
 ```
 
 ## RBAC
@@ -136,12 +136,12 @@ Methods: `initialize`, `tools/list`, `tools/call`, `ping`.
 
 ```bash
 # list available tools
-curl -s -X POST https://monitor.example.com/mcp \
+curl -s -X POST https://vantage.example.com/mcp \
   -H "Authorization: Bearer $LM_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # call a tool
-curl -s -X POST https://monitor.example.com/mcp \
+curl -s -X POST https://vantage.example.com/mcp \
   -H "Authorization: Bearer $LM_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"alerts_firing","arguments":{}}}'
 ```

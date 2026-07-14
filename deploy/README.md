@@ -92,7 +92,7 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 ```bash
 helm install lm oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.0 \
   --namespace vantage --create-namespace \
-  --set hub.ingress.host=monitor.example.com \
+  --set hub.ingress.host=vantage.example.com \
   --set timescaledb.storageClass=sp-hostpath
 ```
 
@@ -183,7 +183,7 @@ and `helm upgrade`, or let your GitOps tool roll it. The hub's `RollingUpdate` s
 keeps redeploys gap-free even at `replicas: 1`.
 
 ### Expose the UI
-- Domain (nginx ingress by default): `--set hub.ingress.host=monitor.example.com` (host alone enables it)
+- Domain (nginx ingress by default): `--set hub.ingress.host=vantage.example.com` (host alone enables it)
   - Other controller: `--set hub.ingress.className=traefik`
   - HTTPS via cert-manager: `--set hub.ingress.tls=true --set hub.ingress.annotations."cert-manager\.io/cluster-issuer"=letsencrypt`
 - Or `--set hub.service.type=NodePort` / `LoadBalancer`, or
@@ -200,7 +200,7 @@ One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cl
 
 **Easiest — the hub serves a ready-to-apply manifest** (this is what the UI shows):
 ```bash
-kubectl apply -f "https://monitor.example.com/pub/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
+kubectl apply -f "https://vantage.example.com/pub/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
 ```
 The hub fills in its own URL, the key, and the cluster — no clone, no chart registry.
 Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.0` (pinned) to
@@ -218,7 +218,7 @@ no clone needed:
 ```bash
 helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.0 \
   --namespace vantage --create-namespace \
-  --set hubUrl=https://monitor.example.com \
+  --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
   --set cluster=k8s-hanoi
 # same cluster as the hub? use the in-cluster Service: --set hubUrl=http://vantage-hub.vantage:8080
@@ -258,7 +258,7 @@ The DaemonSet/Compose/binary agent reads these directly:
 | `DISK_PATH` | — | `/` | Filesystem to report disk usage for (`/host` when the host root is mounted into a container). |
 | `NODE_NAME` | — | (k8s downward API) | Node name when running as a DaemonSet. |
 
-For a single host outside k8s: `curl -fsSL https://monitor.example.com/pub/install.sh | HUB_URL=… API_KEY=… sh`
+For a single host outside k8s: `curl -fsSL https://vantage.example.com/pub/install.sh | HUB_URL=… API_KEY=… sh`
 (native binary + systemd), or run the agent container directly.
 
 ## Images & charts
