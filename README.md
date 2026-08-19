@@ -108,8 +108,10 @@ Open **http://localhost:8080**. On first run you create the admin account (or se
 
 > **Production (Kubernetes):** see [deploy/README.md](deploy/README.md) — Helm chart with
 > pinned images, non-root hub, auto-generated app secret, backups, and the k8s agents
-> (per-node DaemonSet + one-per-cluster collector). **v3 requires a fresh database** —
-> migrations were squashed at v3.0.0, so it won't start against an existing 2.x DB.
+> (per-node DaemonSet + one-per-cluster collector) — plus prerequisites and a
+> troubleshooting section. **Install v3.0.1 or newer** (v3.0.0 fails its first migration
+> with `relation "_sqlx_migrations" does not exist`), and note **v3 requires a fresh
+> database** — migrations were squashed at v3.0.0, so it won't start against a 2.x DB.
 
 > Want sizeable test data? `bash scripts/sim-agents.sh` spins up many simulated
 > node / docker / k8s hosts pushing realistic metrics.
