@@ -74,7 +74,7 @@ jobs:
           fi
           CH="$(git diff --name-only "$PREV" "$NEW")"
           echo "changed files vs $PREV:"; echo "$CH"
-          shared='^(crates/shared/|Cargo\.(toml|lock)$)'
+          shared='^(crates/shared/|Cargo\.(toml|lock)$|\.dockerignore$)'
           hub=false; agent=false
           echo "$CH" | grep -Eq "$shared|^crates/hub/|^frontend/|^deploy/Dockerfile\.hub$" && hub=true
           echo "$CH" | grep -Eq "$shared|^crates/agent/|^deploy/Dockerfile\.agent$" && agent=true

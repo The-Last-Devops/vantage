@@ -79,6 +79,7 @@ jobs:
               - 'crates/shared/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - '.dockerignore'
             hub:
               - *shared
               - 'crates/hub/**'
