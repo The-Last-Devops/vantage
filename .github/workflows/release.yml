@@ -205,7 +205,7 @@ jobs:
         run: docker buildx imagetools inspect "$IMAGE:latest"
 
   # Helm charts published as OCI artifacts to GHCR (public alongside the images).
-  #   hub:   helm install lm oci://ghcr.io/<owner>/charts/vantage --version <tag>
+  #   hub:   helm install vantage oci://ghcr.io/<owner>/charts/vantage --version <tag>
   #   agent: helm install vantage-agent oci://ghcr.io/<owner>/charts/vantage-agent --version <tag>
   charts:
     name: Publish Helm charts

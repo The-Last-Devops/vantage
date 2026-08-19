@@ -7,7 +7,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
-## [Unreleased]
+## [3.0.1] — 2026-08-19
 
 ### ⚠️ Breaking / Removed
 - **Removed the `:auto-update` image channel and the in-cluster self-updater** (hub
@@ -18,7 +18,7 @@ Each released version's section is used verbatim as the GitHub Release notes
 
 ### Added
 - **Install Helm charts from the public OCI registry — no `git clone`**:
-  `helm install lm oci://ghcr.io/the-last-devops/charts/vantage --version <ver>` (hub) and
+  `helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version <ver>` (hub) and
   `…/vantage-agent` (agent). Published per release tag.
 - **Manual "Evict now"** — `POST /api/admin/data-cap/enforce` runs one eviction pass on
   demand (+ a button on Data & retention when over cap).
@@ -35,6 +35,13 @@ Each released version's section is used verbatim as the GitHub Release notes
   separators, large tiers are coloured (red ≥ 1 GiB, amber ≥ 256 MiB), and the storage-cap
   meter shows the **true** over-cap ratio (was clamped to 100%, hiding a 3× overage).
 - Example hosts in docs/templates use a neutral `vantage.example.com` (no company domains).
+- **Helm object names no longer depend on the release name**: always `vantage-hub`,
+  `vantage-db-config`, `vantage-db-data`, Secret `vantage`, `vantage-hub-tls` — so
+  `helm install lm …` no longer produces `lm-hub`. One Vantage release per namespace.
+  Upgrading a differently-named release renames the objects and leaves the old PVCs behind.
+- **`deploy/README.md`**: prerequisites for a Kubernetes install (Helm ≥ 3.8, amd64 nodes,
+  StorageClass, ingress controller) and a **Troubleshooting** section (migration error,
+  `lm-*` names, Pending pod, external TimescaleDB, ingress TLS scheme).
 
 ### Fixed
 - **Auto-evict never converged when over cap**: the enforcer judged progress by a before/after
@@ -44,6 +51,13 @@ Each released version's section is used verbatim as the GitHub Release notes
   window**: `add_retention_policy` silently no-ops when a policy exists, so old defaults
   persisted. `setup()` now converges the built-in default for any tier the admin hasn't
   overridden (UI overrides are recorded and respected).
+- **Fresh Helm/Docker installs failed to start**: the squashed config migration (from
+  `pg_dump`) blanked `search_path`, so sqlx could not record `_sqlx_migrations` on the same
+  connection and the hub died with `relation "_sqlx_migrations" does not exist`, rolling the
+  migration back and crash-looping. The migration now sets `search_path` to `public`, and
+  `scripts/squash-migrations.sh` rewrites that line so a re-squash can't reintroduce it.
+  New guard: `scripts/check-fresh-install.sh` runs the real hub binary against throwaway
+  config/data databases (psql-based checks can't catch it — each file is its own session).
 
 ## [3.0.0] — 2026-07-09
 

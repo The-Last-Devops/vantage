@@ -196,7 +196,7 @@ docker run -d --restart=unless-stopped --pid=host \
 ```
 
 **Helm charts** are published as public OCI artifacts on GHCR — install without cloning:
-`helm install lm oci://ghcr.io/the-last-devops/charts/vantage --version <ver>` (hub) and
+`helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version <ver>` (hub) and
 `…/vantage-agent` (agent). Chart sources + a DaemonSet manifest also live in [deploy/](deploy/).
 
 ## Environment variables

@@ -4,7 +4,7 @@
 
 image:
   hub: ghcr.io/the-last-devops/vantage-hub   # repository (no tag)
-  tag: "3.0.0"           # pinned release for reproducible installs
+  tag: "3.0.1"           # pinned release for reproducible installs
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]
@@ -72,7 +72,7 @@ hub:
     className: nginx
     host: ""                          # e.g. mon.example.com — setting this enables the Ingress
     annotations: {}                   # e.g. cert-manager.io/cluster-issuer: letsencrypt
-    tls: false                        # true → terminate HTTPS using <release>-tls secret (also sets the passkey/PUBLIC_URL scheme to https)
+    tls: false                        # true → terminate HTTPS using the vantage-hub-tls secret (also sets the passkey/PUBLIC_URL scheme to https)
 
 # Default-deny NetworkPolicy + hub→DB allow (only when the bundled DBs are used).
 networkPolicy:

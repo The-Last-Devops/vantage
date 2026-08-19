@@ -1,7 +1,13 @@
-{{- define "vantage.name" -}}{{ .Release.Name }}{{- end -}}
-{{- define "vantage.dbConfig" -}}{{ .Release.Name }}-db-config{{- end -}}
-{{- define "vantage.dbData" -}}{{ .Release.Name }}-db-data{{- end -}}
-{{- define "vantage.hub" -}}{{ .Release.Name }}-hub{{- end -}}
+{{- /*
+  Resource names are FIXED on the product name ("vantage-*"), not the Helm release name,
+  so in-cluster objects always read vantage-hub / vantage-db-config / vantage-db-data no
+  matter what the release is called (`helm install lm …` used to produce lm-hub).
+  Consequence: one Vantage release per namespace (it is a single control plane).
+*/ -}}
+{{- define "vantage.name" -}}vantage{{- end -}}
+{{- define "vantage.dbConfig" -}}vantage-db-config{{- end -}}
+{{- define "vantage.dbData" -}}vantage-db-data{{- end -}}
+{{- define "vantage.hub" -}}vantage-hub{{- end -}}
 
 {{- /*
   In-cluster DB password: use the value if set, else reuse the one already stored
