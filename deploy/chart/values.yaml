@@ -4,7 +4,10 @@
 
 image:
   hub: ghcr.io/the-last-devops/vantage-hub   # repository (no tag)
-  tag: "3.0.5"           # pinned release for reproducible installs
+  # Empty = the chart's appVersion (so `helm upgrade --version X` always lands image X,
+  # even with --reuse-values, which would otherwise keep a hardcoded old tag). Set a value
+  # only to pin a different image than the chart, or to track a moving tag like "main".
+  tag: ""
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]

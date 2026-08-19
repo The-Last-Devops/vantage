@@ -7,6 +7,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.6] — 2026-08-19
+
+### Fixed
+- **`helm upgrade` silently kept the old image**: the chart pinned `image.tag` in values, so
+  an upgrade with `--reuse-values` replayed the tag recorded at install time (e.g. `3.0.2`)
+  and the Deployment never moved — Helm reported success while nothing changed. `image.tag`
+  now defaults to `""` and the templates fall back to the chart's `appVersion`, so
+  `helm upgrade --version X` lands image X. Same fix in the agent chart. `deploy/README.md`
+  gains an **Updating** section (prefer `--reset-then-reuse-values`).
+
 ## [3.0.5] — 2026-08-19
 
 ### Added

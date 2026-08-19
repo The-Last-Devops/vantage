@@ -102,7 +102,7 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.5 \
+helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.6 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=vantage.example.com \
   --set timescaledb.storageClass=standard   # your cluster's StorageClass (kubectl get sc)
@@ -115,7 +115,7 @@ helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.
 > output matches the objects.
 
 > Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
-> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.5`
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.6`
 > prints the full defaults. Working from a checkout instead? swap the ref for the local
 > path: `helm install vantage ./deploy/chart …`.
 
@@ -128,7 +128,7 @@ required — the defaults give a working single-node hub with bundled databases.
 | Key | Default | Purpose |
 |---|---|---|
 | `image.hub` | `ghcr.io/the-last-devops/vantage-hub` | Hub image repository (no tag). |
-| `image.tag` | `3.0.5` | Pinned release tag. Bump + `helm upgrade` to update; or set a moving tag (`latest`/`main`) with `image.pullPolicy=Always`. |
+| `image.tag` | `""` → the chart's appVersion | Leave empty so `helm upgrade --version X` always lands image X (this also survives `--reuse-values`). Set it to pin a different image, or to a moving tag (`latest`/`main`) with `image.pullPolicy=Always`. |
 | `image.pullPolicy` | `IfNotPresent` | Set `Always` when tracking a moving tag. |
 | `image.pullSecrets` | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
 
@@ -196,10 +196,28 @@ Production hardening (opt-in):
 - **NetworkPolicy** (lock the bundled DBs to the hub): `--set networkPolicy.enabled=true`.
 - **PodDisruptionBudget** (with `hub.replicas>1`): `--set podDisruptionBudget.enabled=true`.
 
-**Updates** are driven externally — there's no in-cluster self-updater. Bump `image.tag`
-(or point it at a moving tag like `:latest` / `:main` with `--set image.pullPolicy=Always`)
-and `helm upgrade`, or let your GitOps tool roll it. The hub's `RollingUpdate` strategy
-keeps redeploys gap-free even at `replicas: 1`.
+### Updating
+
+Updates are driven externally — there's no in-cluster self-updater. Upgrade the chart and the
+image follows it (`image.tag` defaults to the chart's appVersion):
+
+```bash
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version <new> \
+  -n vantage --reset-then-reuse-values
+```
+
+> **Don't use plain `--reuse-values` to change versions.** It replays the previous release's
+> value map, so an `image.tag` recorded then (charts before 3.0.6 pinned it, e.g. `3.0.2`)
+> wins over the new chart and the Deployment keeps running the **old image** — the upgrade
+> reports success and nothing changes. Use `--reset-then-reuse-values` (Helm ≥ 3.14), pass
+> your overrides again, or force it with `--set image.tag=<new>`.
+
+Alternatively track a moving tag (`--set image.tag=main --set image.pullPolicy=Always`) and
+`kubectl -n vantage rollout restart deploy/vantage-hub` to pick up a new build. The hub's
+`RollingUpdate` strategy keeps redeploys gap-free even at `replicas: 1`.
+
+Check what's actually running: `kubectl -n vantage get deploy vantage-hub -o jsonpath='{..image}'`
+(or the version chip in the UI header).
 
 ### Expose the UI
 - Domain (nginx ingress by default): `--set hub.ingress.host=vantage.example.com` (host alone enables it)
@@ -240,7 +258,7 @@ One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cl
 kubectl apply -f "https://vantage.example.com/pub/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
 ```
 The hub fills in its own URL, the key, and the cluster — no clone, no chart registry.
-Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.5` (pinned) to
+Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.6` (pinned) to
 choose another. To update, re-apply with the tag you want (or run `:latest`/`:main` with
 `imagePullPolicy: Always`, already set in the served manifest, and restart the pods).
 
@@ -253,7 +271,7 @@ without it the metadata still populates and usage reads 0.
 **and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
 no clone needed:
 ```bash
-helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.5 \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.6 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
@@ -272,7 +290,7 @@ helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --
 | `apiKey` | ✅ | `""` | Enrollment key from the UI (**Add System**). |
 | `cluster` | — | `my-cluster` | Label grouping this cluster's nodes in the UI (**Kubernetes › \<cluster\>**). |
 | `image.repository` | — | `ghcr.io/the-last-devops/vantage-agent` | Agent image repository. |
-| `image.tag` | — | `3.0.5` | Pinned tag; bump + `helm upgrade` (or a moving tag + `pullPolicy=Always`) to update. |
+| `image.tag` | — | `""` → chart appVersion | Leave empty so the chart version decides the image; set to pin another image or track a moving tag (`main`) with `pullPolicy=Always`. |
 | `pullPolicy` | — | `IfNotPresent` | Set `Always` when tracking a moving tag. |
 | `pullSecrets` | — | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
 | `clusterAgent.enabled` | — | `true` | Also deploy the one-per-cluster collector (Deployment + read-only ClusterRole) for the **Clusters** page. `false` = per-node host metrics only. |
@@ -310,11 +328,11 @@ A **v3.0.0-only bug**: the squashed config migration was generated by `pg_dump`,
 `_sqlx_migrations` **on the same connection**, so the blank `search_path` made that write fail
 and the whole migration roll back — the hub then crash-looped with an empty database.
 
-Fix: install **3.0.1+** (`--version 3.0.5`, which pins `image.tag: 3.0.1`). Already on 3.0.0?
+Fix: install **3.0.1 or newer**. Already on 3.0.0?
 
 ```bash
-helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.5 \
-  --namespace vantage --reuse-values
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.6 \
+  --namespace vantage --reset-then-reuse-values
 ```
 
 No data is lost by starting over, because the failed install never wrote a schema. If you want
@@ -352,8 +370,8 @@ HTTPS upstream (Cloudflare, an LB) while `hub.ingress.tls=false` yields `http://
 
 ## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.5`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
-`:3.0.5` by default.
+(e.g. `:3.0.6`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+the chart's appVersion by default.
 
 Helm **charts** ship the same way — public OCI artifacts published per release tag:
 `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and `…/vantage-agent` (agent), each

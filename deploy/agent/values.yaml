@@ -3,7 +3,9 @@
 
 image:
   repository: ghcr.io/the-last-devops/vantage-agent
-  tag: "3.0.5"           # pinned release; bump it (or point at :latest) and helm upgrade to update
+  # Empty = the chart's appVersion (an upgrade to chart X always lands image X, even with
+  # --reuse-values). Set a value to pin another image or track a moving tag like "main".
+  tag: ""
 # Interactive shell/console: when true the agent opens a reverse tunnel so the hub can
 # SSH into this host (via the node's sshd on 127.0.0.1). **OFF by default** (opt-in) per
 # the two-sided-consent exec design. Even when on, access is still gated by RBAC
