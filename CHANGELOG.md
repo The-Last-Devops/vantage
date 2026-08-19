@@ -7,6 +7,28 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.7] — 2026-08-19
+
+### Added
+- **Nodes section on the cluster page** — one row per node, merging the per-node DaemonSet
+  agent's host metrics (online, CPU %, memory, disk, vCPU, agent version) with the cluster
+  agent's per-node pod stats (pods, pod CPU, pod memory, restarts); click a row to open that
+  node's host page. Also **group by "Node"** in the breakdown (table + overlay charts).
+
+### Changed
+- **Cluster page is split into Workloads / Nodes tabs** (`?tab=nodes`). A 26-node cluster's
+  node table used to push the workload breakdown off-screen, so people never found it.
+- **Drill-down is impossible to miss**: clicking a namespace/workload scrolls its container
+  list into view behind a labelled focus bar (`Containers · <scope> · N containers` + back
+  button), and long tables scroll inside the card with a sticky header (new `max-height` on
+  DataTable) instead of pushing the page.
+- **Faster image builds**: prebuilt `cargo-chef` image, `npm ci`, a `.dockerignore` (a
+  host-built `frontend/dist` in the context was busting the cached `npm run build` layer),
+  and the Docker layer cache moved from the 10 GB GHA cache to GHCR — shared by `ci.yml` and
+  `release.yml`, so a release reuses what the main build just produced. Measured locally:
+  warm build 310s → 99s; in CI the hub image job went 338s → 190s. Guarded by
+  `scripts/check-build-cache.sh`.
+
 ## [3.0.6] — 2026-08-19
 
 ### Fixed
