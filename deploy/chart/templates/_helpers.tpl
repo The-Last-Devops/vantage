@@ -68,8 +68,16 @@ postgres://vantage:{{ include "vantage.dbPassword" . }}@{{ include "vantage.dbDa
 {{- if or .Values.hub.appSecret .Values.hub.autoAppSecret -}}true{{- end -}}
 {{- end -}}
 
-{{- /* URL scheme for passkey RP / PUBLIC_URL — https only when TLS is terminated. */ -}}
-{{- define "vantage.scheme" -}}{{ ternary "https" "http" .Values.hub.ingress.tls }}{{- end -}}
+{{- /*
+  URL scheme advertised to browsers (passkey RP origin + PUBLIC_URL). This is about where
+  TLS is TERMINATED, which is not necessarily this Ingress: Cloudflare / an external LB
+  usually terminates HTTPS and talks plain HTTP to the origin. So it follows
+  hub.publicHttps (default true) and is forced on when the Ingress itself serves TLS.
+  Set hub.publicHttps=false only when the hub is genuinely reached over http://.
+*/ -}}
+{{- define "vantage.scheme" -}}
+{{- if or .Values.hub.ingress.tls .Values.hub.publicHttps -}}https{{- else -}}http{{- end -}}
+{{- end -}}
 
 {{- define "vantage.pullSecrets" -}}
 {{- with .Values.image.pullSecrets }}

@@ -102,10 +102,10 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.1 \
+helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.2 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=vantage.example.com \
-  --set timescaledb.storageClass=sp-hostpath
+  --set timescaledb.storageClass=standard   # your cluster's StorageClass (kubectl get sc)
 ```
 
 > **In-cluster object names are fixed**, not derived from the Helm release name: you always
@@ -115,7 +115,7 @@ helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.
 > output matches the objects.
 
 > Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
-> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.1`
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.2`
 > prints the full defaults. Working from a checkout instead? swap the ref for the local
 > path: `helm install vantage ./deploy/chart …`.
 
@@ -128,7 +128,7 @@ required — the defaults give a working single-node hub with bundled databases.
 | Key | Default | Purpose |
 |---|---|---|
 | `image.hub` | `ghcr.io/the-last-devops/vantage-hub` | Hub image repository (no tag). |
-| `image.tag` | `3.0.1` | Pinned release tag. Bump + `helm upgrade` to update; or set a moving tag (`latest`/`main`) with `image.pullPolicy=Always`. |
+| `image.tag` | `3.0.2` | Pinned release tag. Bump + `helm upgrade` to update; or set a moving tag (`latest`/`main`) with `image.pullPolicy=Always`. |
 | `image.pullPolicy` | `IfNotPresent` | Set `Always` when tracking a moving tag. |
 | `image.pullSecrets` | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
 
@@ -164,6 +164,7 @@ required — the defaults give a working single-node hub with bundled databases.
 | `hub.service.type` | `ClusterIP` | `NodePort`/`LoadBalancer` to expose the UI without an Ingress. |
 | `hub.ingress.host` | `""` | Set a hostname → creates an Ingress (enables it implicitly). |
 | `hub.ingress.className` | `nginx` | Ingress controller class (e.g. `traefik`). |
+| `hub.publicHttps` | `true` | Scheme advertised to browsers (`PUBLIC_URL` + passkey origin). Keep `true` when HTTPS is terminated **anywhere** in front of the hub — Cloudflare, an external LB, or `hub.ingress.tls`. `false` only for a genuinely plain-`http://` hub. |
 | `hub.ingress.tls` | `false` | `true` → terminate HTTPS via the `vantage-hub-tls` secret (also sets passkey/`PUBLIC_URL` scheme to https). |
 | `hub.ingress.annotations` | `{}` | e.g. `cert-manager.io/cluster-issuer: letsencrypt`. |
 | `hub.ingress.enabled` | `false` | Usually left implied by `hub.ingress.host`. |
@@ -207,6 +208,24 @@ keeps redeploys gap-free even at `replicas: 1`.
 - Or `--set hub.service.type=NodePort` / `LoadBalancer`, or
   `kubectl -n vantage port-forward svc/vantage-hub 8080:8080`.
 
+### Behind Cloudflare (or any TLS-terminating proxy/LB)
+Terminate HTTPS at Cloudflare and let it talk plain HTTP to the origin — you do **not** need
+`hub.ingress.tls` or cert-manager:
+
+```bash
+--set hub.ingress.host=vantage.example.com     # orange-clouded DNS record in Cloudflare
+# hub.publicHttps defaults to true → PUBLIC_URL / passkey origin are https://…
+```
+
+`hub.publicHttps` (not `hub.ingress.tls`) is what decides the scheme the hub advertises to
+browsers, because TLS may be terminated upstream. Getting it wrong breaks **passkeys**: the
+hub pins `WEBAUTHN_ORIGIN` to `http://host` while the browser reports `https://host`, and
+registration/login fails. Leave it `true` for any real domain; set `--set hub.publicHttps=false`
+only for a plain-`http://` LAN/dev hub.
+
+Cloudflare notes: keep SSL/TLS mode **Full** (or Flexible if the origin is HTTP-only), and the
+hub's WebSocket paths (browser console / live metrics) work through the proxy as-is.
+
 ### External DB instead of in-cluster
 `--set timescaledb.enabled=false --set hub.configDatabaseUrl=... --set hub.dataDatabaseUrl=...`
 
@@ -221,7 +240,7 @@ One key enrolls a whole DaemonSet; each node shows up under **Kubernetes › <cl
 kubectl apply -f "https://vantage.example.com/pub/agent.yaml?key=<api-key>&cluster=k8s-hanoi"
 ```
 The hub fills in its own URL, the key, and the cluster — no clone, no chart registry.
-Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.1` (pinned) to
+Defaults to the `:latest` image; add `&tag=main` (rolling) or `&tag=3.0.2` (pinned) to
 choose another. To update, re-apply with the tag you want (or run `:latest`/`:main` with
 `imagePullPolicy: Always`, already set in the served manifest, and restart the pods).
 
@@ -234,7 +253,7 @@ without it the metadata still populates and usage reads 0.
 **and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
 no clone needed:
 ```bash
-helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.1 \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.2 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
@@ -253,7 +272,7 @@ helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --
 | `apiKey` | ✅ | `""` | Enrollment key from the UI (**Add System**). |
 | `cluster` | — | `my-cluster` | Label grouping this cluster's nodes in the UI (**Kubernetes › \<cluster\>**). |
 | `image.repository` | — | `ghcr.io/the-last-devops/vantage-agent` | Agent image repository. |
-| `image.tag` | — | `3.0.1` | Pinned tag; bump + `helm upgrade` (or a moving tag + `pullPolicy=Always`) to update. |
+| `image.tag` | — | `3.0.2` | Pinned tag; bump + `helm upgrade` (or a moving tag + `pullPolicy=Always`) to update. |
 | `pullPolicy` | — | `IfNotPresent` | Set `Always` when tracking a moving tag. |
 | `pullSecrets` | — | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
 | `clusterAgent.enabled` | — | `true` | Also deploy the one-per-cluster collector (Deployment + read-only ClusterRole) for the **Clusters** page. `false` = per-node host metrics only. |
@@ -291,10 +310,10 @@ A **v3.0.0-only bug**: the squashed config migration was generated by `pg_dump`,
 `_sqlx_migrations` **on the same connection**, so the blank `search_path` made that write fail
 and the whole migration roll back — the hub then crash-looped with an empty database.
 
-Fix: install **3.0.1+** (`--version 3.0.1`, which pins `image.tag: 3.0.1`). Already on 3.0.0?
+Fix: install **3.0.1+** (`--version 3.0.2`, which pins `image.tag: 3.0.1`). Already on 3.0.0?
 
 ```bash
-helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.1 \
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.2 \
   --namespace vantage --reuse-values
 ```
 
@@ -333,8 +352,8 @@ HTTPS upstream (Cloudflare, an LB) while `hub.ingress.tls=false` yields `http://
 
 ## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.1`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
-`:3.0.1` by default.
+(e.g. `:3.0.2`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+`:3.0.2` by default.
 
 Helm **charts** ship the same way — public OCI artifacts published per release tag:
 `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and `…/vantage-agent` (agent), each

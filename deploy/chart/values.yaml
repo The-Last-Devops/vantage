@@ -4,7 +4,7 @@
 
 image:
   hub: ghcr.io/the-last-devops/vantage-hub   # repository (no tag)
-  tag: "3.0.1"           # pinned release for reproducible installs
+  tag: "3.0.2"           # pinned release for reproducible installs
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]
@@ -45,6 +45,10 @@ hub:
   #     default. BACK IT UP — losing it makes stored SSH keys unrecoverable.
   appSecret: ""
   autoAppSecret: true
+  # Scheme browsers reach the hub on (passkey RP origin + PUBLIC_URL). Keep true when
+  # HTTPS is terminated anywhere in front of the hub — Cloudflare, an external LB, or
+  # ingress.tls below. Set false only for a genuinely plain-http:// hub (LAN/dev).
+  publicHttps: true
   # Used only when timescaledb.enabled=false:
   configDatabaseUrl: ""
   dataDatabaseUrl: ""
@@ -72,7 +76,7 @@ hub:
     className: nginx
     host: ""                          # e.g. mon.example.com — setting this enables the Ingress
     annotations: {}                   # e.g. cert-manager.io/cluster-issuer: letsencrypt
-    tls: false                        # true → terminate HTTPS using the vantage-hub-tls secret (also sets the passkey/PUBLIC_URL scheme to https)
+    tls: false                        # true → terminate HTTPS here using the vantage-hub-tls secret (needs cert-manager or a manual secret). Not needed behind Cloudflare/an LB — see hub.publicHttps.
 
 # Default-deny NetworkPolicy + hub→DB allow (only when the bundled DBs are used).
 networkPolicy:

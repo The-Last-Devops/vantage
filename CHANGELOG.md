@@ -7,6 +7,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.2] — 2026-08-19
+
+### Added
+- **`hub.publicHttps` (default `true`)** — the scheme the hub advertises to browsers
+  (`PUBLIC_URL` + passkey `WEBAUTHN_ORIGIN`) is now independent of `hub.ingress.tls`, because
+  HTTPS is usually terminated **upstream** (Cloudflare, an external LB) which then talks plain
+  HTTP to the origin. Previously such a deployment pinned the passkey origin to `http://host`
+  while the browser reported `https://host`, so **passkey registration/login failed** unless
+  you enabled Ingress TLS you didn't want. Set `hub.publicHttps=false` only for a genuinely
+  plain-`http://` hub. `deploy/README.md` gains a "Behind Cloudflare" section.
+
 ## [3.0.1] — 2026-08-19
 
 ### ⚠️ Breaking / Removed
