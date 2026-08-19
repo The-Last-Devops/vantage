@@ -131,6 +131,17 @@ docker compose up -d
   never ad-hoc one-liners (no inline `curl | python`, piped greps, etc.).** Write the check into a
   script, run it yourself, and don't ask for permission to run it. New checks should be idempotent
   and self-cleaning (e.g. `scripts/check-alerts.sh`).
+- **A green `vite build` / `cargo build` is not a working page — run the browser check.**
+  `const f = (p) = expr` (a missing `>`) is valid JS: it builds, then throws
+  `ReferenceError` at setup and blanks the page (that shipped in 3.0.7). After changing a
+  page's `<script setup>`, run `bash scripts/check-console-errors.sh` — it boots the hub on
+  throwaway databases, seeds a k8s cluster + nodes, and opens every main route in headless
+  Chrome, failing on any console error. Add new routes to its `ROUTES` list.
+- **A rollup tier is a continuous aggregate, so TimescaleDB reports its jobs against the
+  MATERIALIZATION hypertable** (`_materialized_hypertable_7`), never the view name
+  (`system_metrics_1m`). Any query over `timescaledb_information.jobs` must resolve the view
+  via `timescaledb_information.continuous_aggregates` — matching on the view alone silently
+  returns nothing (it left every rollup's "Keep for" box blank on Data & retention).
 - **Validate every user-supplied field server-side — the API is the source of truth.**
   The Vue SPA can be bypassed, so each create/patch handler must reject bad input with
   `400` *before* the INSERT/UPDATE, and store the trimmed value. Reuse the shared validators

@@ -7,6 +7,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.10] — 2026-08-19
+
+### Fixed
+- **Data & retention showed an empty "Keep for" box for every rollup tier** (1m/5m/15m/1h,
+  system + container). The policies were there and pruning correctly — but a rollup is a
+  continuous aggregate, and TimescaleDB records its retention job against the
+  *materialization* hypertable (`_materialized_hypertable_7`), not the view name, so the
+  lookup found nothing. It now resolves the view through
+  `timescaledb_information.continuous_aggregates`.
+
+### Documentation
+- README documents the **cluster detail page** (Workloads / Nodes tabs, group-by node,
+  drill-down), `docs/README.md` lists the repo's **check scripts** and what each proves, and
+  CLAUDE.md records two hard-won rules: a green build is not a working page (run
+  `scripts/check-console-errors.sh`), and rollup jobs must be resolved via the
+  materialization hypertable.
+
 ## [3.0.9] — 2026-08-19
 
 ### Changed

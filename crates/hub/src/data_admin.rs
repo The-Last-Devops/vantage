@@ -322,10 +322,16 @@ async fn retention_value(data: &PgPool, table: &str) -> Option<i64> {
     } else {
         86400
     };
+    // A rollup is a continuous aggregate: TimescaleDB records its retention job against
+    // the MATERIALIZATION hypertable (`_materialized_hypertable_7`), never the view name —
+    // so matching only on the view left every rollup's "Keep for" box blank in the UI even
+    // though the policy existed. Resolve the view to its materialization table as well.
     let row: Option<(Option<i64>,)> = sqlx::query_as(&format!(
-        "SELECT (EXTRACT(EPOCH FROM (config->>'drop_after')::interval) / {divisor})::bigint \
-         FROM timescaledb_information.jobs \
-         WHERE proc_name = 'policy_retention' AND hypertable_name = $1"
+        "SELECT (EXTRACT(EPOCH FROM (j.config->>'drop_after')::interval) / {divisor})::bigint \
+         FROM timescaledb_information.jobs j \
+         WHERE j.proc_name = 'policy_retention' AND (j.hypertable_name = $1 \
+           OR j.hypertable_name = (SELECT c.materialization_hypertable_name \
+                FROM timescaledb_information.continuous_aggregates c WHERE c.view_name = $1))"
     ))
     .bind(table)
     .fetch_optional(data)

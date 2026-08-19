@@ -45,6 +45,12 @@ sensors, NVIDIA **GPU** (usage / VRAM / power), and **per-container Docker stats
 (expand to their nodes), with a workspace column, sortable columns, multi-select + bulk
 delete, and an **Add system** wizard (binary / Docker / Compose / k8s DaemonSet).
 
+**Cluster detail (Kubernetes)** — a **Workloads** tab (cluster CPU/memory charts + a
+breakdown grouped by namespace, workload, label or **node**, drilling down to the pods and
+containers of whatever you click) and a **Nodes** tab listing every node of the cluster:
+online state, CPU / memory / disk from the per-node DaemonSet agent alongside pods, pod CPU,
+pod memory and restarts from the cluster collector — click a row to open that node's host page.
+
 **Per-system detail** — uPlot charts with a synced cursor, drag-to-zoom, interactive legends
 and live updates (sub-hour ranges refresh every second). Charts always span the selected
 window, leaving blank space when data is sparse.
