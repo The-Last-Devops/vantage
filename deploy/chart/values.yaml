@@ -4,7 +4,7 @@
 
 image:
   hub: ghcr.io/the-last-devops/vantage-hub   # repository (no tag)
-  tag: "3.0.2"           # pinned release for reproducible installs
+  tag: "3.0.3"           # pinned release for reproducible installs
   pullPolicy: IfNotPresent
   # For private GHCR packages: kubectl create secret docker-registry ghcr ... then:
   pullSecrets: []        # e.g. [ghcr]

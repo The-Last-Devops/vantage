@@ -28,7 +28,8 @@ pub async fn can_view_system(
     if user.can_read_all() {
         return Ok(true);
     }
-    let row: Option<(i64,)> = sqlx::query_as(
+    // `SELECT 1` is INT4 in Postgres — decoding it as i64 fails at runtime (500).
+    let row: Option<(i32,)> = sqlx::query_as(
         "SELECT 1 FROM systems s \
          JOIN memberships m ON m.workspace_id = s.workspace_id \
          WHERE s.id = $1 AND m.user_id = $2",

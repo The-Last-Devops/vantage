@@ -7,6 +7,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.3] — 2026-08-19
+
+### Fixed
+- **Non-admin members got 500 on every host and cluster page** ("Failed to load cluster
+  stats (500)", `mismatched types; Rust type i64 … is not compatible with SQL type INT4`).
+  The membership check behind system/kube endpoints decoded Postgres' `SELECT 1` (INT4) as
+  `i64`. Admins never hit it — they short-circuit on read-all — so only workspace
+  viewers/editors saw the failure. New guard: `scripts/check-viewer-system-access.sh`
+  (verified to fail with the old code and pass with the fix).
+
 ## [3.0.2] — 2026-08-19
 
 ### Added
