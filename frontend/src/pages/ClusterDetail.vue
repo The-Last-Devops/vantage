@@ -214,7 +214,7 @@ const nodeCols = [
 // Collapsed-state hint so the section still says something useful when closed.
 const nodeBusiest = computed(() => nodeRows.value.filter((r) => r.cpu_percent != null)
   .sort((a, b) => b.cpu_percent - a.cpu_percent)[0] || null)
-const usageCls = (p) = (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
+const usageCls = (p) => (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
 function openNode(row) { if (row.system_id) router.push({ path: `/system/${row.system_id}`, query: { name: row.name } }) }
 
 // ---- table ----

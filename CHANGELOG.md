@@ -7,6 +7,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.8] — 2026-08-19
+
+### Fixed
+- **Cluster page was blank in 3.0.7** with `ReferenceError: p is not defined`: a helper was
+  written `const usageCls = (p) = (...)` — an assignment, not an arrow function. Valid JS, so
+  `vite build` accepted it; it threw at setup and killed the whole page.
+- New guard `scripts/check-console-errors.sh`: boots the hub against throwaway databases,
+  seeds a k8s cluster + nodes, then opens every main route (including the cluster page, its
+  Nodes tab and a drill-down) in headless Chrome and **fails on any console error or uncaught
+  exception**. Verified to fail on the 3.0.7 code and pass on the fix.
+
 ## [3.0.7] — 2026-08-19
 
 ### Added
