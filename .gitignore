@@ -4,3 +4,5 @@
 tooling/
 .secrets
 .gh-token
+/frontend/dist/*
+!/frontend/dist/.gitkeep
