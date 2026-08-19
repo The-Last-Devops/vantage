@@ -1,0 +1,18 @@
+# Keep the build context to what the images actually COPY (Cargo.toml/lock, crates/,
+# frontend sources, migrations/). Excluding build output matters for correctness, not
+# just speed: `COPY frontend ./` would otherwise pull in a locally-built frontend/dist
+# and invalidate the cached `npm run build` layer on every host-side rebuild.
+/target
+/frontend/dist
+/frontend/node_modules
+/.git
+/.github
+/docs
+/deploy/chart
+/deploy/agent
+/scripts
+/tooling
+*.md
+*.log
+.secrets
+.env

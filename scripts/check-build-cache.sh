@@ -63,8 +63,8 @@ say() { printf '%-44s ' "$1"; }
 
 say "cargo chef cook layer cached"
 step_cached "$LOG2" "cargo chef cook" && echo ok || { echo "FAIL (deps recompiled)"; fail=1; }
-say "npm install layer cached"
-step_cached "$LOG2" "npm install" && echo ok || { echo "FAIL"; fail=1; }
+say "npm ci layer cached"
+step_cached "$LOG2" "npm ci" && echo ok || { echo "FAIL"; fail=1; }
 say "npm run build layer cached"
 step_cached "$LOG2" "npm run build" && echo ok || { echo "FAIL"; fail=1; }
 say "final cargo build re-ran (expected)"
