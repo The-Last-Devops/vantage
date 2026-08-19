@@ -1,4 +1,13 @@
 vantage {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+{{- if and .Values.image.tag (ne (.Values.image.tag | toString) .Chart.AppVersion) }}
+
+⚠️  image.tag is pinned to "{{ .Values.image.tag }}" but this chart is {{ .Chart.AppVersion }} —
+    the hub will run {{ .Values.image.tag }}, NOT {{ .Chart.AppVersion }}. A tag passed once with
+    --set sticks in the release and --reuse-values keeps replaying it. Drop the pin with:
+      helm upgrade {{ .Release.Name }} <chart> --version {{ .Chart.AppVersion }} \
+        -n {{ .Release.Namespace }} --reuse-values --set image.tag=""
+    (or --set image.tag={{ .Chart.AppVersion }}). Intentional pin? ignore this.
+{{- end }}
 
 1. Reach the UI:
 {{- if .Values.hub.ingress.host }}

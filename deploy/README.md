@@ -102,7 +102,7 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.8 \
+helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.9 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=vantage.example.com \
   --set timescaledb.storageClass=standard   # your cluster's StorageClass (kubectl get sc)
@@ -115,7 +115,7 @@ helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.
 > output matches the objects.
 
 > Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
-> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.8`
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.9`
 > prints the full defaults. Working from a checkout instead? swap the ref for the local
 > path: `helm install vantage ./deploy/chart …`.
 
@@ -206,6 +206,12 @@ helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version <new
   -n vantage --reset-then-reuse-values
 ```
 
+> **A tag you passed once with `--set` sticks.** `--set image.tag=X` is stored in the release,
+> and every later `--reuse-values` replays it — so the hub keeps running X no matter which
+> chart version you upgrade to. Check with `helm get values vantage -n vantage`; clear the pin
+> with `--set image.tag=""` (or `--reset-then-reuse-values`, or a values file). From 3.0.9 the
+> chart's post-install notes warn when a pinned tag disagrees with the chart version.
+
 > **Don't use plain `--reuse-values` to change versions.** It replays the previous release's
 > value map, so an `image.tag` recorded then (charts before 3.0.6 pinned it, e.g. `3.0.2`)
 > wins over the new chart and the Deployment keeps running the **old image** — the upgrade
@@ -271,7 +277,7 @@ without it the metadata still populates and usage reads 0.
 **and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
 no clone needed:
 ```bash
-helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.8 \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.9 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
@@ -331,7 +337,7 @@ and the whole migration roll back — the hub then crash-looped with an empty da
 Fix: install **3.0.1 or newer**. Already on 3.0.0?
 
 ```bash
-helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.8 \
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.9 \
   --namespace vantage --reset-then-reuse-values
 ```
 
@@ -370,7 +376,7 @@ HTTPS upstream (Cloudflare, an LB) while `hub.ingress.tls=false` yields `http://
 
 ## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.8`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+(e.g. `:3.0.9`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
 the chart's appVersion by default.
 
 Helm **charts** ship the same way — public OCI artifacts published per release tag:

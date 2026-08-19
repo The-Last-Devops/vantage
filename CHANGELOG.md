@@ -7,6 +7,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.9] — 2026-08-19
+
+### Changed
+- **The chart warns when `image.tag` is pinned to something other than the chart version.**
+  `--set image.tag=X` is stored in the release and every later `--reuse-values` replays it, so
+  upgrading the chart silently kept running the old image. `helm upgrade` now prints which
+  image will actually run and how to clear the pin (`--set image.tag=""`). `deploy/README.md`
+  documents the trap.
+
 ## [3.0.8] — 2026-08-19
 
 ### Fixed
