@@ -7,6 +7,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.4] — 2026-08-19
+
+### Changed
+- **Cluster cards: the workspace and agent-version badges are legible** — both were dimmed
+  (`text-muted`/`text-faint`) next to the bright Kubernetes version; they now use the same
+  full-contrast badge style.
+
 ## [3.0.3] — 2026-08-19
 
 ### Fixed

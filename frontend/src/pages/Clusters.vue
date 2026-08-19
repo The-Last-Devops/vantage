@@ -87,12 +87,12 @@ const kCores = (mc) => (mc / 1000).toFixed(mc >= 100000 ? 0 : 1)
             <div class="flex items-center gap-2.5">
               <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="online(c) ? 'bg-accent' : 'bg-down'" v-tip="online(c) ? 'online' : 'offline'"></span>
               <span class="truncate text-base font-semibold text-fg">{{ c.name }}</span>
-              <span class="ml-auto shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[11px] text-muted">{{ c.workspace }}</span>
+              <span class="ml-auto shrink-0 rounded-full border border-line2 bg-surface2 px-2 py-0.5 text-[11px] text-fg">{{ c.workspace }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span v-if="c.k8s_version" class="rounded-full border border-line2 bg-surface2 px-2 py-0.5 font-mono text-fg" v-tip="'Kubernetes server version'">{{ c.k8s_version }}</span>
               <span v-else class="text-faint italic">version unknown</span>
-              <span v-if="c.agent_version" class="rounded-full border border-line2 bg-surface2 px-2 py-0.5 font-mono text-faint" v-tip="'Vantage agent version'">agent {{ c.agent_version }}</span>
+              <span v-if="c.agent_version" class="rounded-full border border-line2 bg-surface2 px-2 py-0.5 font-mono text-fg" v-tip="'Vantage agent version'">agent {{ c.agent_version }}</span>
             </div>
             <div class="grid grid-cols-4 gap-2 border-t border-line pt-3">
               <div><div class="text-[9px] font-bold uppercase tracking-wide text-cap">Nodes</div><div class="mt-0.5 font-mono text-base font-bold tabular-nums text-fg">{{ sums[c.id]?.nodes ?? '—' }}</div></div>
