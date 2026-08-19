@@ -10,17 +10,17 @@
 FROM node:22-slim AS web
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY frontend ./
 RUN npm run build
 
 # 2) cargo-chef base
-FROM rust:1-bookworm AS chef
+# Prebuilt cargo-chef (saves compiling it from source on every cold/missed build).
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 ENV CARGO_NET_RETRY=10
 # openssl headers for the webauthn-rs (passkey) dependency's openssl-sys crate.
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN cargo install cargo-chef --locked
 WORKDIR /app
 
 # 3) Plan: a recipe of just the dependency graph (stable across code changes)

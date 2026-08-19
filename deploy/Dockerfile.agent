@@ -3,11 +3,11 @@
 # rustls' webpki roots are compiled in). cargo-chef caches the dependency layer so
 # code-only pushes don't recompile the whole tree (slow, esp. under arm64).
 # Built natively per-arch (no QEMU); the musl triple is derived from the build host.
-FROM rust:1-bookworm AS chef
+# Prebuilt cargo-chef (saves compiling it from source on every cold/missed build).
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 # Retry transient crate downloads (CI hit "curl failed" fetching a crate). Inherited
 # by the planner/build stages that derive from `chef`.
 ENV CARGO_NET_RETRY=10
-RUN cargo install cargo-chef --locked
 WORKDIR /app
 
 FROM chef AS planner

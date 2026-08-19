@@ -22,6 +22,10 @@ const props = defineProps({
   // Ops table: (row) => 'down' | 'warn' | null — washes the row + adds a left rail so
   // an incident reads before you parse a pill. Severity always beats selection colour.
   rowTone: { type: Function, default: null },
+  // Cap the table body's height (any CSS length, e.g. '420px'): the rows scroll inside
+  // the card with a sticky header, so a long table can't push the rest of the page out
+  // of sight. Unset = grow to fit.
+  maxHeight: { type: String, default: '' },
 })
 const emit = defineEmits(['row-click'])
 const selected = defineModel('selected', { default: () => [] }) // array of row keys
@@ -101,20 +105,22 @@ function rowCls(row) {
     </div>
 
     <!-- table -->
-    <div class="overflow-x-auto rounded-b-xl border border-line bg-surface">
+    <div class="rounded-b-xl border border-line bg-surface"
+      :class="maxHeight ? 'overflow-auto' : 'overflow-x-auto'"
+      :style="maxHeight ? { maxHeight } : null">
       <table class="w-full border-collapse">
         <thead>
           <tr>
-            <th v-if="selectable" class="w-9 border-b border-line2 bg-head px-3 py-2.5">
+            <th v-if="selectable" class="w-9 border-b border-line2 bg-head px-3 py-2.5" :class="maxHeight ? 'sticky top-0 z-10' : ''">
               <input ref="headCb" type="checkbox" :checked="allSel" @change="toggleAll" class="h-[15px] w-[15px] cursor-pointer align-middle accent-[rgb(var(--accent))]" />
             </th>
             <th v-for="c in columns" :key="c.key" @click="toggleSort(c)"
               class="select-none border-b border-line2 bg-head px-3.5 py-2.5 text-xs font-extrabold uppercase tracking-wide text-fg"
-              :class="[alignCls(c.align), c.sortable ? 'cursor-pointer hover:text-fg' : '', c.nowrap !== false ? 'whitespace-nowrap' : '']"
+              :class="[alignCls(c.align), c.sortable ? 'cursor-pointer hover:text-fg' : '', c.nowrap !== false ? 'whitespace-nowrap' : '', maxHeight ? 'sticky top-0 z-10' : '']"
               :style="c.width ? { width: c.width } : null">
               {{ c.label }}<span v-if="c.sortable && sortKey === c.key" class="ml-1 text-accent">{{ sortDir === 'asc' ? '▲' : '▼' }}</span>
             </th>
-            <th v-if="$slots['row-actions']" class="border-b border-line2 bg-head px-3.5 py-2.5"></th>
+            <th v-if="$slots['row-actions']" class="border-b border-line2 bg-head px-3.5 py-2.5" :class="maxHeight ? 'sticky top-0 z-10' : ''"></th>
           </tr>
         </thead>
         <tbody>

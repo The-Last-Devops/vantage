@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
@@ -41,12 +41,21 @@ const setNs = (v) => router.replace({ query: { ...route.query, ns: v || undefine
 // focused group (drill-down): charts show just it + its containers
 const sel = computed(() => route.query.sel || '')
 const selns = computed(() => route.query.selns || '')
+const drill = ref(null)
 function focusGroup(row) {
   const same = sel.value === row.group && selns.value === (row.namespace || '')
   router.replace({ query: { ...route.query, sel: same ? undefined : row.group, selns: same ? undefined : (row.namespace || undefined) } })
+  // Bring the pod list into view — on a long page the drill-down renders below the
+  // fold and reads as "nothing happened".
+  if (!same) nextTick(() => drill.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 const clearFocus = () => router.replace({ query: { ...route.query, sel: undefined, selns: undefined } })
 const focused = computed(() => !!sel.value)
+
+// Two tabs instead of one long page: a 26-node cluster's node table used to bury the
+// workload breakdown (users never scrolled to it). Tab lives in the URL so it's linkable.
+const tab = computed(() => (route.query.tab === 'nodes' ? 'nodes' : 'workloads'))
+const setTab = (t) => router.replace({ query: { ...route.query, tab: t === 'nodes' ? 'nodes' : undefined } })
 
 // API filter params for the focused group
 function focusFilter() {
@@ -202,7 +211,10 @@ const nodeCols = [
   { key: 'restarts', label: 'Restarts', sortable: true, align: 'right', mono: true },
   { key: 'agent_version', label: 'Agent', sortable: true },
 ]
-const usageCls = (p) => (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
+// Collapsed-state hint so the section still says something useful when closed.
+const nodeBusiest = computed(() => nodeRows.value.filter((r) => r.cpu_percent != null)
+  .sort((a, b) => b.cpu_percent - a.cpu_percent)[0] || null)
+const usageCls = (p) = (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
 function openNode(row) { if (row.system_id) router.push({ path: `/system/${row.system_id}`, query: { name: row.name } }) }
 
 // ---- table ----
@@ -267,6 +279,18 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         </div>
       </div>
 
+      <!-- tabs -->
+      <div class="flex gap-1 border-b border-line">
+        <button v-for="t in [{ k: 'workloads', l: 'Workloads' }, { k: 'nodes', l: 'Nodes' }]" :key="t.k"
+          @click="setTab(t.k)"
+          class="-mb-px border-b-2 px-3.5 py-2 text-sm font-semibold"
+          :class="tab === t.k ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'">
+          {{ t.l }}
+          <span class="ml-1.5 rounded-full bg-surface2 px-1.5 py-0.5 text-[11px] font-normal text-muted">{{ t.k === 'nodes' ? nodeRows.length : agg.groups.length }}</span>
+        </button>
+      </div>
+
+      <template v-if="tab === 'workloads'">
       <!-- charts -->
       <div class="flex flex-wrap items-center gap-2">
         <h2 class="mr-auto text-sm font-semibold text-fg">
@@ -290,13 +314,70 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         </div>
       </div>
 
-      <!-- nodes of this cluster -->
+
+      <!-- grouping controls -->
+      <div class="flex flex-wrap items-center gap-2">
+        <h2 class="mr-auto text-sm font-semibold text-fg">Breakdown</h2>
+        <span class="text-xs text-faint">namespace</span>
+        <UiSelect :model-value="nsScope" @update:model-value="setNs" :options="nsOptions" />
+        <span class="text-xs text-faint">group by</span>
+        <div class="flex gap-1 rounded-lg border border-line bg-surface2 p-0.5">
+          <button v-for="o in BY_OPTS" :key="o.value" @click="setBy(o.value)"
+            class="rounded px-2.5 py-1 text-xs font-medium" :class="by === o.value ? 'bg-accent text-accentfg' : 'text-muted hover:text-fg'">{{ o.label }}</button>
+        </div>
+        <input v-if="by === 'label'" :value="labelKey" @change="setLabelKey($event.target.value.trim())"
+          placeholder="label key" class="w-36 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
+        <span v-if="asOf" class="text-xs text-faint">as of {{ asOf }}</span>
+      </div>
+
+      <DataTable max-height="460px" :columns="aggCols" :rows="agg.groups" :row-key="rowKey" clickable
+        :filterable="agg.groups.length > 8" filter-placeholder="Filter groups…"
+        :initial-sort="{ key: 'cpu_millicores', dir: 'desc' }"
+        empty="No pods reported yet — is the k8s-cluster agent deployed?"
+        @row-click="focusGroup">
+        <template #cell-group="{ row }">
+          <div class="flex min-w-0 items-center gap-2">
+            <span v-if="by === 'workload' && splitKind(row.group).kind" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-faint">{{ splitKind(row.group).kind }}</span>
+            <span class="truncate font-mono text-sm" :class="isFocusedRow(row) ? 'text-accent' : 'text-fg'">{{ by === 'workload' ? splitKind(row.group).name : (row.group ?? '—') }}</span>
+          </div>
+        </template>
+        <template #cell-cpu_millicores="{ row }">
+          <div class="flex items-center justify-end gap-2">
+            <span class="hidden h-1.5 w-14 shrink-0 overflow-hidden rounded-full sm:inline-block" style="background:rgb(var(--track))"><span class="block h-full rounded-full" :style="{ width: barPct(row.cpu_millicores) + '%', background: barColor(row.cpu_millicores) }"></span></span>
+            <span class="font-mono tabular-nums">{{ fmtCores(row.cpu_millicores) }}</span>
+          </div>
+        </template>
+        <template #cell-mem_bytes="{ row }">{{ fmtBytes(row.mem_bytes) }}</template>
+      </DataTable>
+
+      <!-- drill-down: containers of the focused group -->
+      <template v-if="focused">
+        <div ref="drill" class="scroll-mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent/5 px-3.5 py-2.5">
+          <span class="text-sm font-semibold text-fg">Containers</span>
+          <span class="rounded-full border border-line2 bg-surface2 px-2 py-0.5 font-mono text-xs text-fg">{{ scopeLabel }}</span>
+          <span class="text-xs text-faint">{{ containers.length }} container{{ containers.length === 1 ? '' : 's' }}</span>
+          <button @click="clearFocus" class="ml-auto rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-fg">← back to all {{ by }}s</button>
+        </div>
+        <DataTable max-height="520px" :columns="ctrCols" :rows="containers" :row-key="(r) => r.namespace + '/' + r.pod + '/' + r.container"
+          :filterable="containers.length > 8" filter-placeholder="Filter containers…"
+          :initial-sort="{ key: 'cpu_millicores', dir: 'desc' }" empty="No containers.">
+          <template #cell-cpu_millicores="{ row }">{{ fmtCores(row.cpu_millicores) }}</template>
+          <template #cell-mem_bytes="{ row }">{{ fmtBytes(row.mem_bytes) }}</template>
+          <template #cell-phase="{ row }">
+            <span class="rounded px-1.5 py-0.5 text-xs" :class="row.phase === 'Running' ? 'bg-accent/12 text-accent' : row.phase === 'Failed' ? 'bg-down/12 text-down' : 'bg-surface2 text-muted'">{{ row.phase || '—' }}</span>
+          </template>
+        </DataTable>
+      </template>
+      </template>
+
+      <template v-else>
       <div class="flex flex-wrap items-center gap-2">
         <h2 class="mr-auto text-sm font-semibold text-fg">Nodes
           <span class="ml-1 text-xs font-normal text-faint">{{ nodeRows.length }}<template v-if="nodeRows.length"> · {{ nodeRows.filter(nodeOnline).length }} online</template></span>
         </h2>
+        <span v-if="nodeBusiest" class="text-xs text-muted">busiest: <span class="font-mono text-fg">{{ nodeBusiest.name }}</span> {{ Math.round(nodeBusiest.cpu_percent) }}% CPU</span>
       </div>
-      <DataTable :columns="nodeCols" :rows="nodeRows" :row-key="(r) => r.name" clickable
+      <DataTable max-height="72vh" :columns="nodeCols" :rows="nodeRows" :row-key="(r) => r.name" clickable
         :filterable="nodeRows.length > 8" filter-placeholder="Filter nodes…"
         :initial-sort="{ key: 'cpu_percent', dir: 'desc' }"
         empty="No nodes reported — deploy the per-node DaemonSet agent (Add System → Kubernetes)."
@@ -319,54 +400,6 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
         <template #cell-restarts="{ row }"><span :class="row.restarts > 50 ? 'text-warn' : ''">{{ row.restarts ?? '—' }}</span></template>
         <template #cell-agent_version="{ row }"><span class="font-mono text-xs text-faint">{{ row.agent_version || '—' }}</span></template>
       </DataTable>
-
-      <!-- grouping controls -->
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="mr-auto text-sm font-semibold text-fg">Breakdown</h2>
-        <span class="text-xs text-faint">namespace</span>
-        <UiSelect :model-value="nsScope" @update:model-value="setNs" :options="nsOptions" />
-        <span class="text-xs text-faint">group by</span>
-        <div class="flex gap-1 rounded-lg border border-line bg-surface2 p-0.5">
-          <button v-for="o in BY_OPTS" :key="o.value" @click="setBy(o.value)"
-            class="rounded px-2.5 py-1 text-xs font-medium" :class="by === o.value ? 'bg-accent text-accentfg' : 'text-muted hover:text-fg'">{{ o.label }}</button>
-        </div>
-        <input v-if="by === 'label'" :value="labelKey" @change="setLabelKey($event.target.value.trim())"
-          placeholder="label key" class="w-36 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-        <span v-if="asOf" class="text-xs text-faint">as of {{ asOf }}</span>
-      </div>
-
-      <DataTable :columns="aggCols" :rows="agg.groups" :row-key="rowKey" clickable
-        :filterable="agg.groups.length > 8" filter-placeholder="Filter groups…"
-        :initial-sort="{ key: 'cpu_millicores', dir: 'desc' }"
-        empty="No pods reported yet — is the k8s-cluster agent deployed?"
-        @row-click="focusGroup">
-        <template #cell-group="{ row }">
-          <div class="flex min-w-0 items-center gap-2">
-            <span v-if="by === 'workload' && splitKind(row.group).kind" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-faint">{{ splitKind(row.group).kind }}</span>
-            <span class="truncate font-mono text-sm" :class="isFocusedRow(row) ? 'text-accent' : 'text-fg'">{{ by === 'workload' ? splitKind(row.group).name : (row.group ?? '—') }}</span>
-          </div>
-        </template>
-        <template #cell-cpu_millicores="{ row }">
-          <div class="flex items-center justify-end gap-2">
-            <span class="hidden h-1.5 w-14 shrink-0 overflow-hidden rounded-full sm:inline-block" style="background:rgb(var(--track))"><span class="block h-full rounded-full" :style="{ width: barPct(row.cpu_millicores) + '%', background: barColor(row.cpu_millicores) }"></span></span>
-            <span class="font-mono tabular-nums">{{ fmtCores(row.cpu_millicores) }}</span>
-          </div>
-        </template>
-        <template #cell-mem_bytes="{ row }">{{ fmtBytes(row.mem_bytes) }}</template>
-      </DataTable>
-
-      <!-- drill-down: containers of the focused group -->
-      <template v-if="focused">
-        <h2 class="text-sm font-semibold text-fg">Containers · <span class="text-muted">{{ scopeLabel }}</span></h2>
-        <DataTable :columns="ctrCols" :rows="containers" :row-key="(r) => r.namespace + '/' + r.pod + '/' + r.container"
-          :filterable="containers.length > 8" filter-placeholder="Filter containers…"
-          :initial-sort="{ key: 'cpu_millicores', dir: 'desc' }" empty="No containers.">
-          <template #cell-cpu_millicores="{ row }">{{ fmtCores(row.cpu_millicores) }}</template>
-          <template #cell-mem_bytes="{ row }">{{ fmtBytes(row.mem_bytes) }}</template>
-          <template #cell-phase="{ row }">
-            <span class="rounded px-1.5 py-0.5 text-xs" :class="row.phase === 'Running' ? 'bg-accent/12 text-accent' : row.phase === 'Failed' ? 'bg-down/12 text-down' : 'bg-surface2 text-muted'">{{ row.phase || '—' }}</span>
-          </template>
-        </DataTable>
       </template>
     </div>
   </AppShell>
