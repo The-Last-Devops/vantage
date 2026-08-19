@@ -27,6 +27,7 @@ const BY_OPTS = [
   { value: 'namespace', label: 'Namespace' },
   { value: 'workload', label: 'Workload' },
   { value: 'label', label: 'Label' },
+  { value: 'node', label: 'Node' },
 ]
 const by = computed(() => route.query.by || 'namespace')
 const setBy = (v) => router.replace({ query: { ...route.query, by: v, sel: undefined, selns: undefined } })
@@ -66,6 +67,27 @@ const seriesOne = ref({ t: [], cpu_millicores: [], mem_bytes: [] }) // focused s
 const containers = ref([])
 const summary = ref(null)
 const err = ref('')
+// Nodes of this cluster: host metrics come from the per-node DaemonSet agents
+// (systems of kind 'k8s' carrying this cluster label); pod/CPU/mem-per-node comes
+// from the cluster agent's latest snapshot. Merged by node name.
+const nodeHosts = ref([])
+const nodeAgg = ref([])
+const clusterName = ref('')
+
+async function loadNodes() {
+  const list = await api.get('/api/systems')
+  const self = list.find((s) => s.id === id.value)
+  clusterName.value = self?.cluster || route.query.name || ''
+  nodeHosts.value = clusterName.value
+    ? list.filter((s) => s.kind === 'k8s' && s.cluster === clusterName.value)
+    : []
+}
+async function loadNodeAgg() {
+  try {
+    const r = await api.get(`/api/systems/${id.value}/kube/aggregate?by=node`)
+    nodeAgg.value = r.groups || []
+  } catch { nodeAgg.value = [] }
+}
 
 async function loadSummary() {
   try { summary.value = await api.get(`/api/systems/${id.value}/kube/summary`) } catch { summary.value = null }
@@ -100,7 +122,7 @@ async function loadContainers() {
 async function reloadAll(first = false) {
   err.value = ''
   try {
-    const tasks = [loadAgg(), loadCharts(), loadContainers(), loadSummary()]
+    const tasks = [loadAgg(), loadCharts(), loadContainers(), loadSummary(), loadNodes(), loadNodeAgg()]
     if (first) tasks.push(loadNamespaces())
     await (first ? minLoad(Promise.all(tasks)) : Promise.all(tasks))
   } catch (e) {
@@ -146,8 +168,45 @@ const memSeries = computed(() => {
   return (seriesBy.value.groups || []).map((g, i) => ({ name: g.name, color: color(i), data: g.mem_bytes }))
 })
 
+// ---- nodes table ----
+// One row per node: union of the DaemonSet's host metrics and the cluster agent's
+// per-node pod stats, so a node still shows up if only one of the two reports it.
+const nodeRows = computed(() => {
+  const byName = new Map()
+  for (const h of nodeHosts.value) {
+    byName.set(h.name, {
+      name: h.name, system_id: h.id, agent_version: h.agent_version, last_seen: h.last_seen,
+      cpu_percent: h.cpu_percent, mem_pct: pct(h.mem_used, h.mem_total), disk_pct: h.disk_util ?? pct(h.disk_used, h.disk_total),
+      mem_used: h.mem_used, mem_total: h.mem_total, cores: h.cpu_cores,
+      pods: null, k_cpu: null, k_mem: null, restarts: null,
+    })
+  }
+  for (const g of nodeAgg.value) {
+    const n = g.group || '—'
+    const row = byName.get(n) || { name: n, system_id: null, cpu_percent: null, mem_pct: null, disk_pct: null }
+    row.pods = g.pods; row.k_cpu = g.cpu_millicores; row.k_mem = g.mem_bytes; row.restarts = g.restarts
+    byName.set(n, row)
+  }
+  return [...byName.values()]
+})
+function pct(used, total) { return total ? Math.round((Number(used) / Number(total)) * 100) : null }
+const nodeOnline = (r) => r.last_seen && Date.now() - new Date(r.last_seen).getTime() < 120000
+const nodeCols = [
+  { key: 'name', label: 'Node', sortable: true },
+  { key: 'cpu_percent', label: 'CPU', sortable: true, align: 'right', mono: true },
+  { key: 'mem_pct', label: 'Memory', sortable: true, align: 'right', mono: true },
+  { key: 'disk_pct', label: 'Disk', sortable: true, align: 'right', mono: true },
+  { key: 'pods', label: 'Pods', sortable: true, align: 'right', mono: true },
+  { key: 'k_cpu', label: 'Pod CPU', sortable: true, align: 'right', mono: true },
+  { key: 'k_mem', label: 'Pod memory', sortable: true, align: 'right', mono: true },
+  { key: 'restarts', label: 'Restarts', sortable: true, align: 'right', mono: true },
+  { key: 'agent_version', label: 'Agent', sortable: true },
+]
+const usageCls = (p) => (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
+function openNode(row) { if (row.system_id) router.push({ path: `/system/${row.system_id}`, query: { name: row.name } }) }
+
 // ---- table ----
-const groupHeader = computed(() => (by.value === 'label' ? `Label: ${labelKey.value}` : by.value === 'workload' ? 'Workload' : 'Namespace'))
+const groupHeader = computed(() => (by.value === 'label' ? `Label: ${labelKey.value}` : by.value === 'workload' ? 'Workload' : by.value === 'node' ? 'Node' : 'Namespace'))
 const showNsCol = computed(() => by.value === 'workload')
 const aggCols = computed(() => [
   ...(showNsCol.value ? [{ key: 'namespace', label: 'Namespace', sortable: true }] : []),
@@ -230,6 +289,36 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
           <UplotChart :time="chartTime" :series="memSeries" unit="B" :span-seconds="spanSeconds" :area="focused" sync-key="kube-cluster" />
         </div>
       </div>
+
+      <!-- nodes of this cluster -->
+      <div class="flex flex-wrap items-center gap-2">
+        <h2 class="mr-auto text-sm font-semibold text-fg">Nodes
+          <span class="ml-1 text-xs font-normal text-faint">{{ nodeRows.length }}<template v-if="nodeRows.length"> · {{ nodeRows.filter(nodeOnline).length }} online</template></span>
+        </h2>
+      </div>
+      <DataTable :columns="nodeCols" :rows="nodeRows" :row-key="(r) => r.name" clickable
+        :filterable="nodeRows.length > 8" filter-placeholder="Filter nodes…"
+        :initial-sort="{ key: 'cpu_percent', dir: 'desc' }"
+        empty="No nodes reported — deploy the per-node DaemonSet agent (Add System → Kubernetes)."
+        @row-click="openNode">
+        <template #cell-name="{ row }">
+          <div class="flex min-w-0 items-center gap-2">
+            <span class="h-2 w-2 shrink-0 rounded-full" :class="nodeOnline(row) ? 'bg-accent' : 'bg-down'" v-tip="nodeOnline(row) ? 'online' : 'no host metrics'"></span>
+            <span class="truncate font-mono text-sm text-fg">{{ row.name }}</span>
+            <span v-if="row.cores" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] text-faint">{{ row.cores }} vCPU</span>
+          </div>
+        </template>
+        <template #cell-cpu_percent="{ row }"><span :class="usageCls(row.cpu_percent)">{{ row.cpu_percent != null ? Math.round(row.cpu_percent) + '%' : '—' }}</span></template>
+        <template #cell-mem_pct="{ row }">
+          <span :class="usageCls(row.mem_pct)">{{ row.mem_pct != null ? row.mem_pct + '%' : '—' }}</span>
+          <small v-if="row.mem_total" class="ml-1 text-[10px] text-faint">{{ fmtBytes(row.mem_used) }}/{{ fmtBytes(row.mem_total) }}</small>
+        </template>
+        <template #cell-disk_pct="{ row }"><span :class="usageCls(row.disk_pct)">{{ row.disk_pct != null ? Math.round(row.disk_pct) + '%' : '—' }}</span></template>
+        <template #cell-k_cpu="{ row }">{{ row.k_cpu != null ? fmtCores(row.k_cpu) + ' c' : '—' }}</template>
+        <template #cell-k_mem="{ row }">{{ row.k_mem != null ? fmtBytes(row.k_mem) : '—' }}</template>
+        <template #cell-restarts="{ row }"><span :class="row.restarts > 50 ? 'text-warn' : ''">{{ row.restarts ?? '—' }}</span></template>
+        <template #cell-agent_version="{ row }"><span class="font-mono text-xs text-faint">{{ row.agent_version || '—' }}</span></template>
+      </DataTable>
 
       <!-- grouping controls -->
       <div class="flex flex-wrap items-center gap-2">

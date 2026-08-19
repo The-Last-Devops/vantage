@@ -7,6 +7,16 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.5] — 2026-08-19
+
+### Added
+- **Nodes section on the cluster page** — one row per node of the cluster, merging the
+  per-node DaemonSet agent's host metrics (online, CPU %, memory, disk, vCPU, agent version)
+  with the cluster agent's per-node pod stats (pods, pod CPU, pod memory, restarts). Click a
+  row to open that node's host page. Nodes appear even if only one of the two agents reports.
+- **Group by "Node"** in the cluster breakdown (table + overlay charts), alongside
+  Namespace / Workload / Label.
+
 ## [3.0.4] — 2026-08-19
 
 ### Changed

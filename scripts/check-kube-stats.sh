@@ -87,6 +87,21 @@ s=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
   WHERE c.system_id='$SID' AND c.time=l.t AND workload='web' AND namespace='staging';")
 assert "Deployment/web in staging cpu" "$s" "100"
 
+# by=node (the Nodes table + "group by Node"): one group per node, cpu split
+# n1=250+10, n2=30, n3=100 — and pods counted per node.
+nn=$(psql -c "$L SELECT count(*) FROM (SELECT (CASE WHEN node='' THEN '—' ELSE node END) grp \
+  FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t GROUP BY grp) x;")
+assert "by=node group count" "$nn" "3"
+n1=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
+  WHERE c.system_id='$SID' AND c.time=l.t AND node='n1';")
+assert "node n1 cpu" "$n1" "260"
+n1p=$(psql -c "$L SELECT count(DISTINCT pod) FROM kube_container_stats c, l \
+  WHERE c.system_id='$SID' AND c.time=l.t AND node='n1';")
+assert "node n1 pods" "$n1p" "1"
+n3=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
+  WHERE c.system_id='$SID' AND c.time=l.t AND node='n3';")
+assert "node n3 cpu" "$n3" "100"
+
 # aggregate by label app=logger -> 30
 lbl=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
   WHERE c.system_id='$SID' AND c.time=l.t AND labels->>'app'='logger';")

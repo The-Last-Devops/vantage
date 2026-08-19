@@ -67,7 +67,7 @@ pub async fn kube_aggregate(
         return Err(StatusCode::FORBIDDEN);
     }
     let by = q.by.as_deref().unwrap_or("namespace");
-    if !matches!(by, "namespace" | "workload" | "label") {
+    if !matches!(by, "namespace" | "workload" | "label" | "node") {
         return Err(StatusCode::BAD_REQUEST);
     }
     if by == "label" && q.label.as_deref().unwrap_or("").is_empty() {
@@ -88,6 +88,9 @@ pub async fn kube_aggregate(
         "workload" => {
             // Keep same-named workloads in different namespaces distinct.
             qb.push("(CASE WHEN workload = '' THEN '—' ELSE workload_kind || '/' || workload END) AS grp, namespace AS namespace");
+        }
+        "node" => {
+            qb.push("(CASE WHEN node = '' THEN '—' ELSE node END) AS grp, NULL::text AS namespace");
         }
         _ => {
             qb.push("COALESCE(labels ->> ")
@@ -391,7 +394,7 @@ pub async fn kube_series_by(
         return Err(StatusCode::FORBIDDEN);
     }
     let by = q.by.as_deref().unwrap_or("namespace");
-    if !matches!(by, "namespace" | "workload" | "label") {
+    if !matches!(by, "namespace" | "workload" | "label" | "node") {
         return Err(StatusCode::BAD_REQUEST);
     }
     if by == "label" && q.label.as_deref().unwrap_or("").is_empty() {
@@ -413,6 +416,9 @@ pub async fn kube_series_by(
         "workload" => {
             // Qualify with namespace so same-named workloads are separate lines.
             qb.push("(namespace || ' · ' || workload_kind || '/' || workload) AS grp");
+        }
+        "node" => {
+            qb.push("(CASE WHEN node = '' THEN '—' ELSE node END) AS grp");
         }
         _ => {
             qb.push("COALESCE(labels ->> ")
