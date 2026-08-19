@@ -18,6 +18,22 @@ Agents and install assets are unauthenticated by design and live under `/pub/*`:
 Your gate **must bypass `/pub/*`** (and only that) — everything else (the SPA, `/api/*`)
 should require passing the gate.
 
+### The full picture, path by path
+
+| Path | Who calls it | Behind the gate? |
+|---|---|---|
+| `/pub/ingest`, `/pub/kube` | agents (`x-api-key`) | **Bypass** — required, or metrics stop |
+| `/pub/push/{token}` | anything sending a push-monitor heartbeat | **Bypass** — required |
+| `/pub/tunnel` | agent reverse tunnel, WebSocket (shell/exec) | **Bypass** — required (Cloudflare Access passes WebSockets) |
+| `/pub/agent.yaml`, `/pub/install.sh` | `kubectl apply` / `curl \| sh` on a new host | **Bypass** — required to install agents unauthenticated |
+| `/healthz`, `/readyz` | kubelet probes | Irrelevant — probes hit the pod directly, never the gate. Bypass only if an **external** uptime checker polls them |
+| `/exposure-check` | the hub's own self-check | **Keep gated** — this is the marker that proves the gate works; bypassing it makes the check report "exposed" |
+| `/mcp` | MCP clients / scripts (`Authorization: Bearer <pat>`) | Gated by default → non-browser clients get an Access login page. Either issue a **Cloudflare service token** for them, or bypass `/mcp` (it still requires a PAT) |
+| `/api/*`, `/` (SPA), `/api/systems/{id}/console` | humans in a browser (session cookie) | **Keep gated** — the console WebSocket rides the same session and works through Access |
+
+Note: agent tokens and PATs are *still* checked behind a bypass — a bypass removes the
+Cloudflare challenge, not Vantage's own authentication.
+
 ## The exposure self-check
 
 Go to **Settings → Security → Public exposure → Check now**. The hub works out its public
