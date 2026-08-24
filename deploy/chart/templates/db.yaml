@@ -50,7 +50,11 @@ spec:
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
           readinessProbe:
-            exec: { command: ["pg_isready", "-U", "vantage"] }
+            # -d is REQUIRED: without it libpq falls back to dbname = username, so the
+            # probe asked for a database called "vantage" (the DBs are vantage_config /
+            # vantage_data). The probe still passed, but Postgres logged a FATAL
+            # "database \"vantage\" does not exist" every 5s, drowning its real log.
+            exec: { command: ["pg_isready", "-U", "vantage", "-d", {{ $database | quote }}] }
             initialDelaySeconds: 5
             periodSeconds: 5
   volumeClaimTemplates:
