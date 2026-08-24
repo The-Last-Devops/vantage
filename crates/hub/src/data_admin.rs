@@ -556,15 +556,19 @@ pub async fn prune_config_logs(config: &PgPool) {
 
 /// Current cap config (from the config DB) + live Data-DB usage.
 pub async fn cap_status(config: &PgPool, data: &PgPool) -> CapStatus {
-    let limit_bytes =
-        crate::settings::get(config, "data_cap_limit_bytes", 10_737_418_240_i64).await;
-    let enabled = crate::settings::get(config, "data_cap_enabled", false).await;
+    let limit_bytes = crate::settings::get(config, "data_cap_limit_bytes", DEFAULT_CAP_BYTES).await;
+    let enabled = crate::settings::get(config, "data_cap_enabled", true).await;
     CapStatus {
         limit_bytes,
         used_bytes: db_size_bytes(data).await,
         enabled,
     }
 }
+
+/// Default Data-DB cap: 20 GiB, and eviction is ON by default (see
+/// migrations/config/0002). An install with no ceiling fills its volume and takes
+/// Postgres down with it, so the safe default is a cap that is enforced.
+const DEFAULT_CAP_BYTES: i64 = 20 * 1024 * 1024 * 1024;
 
 /// Cap bounds: 256 MiB .. 1 TiB.
 const CAP_MIN: i64 = 256 * 1024 * 1024;
@@ -637,8 +641,8 @@ pub struct EvictionResult {
 /// writes can grow the DB between the two size reads faster than a small chunk frees,
 /// which made the old size-delta guard `break` after ~one drop and never converge.
 pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
-    let limit = crate::settings::get(config, "data_cap_limit_bytes", 10_737_418_240_i64).await;
-    let enabled = crate::settings::get(config, "data_cap_enabled", false).await;
+    let limit = crate::settings::get(config, "data_cap_limit_bytes", DEFAULT_CAP_BYTES).await;
+    let enabled = crate::settings::get(config, "data_cap_enabled", true).await;
     let start = db_size_bytes(data).await;
     let mut used = start;
     let mut dropped_total: u32 = 0;
