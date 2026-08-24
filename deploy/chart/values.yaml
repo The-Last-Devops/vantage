@@ -33,7 +33,13 @@ timescaledb:
   password: ""                        # leave empty — auto-generated, stable across upgrades
   storageClass: ""                    # "" = cluster default; applies to both DBs
   configStorage: 1Gi                  # config DB volume (small: users/config/rules)
-  dataStorage: 5Gi                    # data DB volume (grows with metrics history)
+  # Data DB volume. Must stay comfortably ABOVE the app's storage cap (default 20 GiB,
+  # Settings -> Data & retention): the cap only measures pg_database_size, while the
+  # volume also holds WAL, temp files and index bloat. 25Gi vs a 20 GiB cap leaves that
+  # headroom. NOTE: a StatefulSet's volumeClaimTemplates are IMMUTABLE — changing this on
+  # an existing release makes `helm upgrade` fail. See deploy/README.md (Resizing the DB
+  # volume) for the expand-then-recreate procedure.
+  dataStorage: 25Gi
   # Resource requests/limits for each DB pod.
   resources:
     requests: { cpu: 100m, memory: 256Mi }

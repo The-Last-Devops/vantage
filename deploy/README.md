@@ -147,7 +147,7 @@ required — the defaults give a working single-node hub with bundled databases.
 | `timescaledb.password` | `""` | Leave empty — auto-generated and kept stable across `helm upgrade`. |
 | `timescaledb.storageClass` | `""` | StorageClass for both DB PVCs (`""` = cluster default). |
 | `timescaledb.configStorage` | `1Gi` | Config DB volume size (small). |
-| `timescaledb.dataStorage` | `5Gi` | Data DB volume size (grows with metrics history). |
+| `timescaledb.dataStorage` | `25Gi` | Data DB volume size. Keep it above the app storage cap (default 20 GiB) — see *Resizing the DB volume*. |
 | `timescaledb.resources` | `100m/256Mi req, 1Gi limit` | Per-DB pod resources. |
 
 **Hub pod**
@@ -389,3 +389,30 @@ kubectl -n vantage create secret docker-registry ghcr \
   --docker-server=ghcr.io --docker-username=<gh-user> --docker-password=<PAT read:packages>
 helm ... --set image.pullSecrets='{ghcr}'   # agent chart: same flag
 ```
+
+## Resizing the DB volume
+
+A StatefulSet's `volumeClaimTemplates` are **immutable**, so raising
+`timescaledb.dataStorage` on an existing release makes `helm upgrade` fail with
+*"updates to statefulset spec for fields other than 'replicas', 'template' … are
+forbidden"*. Growing the volume is a three-step dance, and it only works at all if the
+StorageClass reports `allowVolumeExpansion: true` (many hostpath provisioners do not —
+there, the only path is a backup/restore onto a new PVC):
+
+```bash
+kubectl get sc <class> -o jsonpath='{.allowVolumeExpansion}'   # must print true
+
+# 1. grow the existing PVC in place (data stays put; the pod keeps running)
+kubectl patch pvc data-vantage-db-data-0 -n <ns> \
+  -p '{"spec":{"resources":{"requests":{"storage":"25Gi"}}}}'
+
+# 2. drop the StatefulSet object but KEEP its pod and PVC
+kubectl delete statefulset vantage-db-data -n <ns> --cascade=orphan
+
+# 3. let Helm recreate it with the new template (it adopts the running pod + PVC)
+helm upgrade vantage oci://ghcr.io/itlboy/charts/vantage -n <ns> -f my-values.yaml
+```
+
+Verify with `kubectl exec -n <ns> vantage-db-data-0 -- df -h /var/lib/postgresql/data`.
+Never delete the PVC — `persistentVolumeClaimRetentionPolicy` is `Retain` precisely so a
+mistaken `helm uninstall` cannot take the metrics history with it.
