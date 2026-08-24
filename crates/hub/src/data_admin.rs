@@ -298,7 +298,12 @@ async fn hypertable_stat(data: &PgPool, name: &str, label: &str) -> TableStat {
             .await
             .ok()
             .flatten();
-    let rows: Option<(i64,)> = sqlx::query_as(&format!("SELECT count(*) FROM {name}"))
+    // NEVER `count(*)` here. These hypertables hold tens of millions of rows and the
+    // rollups are continuous aggregates (a real-time CAgg count also re-aggregates the
+    // uncovered raw tail) — 14 of those in one page load pinned every Postgres core.
+    // `approximate_row_count()` reads chunk statistics instead: O(#chunks), no table scan.
+    let rows: Option<(i64,)> = sqlx::query_as("SELECT approximate_row_count(($1::text)::regclass)")
+        .bind(name)
         .fetch_optional(data)
         .await
         .ok()
@@ -398,10 +403,11 @@ async fn db_size_bytes(pool: &PgPool) -> i64 {
         .unwrap_or(0)
 }
 
-/// Per-table stats for a plain relational DB (the config DB). The config DB is small,
-/// so we run an exact `COUNT(*)` per table — the planner's `reltuples` estimate reads 0
-/// for any table not yet ANALYZEd (e.g. users/workspaces with low write volume), which
-/// looks like the table is empty when it isn't.
+/// Per-table stats for a plain relational DB (the config DB). Small tables get an exact
+/// `COUNT(*)` — the planner's `reltuples` estimate reads 0 (or -1) for any table not yet
+/// ANALYZEd (e.g. users/workspaces with low write volume), which looks like the table is
+/// empty when it isn't. Anything past `EXACT_COUNT_MAX_BYTES` (audit/transcript tables can
+/// reach gigabytes) falls back to the estimate rather than scanning it on every page view.
 pub async fn config_stats(config: &PgPool) -> DbStats {
     let db_size = sqlx::query_as::<_, (String,)>(
         "SELECT pg_size_pretty(pg_database_size(current_database()))",
@@ -411,8 +417,8 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
     .map(|(s,)| s)
     .unwrap_or_else(|_| "—".into());
     // Table name + exact on-disk size from the catalog, biggest first.
-    let metas: Vec<(String, i64, String)> = sqlx::query_as(
-        "SELECT c.relname, pg_total_relation_size(c.oid), pg_size_pretty(pg_total_relation_size(c.oid)) \
+    let metas: Vec<(String, i64, String, f32)> = sqlx::query_as(
+        "SELECT c.relname, pg_total_relation_size(c.oid), pg_size_pretty(pg_total_relation_size(c.oid)), c.reltuples \
          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
          WHERE n.nspname = 'public' AND c.relkind = 'r' \
          ORDER BY pg_total_relation_size(c.oid) DESC",
@@ -428,16 +434,21 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
         }
     }
     let mut tables = Vec::with_capacity(metas.len());
-    for (name, size_bytes, size) in metas {
-        // Names come from pg_catalog (our own schema); double-quote defensively.
-        let rows = sqlx::query_as::<_, (i64,)>(&format!(
-            "SELECT count(*) FROM \"{}\"",
-            name.replace('"', "\"\"")
-        ))
-        .fetch_one(config)
-        .await
-        .map(|(n,)| n)
-        .unwrap_or(0);
+    for (name, size_bytes, size, reltuples) in metas {
+        let rows = if size_bytes <= EXACT_COUNT_MAX_BYTES {
+            // Names come from pg_catalog (our own schema); double-quote defensively.
+            sqlx::query_as::<_, (i64,)>(&format!(
+                "SELECT count(*) FROM \"{}\"",
+                name.replace('"', "\"\"")
+            ))
+            .fetch_one(config)
+            .await
+            .map(|(n,)| n)
+            .unwrap_or(0)
+        } else {
+            // reltuples is -1 when never analyzed; show 0 rather than a negative count.
+            reltuples.max(0.0) as i64
+        };
         let retention_days = retention.get(name.as_str()).copied();
         let note = config_table_note(&name).map(String::from);
         tables.push(TableStat {
@@ -451,6 +462,10 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
     }
     DbStats { db_size, tables }
 }
+
+/// Above this on-disk size a config table's row count comes from the planner estimate
+/// instead of a full `count(*)` scan (the Data & retention page is not worth a seq scan).
+const EXACT_COUNT_MAX_BYTES: i64 = 64 * 1024 * 1024;
 
 /// One-line purpose for each known config-DB table (shown in the admin UI).
 fn config_table_note(name: &str) -> Option<&'static str> {
