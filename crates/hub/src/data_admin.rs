@@ -642,6 +642,15 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
     let start = db_size_bytes(data).await;
     let mut used = start;
     let mut dropped_total: u32 = 0;
+    // Being over the cap and doing nothing used to be completely silent, which reads as
+    // "auto-delete is broken". Say why: the cap is off, or nothing was droppable.
+    if !enabled && start > limit {
+        tracing::warn!(
+            used = %human_bytes(start),
+            limit = %human_bytes(limit),
+            "data cap: Data DB is over the configured limit but the cap is DISABLED — no eviction (enable it on Data & retention)"
+        );
+    }
     if enabled && start > limit {
         while used > limit {
             if dropped_total >= MAX_DROPS_PER_PASS {
@@ -692,6 +701,14 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
         }
     }
     let freed = (start - used).max(0);
+    if enabled && used > limit && dropped_total == 0 {
+        tracing::warn!(
+            used = %human_bytes(used),
+            limit = %human_bytes(limit),
+            "data cap: over the limit but no chunk could be dropped (only the newest chunk left, \
+             or drop_chunks failed) — lower a tier's retention or raise the cap"
+        );
+    }
     if freed > 0 {
         let msg = format!(
             "data cap eviction: freed {} ({} chunks), now {} / limit {}",
