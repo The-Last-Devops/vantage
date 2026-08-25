@@ -137,6 +137,19 @@ docker compose up -d
   page's `<script setup>`, run `bash scripts/check-console-errors.sh` — it boots the hub on
   throwaway databases, seeds a k8s cluster + nodes, and opens every main route in headless
   Chrome, failing on any console error. Add new routes to its `ROUTES` list.
+- **Never read "the latest row per id" from a hypertable with `DISTINCT ON` / `GROUP BY id` /
+  `row_number()`, and never leave a `max(time)` unbounded.** Those shapes cannot use the
+  `(id, time DESC)` index and give TimescaleDB nothing to exclude chunks on, so a query that
+  wants one row per host reads and sorts the *entire* table. This is what made `/clusters`,
+  `/api/systems`, `/api/monitors` and the uptime bar hammer Postgres (fixed in 3.0.12).
+  Use one indexed lookup per id instead — `FROM unnest($1::uuid[]) AS s(id) JOIN LATERAL
+  (SELECT … WHERE <id col> = s.id ORDER BY time DESC LIMIT n) x ON true` — and add a time
+  bound (`AND time > now() - interval '…'`) wherever a stale answer is meaningless anyway, so
+  chunk exclusion applies. For a single id, put the `max(time)` in a **scalar subquery**, not a
+  CTE: a CTE gets materialised and blocks runtime chunk exclusion. Leave it unbounded only when
+  the answer must survive a long silence (a monitor's up/down state), where `LIMIT 1` stops
+  early anyway. `scripts/check-latest-row-queries.sh` asserts the plan from `EXPLAIN` — extend
+  it when you add such a read.
 - **A rollup tier is a continuous aggregate, so TimescaleDB reports its jobs against the
   MATERIALIZATION hypertable** (`_materialized_hypertable_7`), never the view name
   (`system_metrics_1m`). Any query over `timescaledb_information.jobs` must resolve the view
