@@ -48,8 +48,11 @@ pub async fn list_monitors(
     .await
     .map_err(internal)?;
 
-    // Latest heartbeat for ALL monitors in ONE query (was N+1). DISTINCT ON + the
-    // (monitor_id, time DESC) index makes this a fast per-monitor index scan.
+    // Latest heartbeat for ALL monitors in ONE query (was N+1). One LATERAL LIMIT 1 per
+    // monitor rather than `DISTINCT ON` over `= ANY($1)`, which had to sort every
+    // heartbeat row of every monitor to keep the newest of each. No time bound here on
+    // purpose: an up/down state must still show for a monitor that has been quiet or
+    // paused for days, and the LIMIT 1 index scan is cheap regardless.
     let ids: Vec<Uuid> = monitors.iter().map(|m| m.0).collect();
     #[allow(clippy::type_complexity)]
     let beat_rows: Vec<(
@@ -59,8 +62,10 @@ pub async fn list_monitors(
         Option<i32>,
         Option<String>,
     )> = sqlx::query_as(
-        "SELECT DISTINCT ON (monitor_id) monitor_id, time, up, latency_ms, message \
-         FROM heartbeats WHERE monitor_id = ANY($1) ORDER BY monitor_id, time DESC",
+        "SELECT s.mid, h.time, h.up, h.latency_ms, h.message \
+         FROM unnest($1::uuid[]) AS s(mid) \
+         JOIN LATERAL (SELECT time, up, latency_ms, message FROM heartbeats \
+                       WHERE monitor_id = s.mid ORDER BY time DESC LIMIT 1) h ON true",
     )
     .bind(&ids)
     .fetch_all(&state.data)
@@ -80,14 +85,20 @@ pub async fn list_monitors(
         latest.insert(mid, (t, up, lat, msg));
     }
 
-    // Last ~40 beats per monitor (oldest→newest) for the mini uptime bar — ONE
-    // windowed query for all monitors.
+    // Last ~40 beats per monitor (oldest→newest) for the mini uptime bar — ONE query for
+    // all monitors, as a LATERAL LIMIT 40 per monitor. The old `row_number() OVER
+    // (PARTITION BY monitor_id ORDER BY time DESC)` had to sort the ENTIRE heartbeats
+    // table before discarding everything past rn 40 — by far the most expensive read in
+    // the product. LATERAL turns it into a per-monitor index scan, and the 7-day bound
+    // lets TimescaleDB exclude old chunks (without it the planner reads a monitor's whole
+    // retained history and sorts it just to take 40 rows). 7 days covers 40 beats for any
+    // interval up to ~4h; a slower monitor than that simply shows a shorter bar.
     let recent_rows: Vec<(Uuid, bool)> = sqlx::query_as(
-        "SELECT monitor_id, up FROM ( \
-           SELECT monitor_id, up, time, \
-                  row_number() OVER (PARTITION BY monitor_id ORDER BY time DESC) AS rn \
-           FROM heartbeats WHERE monitor_id = ANY($1) \
-         ) t WHERE rn <= 40 ORDER BY monitor_id, time ASC",
+        "SELECT s.mid, b.up FROM unnest($1::uuid[]) AS s(mid) \
+         JOIN LATERAL (SELECT up, time FROM heartbeats WHERE monitor_id = s.mid \
+                       AND time > now() - interval '7 days' \
+                       ORDER BY time DESC LIMIT 40) b ON true \
+         ORDER BY s.mid, b.time ASC",
     )
     .bind(&ids)
     .fetch_all(&state.data)

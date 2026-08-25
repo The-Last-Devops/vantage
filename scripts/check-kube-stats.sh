@@ -63,52 +63,57 @@ done
 fail=0
 assert() { if [ "$2" = "$3" ]; then echo "  ok: $1"; else echo "  FAIL: $1 (got '$2', want '$3')"; fi; [ "$2" = "$3" ] || fail=1; }
 
-# Reusable "latest snapshot" CTE prefix.
-L="WITH l AS (SELECT max(time) t FROM kube_container_stats WHERE system_id='$SID')"
+# Reusable "latest snapshot" predicate — the exact shape the hub ships (web/kube.rs):
+# a FRESH time bound on both halves plus a scalar subquery (not a CTE), so TimescaleDB
+# can exclude chunks instead of reading the whole hypertable.
+FRESH="6 hours"
+W="c.system_id='$SID' AND c.time > now() - interval '$FRESH' \
+   AND c.time = (SELECT max(time) FROM kube_container_stats \
+                 WHERE system_id='$SID' AND time > now() - interval '$FRESH')"
 
 echo "asserting read queries…"
 # aggregate scoped to ns=default: cpu 260 (250+10), pods 1, containers 2
-read -r cpu pods conts <<<"$(psql -c "$L SELECT sum(cpu_millicores), count(DISTINCT pod), count(*) \
-  FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t AND namespace='default';" | tr '|' ' ')"
+read -r cpu pods conts <<<"$(psql -c "SELECT sum(cpu_millicores), count(DISTINCT pod), count(*) \
+  FROM kube_container_stats c WHERE $W AND namespace='default';" | tr '|' ' ')"
 assert "ns=default cpu" "$cpu" "260"
 assert "ns=default pods" "$pods" "1"
 assert "ns=default containers" "$conts" "2"
 
 # by=workload keeps same-named deployments in different namespaces DISTINCT (issue #2):
 # 'Deployment/web' must appear once per namespace (default + staging), not merged.
-n=$(psql -c "$L SELECT count(*) FROM ( \
-  SELECT namespace, (workload_kind||'/'||workload) grp FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t GROUP BY namespace, grp) x WHERE grp='Deployment/web';")
+n=$(psql -c "SELECT count(*) FROM ( \
+  SELECT namespace, (workload_kind||'/'||workload) grp FROM kube_container_stats c \
+  WHERE $W GROUP BY namespace, grp) x WHERE grp='Deployment/web';")
 assert "Deployment/web distinct across namespaces" "$n" "2"
-d=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND workload='web' AND namespace='default';")
+d=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c \
+  WHERE $W AND workload='web' AND namespace='default';")
 assert "Deployment/web in default cpu" "$d" "260"
-s=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND workload='web' AND namespace='staging';")
+s=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c \
+  WHERE $W AND workload='web' AND namespace='staging';")
 assert "Deployment/web in staging cpu" "$s" "100"
 
 # by=node (the Nodes table + "group by Node"): one group per node, cpu split
 # n1=250+10, n2=30, n3=100 — and pods counted per node.
-nn=$(psql -c "$L SELECT count(*) FROM (SELECT (CASE WHEN node='' THEN '—' ELSE node END) grp \
-  FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t GROUP BY grp) x;")
+nn=$(psql -c "SELECT count(*) FROM (SELECT (CASE WHEN node='' THEN '—' ELSE node END) grp \
+  FROM kube_container_stats c WHERE $W GROUP BY grp) x;")
 assert "by=node group count" "$nn" "3"
-n1=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND node='n1';")
+n1=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c \
+  WHERE $W AND node='n1';")
 assert "node n1 cpu" "$n1" "260"
-n1p=$(psql -c "$L SELECT count(DISTINCT pod) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND node='n1';")
+n1p=$(psql -c "SELECT count(DISTINCT pod) FROM kube_container_stats c \
+  WHERE $W AND node='n1';")
 assert "node n1 pods" "$n1p" "1"
-n3=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND node='n3';")
+n3=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c \
+  WHERE $W AND node='n3';")
 assert "node n3 cpu" "$n3" "100"
 
 # aggregate by label app=logger -> 30
-lbl=$(psql -c "$L SELECT sum(cpu_millicores) FROM kube_container_stats c, l \
-  WHERE c.system_id='$SID' AND c.time=l.t AND labels->>'app'='logger';")
+lbl=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c \
+  WHERE $W AND labels->>'app'='logger';")
 assert "label app=logger cpu" "$lbl" "30"
 
 # containers filtered by ns=default -> 2 rows
-c=$(psql -c "$L SELECT count(*) FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t AND namespace='default';")
+c=$(psql -c "SELECT count(*) FROM kube_container_stats c WHERE $W AND namespace='default';")
 assert "containers ns=default rows" "$c" "2"
 
 # series-by (per-group overlay): the time_bucket()+group query must return rows for
@@ -129,5 +134,47 @@ buckets=$(psql -c "SELECT count(*) FROM (SELECT time_bucket('1 minute', time) t,
 scpu=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats WHERE system_id='$SID' \
   AND time=(SELECT max(time) FROM kube_container_stats WHERE system_id='$SID');")
 assert "latest snapshot total cpu" "$scpu" "390"
+
+# /api/kube/summaries — the per-cluster LATERAL roll-up behind the Clusters page.
+read -r as_of cpu mem pods run conts rst ns nodes <<<"$(psql -c "
+  SELECT agg.* FROM unnest(ARRAY['$SID']::uuid[]) AS s(sid)
+  CROSS JOIN LATERAL (
+    SELECT extract(epoch FROM max(c.time))::int8 AS as_of,
+           COALESCE(sum(cpu_millicores),0)::float8, COALESCE(sum(mem_bytes),0)::float8,
+           count(DISTINCT pod)::int8, count(DISTINCT pod) FILTER (WHERE phase='Running')::int8,
+           count(*)::int8, COALESCE(sum(restarts),0)::int8,
+           count(DISTINCT namespace)::int8, count(DISTINCT node) FILTER (WHERE node <> '')::int8
+    FROM kube_container_stats c WHERE c.system_id = s.sid
+      AND c.time > now() - interval '$FRESH'
+      AND c.time = (SELECT max(time) FROM kube_container_stats
+                    WHERE system_id = s.sid AND time > now() - interval '$FRESH')
+  ) agg WHERE agg.as_of IS NOT NULL;" | tr '|' ' ')"
+assert "summaries cpu" "$cpu" "390"
+assert "summaries mem" "$mem" "185597952"
+assert "summaries pods" "$pods" "3"
+assert "summaries pods_running" "$run" "3"
+assert "summaries containers" "$conts" "4"
+assert "summaries restarts" "$rst" "3"
+assert "summaries namespaces" "$ns" "3"
+assert "summaries nodes" "$nodes" "3"
+[ -n "$as_of" ] && echo "  ok: summaries as_of set" || { echo "  FAIL: summaries as_of null"; fail=1; }
+
+# Chunk exclusion: an old snapshot must land in its own chunk that the bounded
+# "latest" query never reads. The unbounded shape (the pre-fix one) reads both —
+# that is what made /clusters hammer Postgres.
+docker exec -i "$CID" psql -v ON_ERROR_STOP=1 -q -U vantage -d vantage_data >/dev/null <<SQL
+INSERT INTO kube_container_stats
+  (time, system_id, namespace, pod, container, node, phase, workload, workload_kind, cpu_millicores, mem_bytes, restarts, labels)
+VALUES (now() - interval '10 days', '$SID'::uuid, 'default','old-1','app','n1','Running','web','Deployment',1,1,0,'{}'::jsonb);
+SQL
+chunks() { psql -c "EXPLAIN (COSTS OFF) $1" | grep -c '_hyper_[0-9]*_[0-9]*_chunk' || true; }
+new=$(chunks "SELECT sum(cpu_millicores) FROM kube_container_stats c WHERE $W;")
+old=$(chunks "WITH l AS (SELECT max(time) t FROM kube_container_stats WHERE system_id='$SID') \
+  SELECT sum(cpu_millicores) FROM kube_container_stats c, l WHERE c.system_id='$SID' AND c.time=l.t;")
+if [ "$new" -lt "$old" ]; then echo "  ok: chunk exclusion ($new chunk scans vs $old unbounded)"
+else echo "  FAIL: bounded query scans $new chunks, unbounded $old — no exclusion"; fail=1; fi
+# ...and it must still be correct with the old row present.
+scpu2=$(psql -c "SELECT sum(cpu_millicores) FROM kube_container_stats c WHERE $W;")
+assert "latest snapshot cpu ignores old chunk" "$scpu2" "390"
 
 [ "$fail" = 0 ] && echo "PASS — kube_container_stats migration + ingest + read queries valid" || { echo "FAILED"; exit 1; }

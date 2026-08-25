@@ -48,7 +48,9 @@ async function load(first = false) {
   finally { if (first) loaded.value = true }
 }
 let timer = null
-onMounted(() => { load(true); timer = setInterval(() => load(false), 8000) })
+// 30s, not 8s: the cluster agent snapshots every 15s, so faster polling only
+// re-ran the roll-up query against the biggest hypertable for no new data.
+onMounted(() => { load(true); timer = setInterval(() => load(false), 30000) })
 onBeforeUnmount(() => clearInterval(timer))
 
 const open = (s) => router.push({ name: 'cluster', params: { id: s.id }, query: { ...(route.query.ws ? { ws: route.query.ws } : {}), name: s.name } })

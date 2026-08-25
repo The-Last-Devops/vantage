@@ -7,6 +7,44 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.11] — 2026-08-25
+
+### Performance
+- **The Clusters page no longer makes Postgres read the whole metrics history.** Every
+  "what does this cluster look like right now" query took the newest snapshot with an
+  unbounded `max(time)` fed through a CTE, which gives TimescaleDB nothing to exclude
+  chunks on — so each one scanned all 14 days of `kube_container_stats`, the largest table
+  in the product (one row per container per snapshot), and the page re-ran it every 8
+  seconds. The roll-up behind `/api/kube/summaries` also aggregated with
+  `GROUP BY system_id` over a cluster-id list, which cannot use the
+  `(system_id, time DESC)` index. Both are fixed: one indexed lookup per cluster
+  (`LATERAL`) plus a freshness bound, measured at **1 chunk read instead of 8**.
+  A cluster that has not reported for 6 hours now shows no usage numbers instead of
+  hours-old ones; it was already flagged offline.
+- **The same fix applied to the hottest read in the product, `/api/systems`** — the query
+  behind the Dashboard, Systems, Clusters and Fleet pages. It used `DISTINCT ON (system_id)`
+  across a host-id list to keep each host's newest sample, which sorts every matching row
+  of `system_metrics` (the raw tier, one row per host per 5s) just to discard all but the
+  last. Now one indexed lookup per host, bounded to 6 hours.
+- **`/api/monitors` and the mini uptime bars.** The latest heartbeat per monitor had the
+  same `DISTINCT ON` sort, and the 40-beat uptime bar used
+  `row_number() OVER (PARTITION BY monitor_id ORDER BY time DESC)` — which sorted the
+  *entire* `heartbeats` table before throwing away everything past the 40th row per
+  monitor. Both are per-monitor index scans now. The MCP `list_monitors` tool got the same
+  fix. Monitor up/down state is still read without a time bound, so a monitor that has been
+  quiet for weeks still reports a state.
+- **Polling backed off to match how fast the data actually changes.** Clusters 8s → 30s,
+  Dashboard 10s → 30s (one refresh there is ~10 API calls), cluster detail 8s → 20s
+  (5s while a live range is selected). The cluster agent only snapshots every 15s, so the
+  faster cadences were re-running the heaviest queries for data that had not changed.
+
+### Added
+- `scripts/check-latest-row-queries.sh` — proves the new "latest row per id" reads answer
+  identically to the old ones against a throwaway TimescaleDB, and asserts from `EXPLAIN`
+  that they read fewer chunks and no longer sort the hypertable.
+- `scripts/check-kube-stats.sh` now covers `/api/kube/summaries` and asserts chunk
+  exclusion, so this regression cannot come back unnoticed.
+
 ## [3.0.10] — 2026-08-19
 
 ### Fixed

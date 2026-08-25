@@ -143,7 +143,7 @@ async function reloadAll(first = false) {
 
 let timer = null
 const liveRange = computed(() => ['30m', '1h'].includes(range.value))
-function restartTimer() { clearInterval(timer); timer = setInterval(() => reloadAll(false), liveRange.value ? 3000 : 8000) }
+function restartTimer() { clearInterval(timer); timer = setInterval(() => reloadAll(false), liveRange.value ? 5000 : 20000) }
 onMounted(() => { reloadAll(true); restartTimer() })
 onBeforeUnmount(() => clearInterval(timer))
 watch(() => [id.value, range.value, by.value, labelKey.value, nsScope.value, sel.value, selns.value].join('|'), () => { reloadAll(false); restartTimer() })

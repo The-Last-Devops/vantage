@@ -17,6 +17,17 @@ use crate::auth::CurrentUser;
 use crate::web::{can_view_system, chart_tier, internal};
 use crate::AppState;
 
+/// How far back a "latest snapshot" lookup is allowed to look.
+///
+/// `kube_container_stats` is the biggest hypertable in the product (one row per
+/// container per snapshot, 14 days retention, 2-day chunks). An unbounded
+/// `max(time)` / `time = <that max>` pair gives TimescaleDB nothing to exclude
+/// chunks on, so every "what does the cluster look like right now" query scanned
+/// the whole table — and the Clusters page polls it. Bounding the lookup to a
+/// window that comfortably covers any configured push cadence lets chunk
+/// exclusion cut it to the newest chunk.
+const FRESH: &str = "6 hours";
+
 #[derive(Deserialize)]
 pub struct AggQuery {
     /// Grouping dimension: "namespace" (default) | "workload" | "label".
@@ -77,10 +88,7 @@ pub async fn kube_aggregate(
     // Built with QueryBuilder so the label key + namespace filter are bound, never
     // interpolated. Grouping columns come from a fixed allowlist above. `as_of` rides
     // the same query (the latest snapshot time) — no separate round-trip.
-    let mut qb = sqlx::QueryBuilder::new(
-        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = ",
-    );
-    qb.push_bind(id).push(") SELECT ");
+    let mut qb = sqlx::QueryBuilder::new("SELECT ");
     match by {
         "namespace" => {
             qb.push("namespace AS grp, NULL::text AS namespace");
@@ -101,10 +109,18 @@ pub async fn kube_aggregate(
     qb.push(
         ", sum(cpu_millicores)::float8 AS cpu_millicores, sum(mem_bytes)::float8 AS mem_bytes, \
          count(DISTINCT pod)::int8 AS pods, count(*)::int8 AS containers, sum(restarts)::int8 AS restarts, \
-         extract(epoch FROM (SELECT t FROM latest))::int8 AS as_of \
-         FROM kube_container_stats c, latest WHERE c.system_id = ",
+         extract(epoch FROM max(c.time))::int8 AS as_of \
+         FROM kube_container_stats c WHERE c.system_id = ",
     );
-    qb.push_bind(id).push(" AND c.time = latest.t");
+    // Scalar subquery (not a CTE) so the planner runs it as an InitPlan and can do
+    // runtime chunk exclusion on `c.time`; both halves are bounded by FRESH.
+    qb.push_bind(id)
+        .push(format!(
+            " AND c.time > now() - interval '{FRESH}' AND c.time = (SELECT max(time) FROM \
+             kube_container_stats WHERE system_id = "
+        ))
+        .push_bind(id)
+        .push(format!(" AND time > now() - interval '{FRESH}')"));
     if let Some(ns) = q.ns.filter(|s| !s.is_empty()) {
         qb.push(" AND namespace = ").push_bind(ns);
     }
@@ -152,9 +168,8 @@ pub async fn kube_summary(
     if !can_view_system(&state, &user, id).await? {
         return Err(StatusCode::FORBIDDEN);
     }
-    let row: KubeSummary = sqlx::query_as(
-        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = $1) \
-         SELECT extract(epoch FROM max(c.time))::int8 AS as_of, \
+    let row: KubeSummary = sqlx::query_as(&format!(
+        "SELECT extract(epoch FROM max(c.time))::int8 AS as_of, \
                 COALESCE(sum(cpu_millicores),0)::float8 AS cpu_millicores, \
                 COALESCE(sum(mem_bytes),0)::float8 AS mem_bytes, \
                 count(DISTINCT pod)::int8 AS pods, \
@@ -163,8 +178,11 @@ pub async fn kube_summary(
                 COALESCE(sum(restarts),0)::int8 AS restarts, \
                 count(DISTINCT namespace)::int8 AS namespaces, \
                 count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
-         FROM kube_container_stats c, latest WHERE c.system_id = $1 AND c.time = latest.t",
-    )
+         FROM kube_container_stats c WHERE c.system_id = $1 \
+           AND c.time > now() - interval '{FRESH}' \
+           AND c.time = (SELECT max(time) FROM kube_container_stats \
+                         WHERE system_id = $1 AND time > now() - interval '{FRESH}')"
+    ))
     .bind(id)
     .fetch_one(&state.data)
     .await
@@ -206,21 +224,27 @@ pub async fn kube_summaries(
     if ids.is_empty() {
         return Ok(Json(vec![]));
     }
-    let rows: Vec<ClusterSummary> = sqlx::query_as(
-        "WITH latest AS (SELECT system_id, max(time) AS t FROM kube_container_stats \
-                         WHERE system_id = ANY($1) GROUP BY system_id) \
-         SELECT c.system_id, extract(epoch FROM max(c.time))::int8 AS as_of, \
-                COALESCE(sum(cpu_millicores),0)::float8 AS cpu_millicores, \
-                COALESCE(sum(mem_bytes),0)::float8 AS mem_bytes, \
-                count(DISTINCT pod)::int8 AS pods, \
-                count(DISTINCT pod) FILTER (WHERE phase = 'Running')::int8 AS pods_running, \
-                count(*)::int8 AS containers, \
-                COALESCE(sum(restarts),0)::int8 AS restarts, \
-                count(DISTINCT namespace)::int8 AS namespaces, \
-                count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
-         FROM kube_container_stats c JOIN latest l ON l.system_id = c.system_id AND c.time = l.t \
-         GROUP BY c.system_id",
-    )
+    // One index-scan pair per cluster (LATERAL), not one grouped aggregate over the
+    // whole hypertable: `GROUP BY system_id` over `= ANY($1)` can't use the
+    // (system_id, time DESC) index and had no time bound, so it read every chunk.
+    let rows: Vec<ClusterSummary> = sqlx::query_as(&format!(
+        "SELECT s.sid AS system_id, agg.* FROM unnest($1::uuid[]) AS s(sid) \
+         CROSS JOIN LATERAL ( \
+           SELECT extract(epoch FROM max(c.time))::int8 AS as_of, \
+                  COALESCE(sum(cpu_millicores),0)::float8 AS cpu_millicores, \
+                  COALESCE(sum(mem_bytes),0)::float8 AS mem_bytes, \
+                  count(DISTINCT pod)::int8 AS pods, \
+                  count(DISTINCT pod) FILTER (WHERE phase = 'Running')::int8 AS pods_running, \
+                  count(*)::int8 AS containers, \
+                  COALESCE(sum(restarts),0)::int8 AS restarts, \
+                  count(DISTINCT namespace)::int8 AS namespaces, \
+                  count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
+           FROM kube_container_stats c WHERE c.system_id = s.sid \
+             AND c.time > now() - interval '{FRESH}' \
+             AND c.time = (SELECT max(time) FROM kube_container_stats \
+                           WHERE system_id = s.sid AND time > now() - interval '{FRESH}') \
+         ) agg WHERE agg.as_of IS NOT NULL"
+    ))
     .bind(&ids)
     .fetch_all(&state.data)
     .await
@@ -285,14 +309,17 @@ pub async fn kube_containers(
         return Err(StatusCode::FORBIDDEN);
     }
     let mut qb = sqlx::QueryBuilder::new(
-        "WITH latest AS (SELECT max(time) AS t FROM kube_container_stats WHERE system_id = ",
+        "SELECT namespace, pod, container, node, phase, workload, workload_kind, \
+                cpu_millicores, mem_bytes, restarts, labels \
+         FROM kube_container_stats c WHERE c.system_id = ",
     );
-    qb.push_bind(id).push(
-        ") SELECT namespace, pod, container, node, phase, workload, workload_kind, \
-              cpu_millicores, mem_bytes, restarts, labels \
-         FROM kube_container_stats c, latest WHERE c.system_id = ",
-    );
-    qb.push_bind(id).push(" AND c.time = latest.t");
+    qb.push_bind(id)
+        .push(format!(
+            " AND c.time > now() - interval '{FRESH}' AND c.time = (SELECT max(time) FROM \
+             kube_container_stats WHERE system_id = "
+        ))
+        .push_bind(id)
+        .push(format!(" AND time > now() - interval '{FRESH}')"));
     push_filters(&mut qb, &f);
     qb.push(" ORDER BY namespace, pod, container LIMIT 2000");
     let rows = qb

@@ -63,12 +63,21 @@ pub async fn list_systems(
     .await
     .map_err(internal)?;
 
-    // Latest sample for ALL systems in ONE query (was N+1). DISTINCT ON + the
-    // (system_id, time DESC) index makes this a fast per-system index scan.
+    // Latest sample for ALL systems in ONE query (was N+1). One LATERAL LIMIT 1 per
+    // system, not `DISTINCT ON` over `= ANY($1)`: the latter had to sort every matching
+    // row in `system_metrics` — the raw tier, one row per host per 5s — just to keep the
+    // newest per host. The FRESH bound then lets TimescaleDB exclude all but the newest
+    // chunk; a host silent that long is offline and shows no numbers anyway (`last_seen`
+    // comes from the config DB and is unaffected). This is `/api/systems`, which the
+    // Overview / Systems / Clusters / Fleet pages all poll.
     let ids: Vec<Uuid> = servers.iter().map(|s| s.0).collect();
     let latest_rows: Vec<(Uuid, f64, i64, i64, Option<i64>, Option<i64>, Option<f64>)> = sqlx::query_as(
-        "SELECT DISTINCT ON (system_id) system_id, cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util \
-         FROM system_metrics WHERE system_id = ANY($1) ORDER BY system_id, time DESC",
+        "SELECT s.sid, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.disk_util \
+         FROM unnest($1::uuid[]) AS s(sid) \
+         JOIN LATERAL (SELECT cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util \
+                       FROM system_metrics WHERE system_id = s.sid \
+                         AND time > now() - interval '6 hours' \
+                       ORDER BY time DESC LIMIT 1) m ON true",
     )
     .bind(&ids)
     .fetch_all(&state.data)

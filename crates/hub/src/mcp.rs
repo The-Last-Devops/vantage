@@ -147,8 +147,11 @@ async fn t_list_services(state: &AppState, user: &CurrentUser) -> Result<Value, 
     .map_err(|e| e.to_string())?;
     let ids: Vec<Uuid> = mons.iter().map(|m| m.0).collect();
     let beats: Vec<(Uuid, bool, Option<String>)> = sqlx::query_as(
-        "SELECT DISTINCT ON (monitor_id) monitor_id, up, message FROM heartbeats \
-         WHERE monitor_id = ANY($1) ORDER BY monitor_id, time DESC",
+        // LATERAL LIMIT 1 per monitor, same as the monitors list — `DISTINCT ON` over
+        // `= ANY($1)` sorted every heartbeat row of every monitor to keep the newest.
+        "SELECT s.mid, h.up, h.message FROM unnest($1::uuid[]) AS s(mid) \
+         JOIN LATERAL (SELECT up, message FROM heartbeats WHERE monitor_id = s.mid \
+                       ORDER BY time DESC LIMIT 1) h ON true",
     )
     .bind(&ids)
     .fetch_all(&state.data)

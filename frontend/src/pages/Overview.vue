@@ -214,7 +214,9 @@ watch(() => route.query.ws, load)
 onMounted(async () => {
   try { workspaces.value = await api.get('/api/workspaces') } catch {}
   await load()
-  timer = setInterval(load, 10000)
+  // 30s — one `load()` is ~10 API calls (incl. the cluster roll-up); 10s was
+  // hammering Postgres for data that changes far more slowly.
+  timer = setInterval(load, 30000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
