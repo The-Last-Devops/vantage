@@ -56,11 +56,17 @@ const emit = defineEmits([
                 <UiSelect :model-value="editWs[n.id]" @update:model-value="(v) => emit('set-ws-role', n, v)" class="shrink-0"
                   :options="[{ value: '', label: '— no access' }, ...wsRoles.map((r) => ({ value: r.v, label: r.label }))]" />
               </div>
-              <!-- Shell/exec is a separate grant, and only meaningful for owners. -->
-              <label v-if="editWs[n.id] === 'owner'" class="mt-2 flex items-center gap-2 pl-0.5 text-xs text-muted">
-                <input type="checkbox" class="h-3.5 w-3.5 accent-accent" :checked="!!editWsExec[n.id]"
+              <!-- Remote SSH is a SEPARATE grant on top of owner (rbac::require_exec needs
+                   both). Always rendered — when the member is not an owner it stays visible
+                   but disabled, because a silently absent checkbox reads as "this product has
+                   no such permission". -->
+              <label v-if="editWs[n.id]" class="mt-2 flex items-start gap-2 pl-0.5 text-xs"
+                :class="editWs[n.id] === 'owner' ? 'text-muted' : 'text-faint'">
+                <input type="checkbox" class="mt-0.5 h-3.5 w-3.5 accent-accent disabled:opacity-40"
+                  :checked="!!editWsExec[n.id]" :disabled="editWs[n.id] !== 'owner'"
                   @change="emit('set-ws-exec', n, $event.target.checked)" />
-                <span>Shell access <span class="text-faint">— open an interactive console on this workspace's hosts</span></span>
+                <span v-if="editWs[n.id] === 'owner'">Remote SSH <span class="text-faint">— open an interactive console on this workspace's hosts</span></span>
+                <span v-else>Remote SSH <span class="text-faint">— requires the <b>owner</b> role in this workspace</span></span>
               </label>
             </div>
           </div>

@@ -7,6 +7,37 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.12] — 2026-08-25
+
+### Changed
+- **Remote SSH (the interactive console) is now on by default on the agent side.** The agent
+  binary already defaulted to opening the reverse tunnel, but the Helm chart and the
+  `/pub/agent.yaml` installer both pinned `ALLOW_SHELL=0`, so on Kubernetes it stayed off no
+  matter what the binary did. The chart now emits **no** `ALLOW_SHELL` env at all by default
+  and only writes `ALLOW_SHELL=0` when you opt a host out with `allowShell: false` — so
+  upgrading the agent is enough to enable it, with no stale `0` left behind in an existing
+  pod spec.
+- **This does not widen who can open a shell.** The tunnel is a forward-only byte pipe to the
+  node's own sshd; the hub stores no usable SSH credential. Opening a console still requires
+  the **owner** role *plus* the separate **Remote SSH** capability on that membership
+  (`rbac::require_exec`), a step-up password, and the host's own SSH auth. A viewer or editor
+  with the capability set is still refused.
+
+### Fixed
+- **The Remote SSH permission was invisible unless the member was already an owner.** The
+  checkbox in Members → Workspace access only rendered for `owner` rows, so for an editor or
+  viewer it disappeared entirely and read as "this product has no such permission". It is now
+  always shown for any member, disabled with "requires the **owner** role in this workspace"
+  when it does not apply, and labelled **Remote SSH** rather than "Shell access".
+
+### Added
+- `scripts/check-exec-rbac.sh` — boots a hub on throwaway databases and asserts the whole
+  gate: an owner without the capability gets 403, with it gets past the gate, a viewer with
+  it is still refused, revoking closes it again, anonymous is 401 — plus that the chart emits
+  no `ALLOW_SHELL` by default and `/pub/agent.yaml` ships `1`.
+- `scripts/check-console-errors.sh` now also opens `/members`, `/workspaces`, `/fleet` and
+  `/metrics`.
+
 ## [3.0.11] — 2026-08-25
 
 ### Performance

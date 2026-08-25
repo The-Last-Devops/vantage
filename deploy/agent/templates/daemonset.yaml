@@ -39,10 +39,16 @@ spec:
             - { name: HUB_URL, value: {{ .Values.hubUrl | quote }} }
             - { name: AGENT_KIND, value: "k8s" }
             - { name: CLUSTER, value: {{ .Values.cluster | quote }} }
-            # 1 = open the reverse shell tunnel so the hub can SSH into this host via
-            # 127.0.0.1:<sshd>. Off by default; the node must run sshd (hostNetwork=true
-            # makes the agent's localhost:22 the node's sshd).
-            - { name: ALLOW_SHELL, value: {{ ternary "1" "0" .Values.allowShell | quote }} }
+            # Reverse shell tunnel: the hub SSHes into this host via 127.0.0.1:<sshd>.
+            # The agent binary has this ON by default, so the env var is emitted ONLY to
+            # opt a host out (allowShell: false) — that way upgrading the agent image is
+            # enough to enable it, with no stale ALLOW_SHELL=0 left in the pod spec.
+            # The node must run sshd (hostNetwork=true makes the agent's localhost:22 the
+            # node's sshd). Access is still gated hub-side by require_exec (owner +
+            # can_exec) + a step-up password + the host's own SSH auth.
+            {{- if not .Values.allowShell }}
+            - { name: ALLOW_SHELL, value: "0" }
+            {{- end }}
             - { name: DISK_PATH, value: "/host" }
             - name: NODE_NAME
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }

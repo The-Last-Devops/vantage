@@ -6,12 +6,14 @@ image:
   # Empty = the chart's appVersion (an upgrade to chart X always lands image X, even with
   # --reuse-values). Set a value to pin another image or track a moving tag like "main".
   tag: ""
-# Interactive shell/console: when true the agent opens a reverse tunnel so the hub can
-# SSH into this host (via the node's sshd on 127.0.0.1). **OFF by default** (opt-in) per
-# the two-sided-consent exec design. Even when on, access is still gated by RBAC
-# (owner + exec capability), a step-up password, and the host's own SSH auth. The node
+# Interactive shell/console: the agent opens a reverse tunnel so the hub can SSH into this
+# host (via the node's sshd on 127.0.0.1). **ON by default** — set false to opt a host out.
+# The tunnel is not the security boundary: it is a forward-only byte pipe to loopback sshd,
+# and the hub stores no usable credential. Using it still requires RBAC (owner + the exec
+# capability, `rbac::require_exec`), a step-up password, and the host's own SSH auth — so a
+# user without the exec permission cannot open a console even with the tunnel up. The node
 # must run sshd. See docs/exec-design.md.
-allowShell: false
+allowShell: true
 # One-per-cluster collector (k8s object + per-container stats → the Cluster page). Deploys
 # a Deployment + read-only ClusterRole alongside the per-node DaemonSet.
 clusterAgent:

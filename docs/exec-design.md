@@ -80,7 +80,9 @@ rule lives.
 
 ## A hub compromise alone cannot exec
 
-The Tier-1 agent tunnel is now **on by default** (set `ALLOW_SHELL=0` to opt a host out;
+The Tier-1 agent tunnel is **on by default** — in the agent binary *and*, since 3.0.12, in
+the Helm chart (`allowShell: true`) and the `/pub/agent.yaml` installer, which previously
+pinned `ALLOW_SHELL=0` and so kept it off on Kubernetes. (Set `ALLOW_SHELL=0` to opt a host out;
 Tier-2 host-exec stays a hard opt-in via `ALLOW_HOST_EXEC=1` + privileged). So the tunnel
 being open is *not* the security boundary — it's only a byte-pipe to the node's loopback
 sshd. The real boundary is **per-user SSH auth**: the hub stores **no usable credential**

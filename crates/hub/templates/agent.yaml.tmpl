@@ -49,8 +49,8 @@ spec:
               value: "k8s"
             - name: CLUSTER
               value: "<CLUSTER>"
-            - name: ALLOW_SHELL        # 1 = open the reverse shell tunnel (opt-in; set 1 to enable exec/SSH)
-              value: "0"
+            - name: ALLOW_SHELL        # 1 = open the reverse shell tunnel (on by default; set 0 to opt out)
+              value: "1"
             - name: DISK_PATH
               value: "/host"
             - name: NODE_NAME            # stable identity = k8s node name

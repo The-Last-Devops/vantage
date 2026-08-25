@@ -102,7 +102,7 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.11 \
+helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.12 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=vantage.example.com \
   --set timescaledb.storageClass=standard   # your cluster's StorageClass (kubectl get sc)
@@ -115,7 +115,7 @@ helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.
 > output matches the objects.
 
 > Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
-> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.11`
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.12`
 > prints the full defaults. Working from a checkout instead? swap the ref for the local
 > path: `helm install vantage ./deploy/chart …`.
 
@@ -277,13 +277,13 @@ without it the metadata still populates and usage reads 0.
 **and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
 no clone needed:
 ```bash
-helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.11 \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.12 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
   --set cluster=k8s-hanoi
 # same cluster as the hub? use the in-cluster Service: --set hubUrl=http://vantage-hub.vantage:8080
-# opt into the reverse SSH tunnel (off by default): --set allowShell=true
+# opt a host OUT of the reverse SSH tunnel (on by default): --set allowShell=false
 # per-node host metrics only (skip the cluster collector): --set clusterAgent.enabled=false
 # from a checkout instead of the registry: helm install vantage-agent ./deploy/agent …
 ```
@@ -300,7 +300,7 @@ helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --
 | `pullPolicy` | — | `IfNotPresent` | Set `Always` when tracking a moving tag. |
 | `pullSecrets` | — | `[]` | imagePullSecrets for private GHCR, e.g. `{ghcr}`. |
 | `clusterAgent.enabled` | — | `true` | Also deploy the one-per-cluster collector (Deployment + read-only ClusterRole) for the **Clusters** page. `false` = per-node host metrics only. |
-| `allowShell` | — | `false` | Open the reverse SSH tunnel so the hub can console into nodes (opt-in; still gated by RBAC + step-up + host SSH auth). See `docs/exec-design.md`. |
+| `allowShell` | — | `true` | Open the reverse SSH tunnel so the hub can console into nodes. On by default; set `false` to opt a host out. The tunnel is only a forward-only pipe to the node's own sshd — using it still requires the **exec capability** (owner + `can_exec`), a step-up password and the host's SSH auth. See `docs/exec-design.md`. |
 | `resources` | — | `20m/32Mi req, 128Mi limit` | Agent pod resources. |
 
 #### Agent environment variables (Docker / binary / served manifest)
@@ -313,7 +313,7 @@ The DaemonSet/Compose/binary agent reads these directly:
 | `API_KEY` | ✅ | — | Per-server enrollment key (sent as `x-api-key`); the hub maps it to a workspace. |
 | `AGENT_KIND` | — | auto-detect | Force `node` / `docker` / `k8s` / `k8s-cluster` instead of auto-detecting. |
 | `CLUSTER` | — | — | Cluster label for grouping (Kubernetes). |
-| `ALLOW_SHELL` | — | `0` (charts) | `1` opens the reverse SSH tunnel (see `allowShell`). |
+| `ALLOW_SHELL` | — | `1` | Reverse SSH tunnel; `0`/`false`/`no`/`off` opts this host out (see `allowShell`). |
 | `INTERVAL` | — | hub-controlled | Optional push-cadence override (seconds); normally the hub decides. |
 | `HOSTNAME_OVERRIDE` | — | system hostname | Name this host reports as. |
 | `DISK_PATH` | — | `/` | Filesystem to report disk usage for (`/host` when the host root is mounted into a container). |
@@ -337,7 +337,7 @@ and the whole migration roll back — the hub then crash-looped with an empty da
 Fix: install **3.0.1 or newer**. Already on 3.0.0?
 
 ```bash
-helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.11 \
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.12 \
   --namespace vantage --reset-then-reuse-values
 ```
 
@@ -376,7 +376,7 @@ HTTPS upstream (Cloudflare, an LB) while `hub.ingress.tls=false` yields `http://
 
 ## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.11`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+(e.g. `:3.0.12`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
 the chart's appVersion by default.
 
 Helm **charts** ship the same way — public OCI artifacts published per release tag:
