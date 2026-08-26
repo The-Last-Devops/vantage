@@ -34,13 +34,17 @@ impl Notification {
             at: now_utc(),
         }
     }
+    /// The word in the headline and in `{{status}}` / the webhook `status` field.
+    /// Deliberately UP / DOWN / STILL DOWN — the same vocabulary the UI uses for a
+    /// host or service, so a phone notification reads at a glance. (A threshold rule
+    /// like "CPU % > 90" also renders DOWN; the `Condition` field carries the nuance.)
     pub(crate) fn status_word(&self) -> &'static str {
         if !self.firing {
-            "RECOVERED"
+            "UP"
         } else if self.repeat {
-            "STILL FIRING"
+            "STILL DOWN"
         } else {
-            "ALERT"
+            "DOWN"
         }
     }
     fn emoji(&self) -> &'static str {
@@ -150,4 +154,53 @@ impl Notification {
 
 fn now_utc() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn n(firing: bool, repeat: bool) -> Notification {
+        Notification {
+            firing,
+            repeat,
+            target: "api.shop".into(),
+            kind_label: "Service".into(),
+            workspace: "production".into(),
+            condition: "is DOWN".into(),
+            detail: "connection refused".into(),
+            at: "2026-08-26 03:14 UTC".into(),
+        }
+    }
+
+    /// The three words people actually read on their phone. Changing them changes every
+    /// transport at once (headline, `{{status}}` in custom webhook templates, and the
+    /// webhook JSON `status` field), so pin them.
+    #[test]
+    fn status_words_are_up_down_still_down() {
+        assert_eq!(n(false, false).status_word(), "UP");
+        assert_eq!(n(true, false).status_word(), "DOWN");
+        assert_eq!(n(true, true).status_word(), "STILL DOWN");
+        // repeat only matters while firing — a recovery is never "STILL DOWN".
+        assert_eq!(n(false, true).status_word(), "UP");
+    }
+
+    #[test]
+    fn title_pairs_the_word_with_an_emoji() {
+        assert_eq!(n(true, false).title(), "🔴 api.shop — DOWN");
+        assert_eq!(n(true, true).title(), "🔴 api.shop — STILL DOWN");
+        assert_eq!(n(false, false).title(), "✅ api.shop — UP");
+    }
+
+    #[test]
+    fn text_lists_the_fields_and_skips_empty_ones() {
+        let t = n(true, false).text();
+        assert!(t.starts_with("🔴 api.shop — DOWN\n"), "{t}");
+        assert!(t.contains("\nCondition: is DOWN"), "{t}");
+        assert!(t.ends_with("\n— Vantage"), "{t}");
+        // the test payload has no type/workspace/condition — those rows must not appear
+        let test = Notification::test().text();
+        assert!(!test.contains("Workspace:"), "{test}");
+        assert!(test.contains("When: "), "{test}");
+    }
 }
