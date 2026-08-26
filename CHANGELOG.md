@@ -7,6 +7,54 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.13] — 2026-08-26
+
+### Fixed
+- **A read-only admin could be given a workspace role and get nothing for it.**
+  `rbac::role_in` returned `Viewer` for anyone with `read_all` and returned early, so it
+  never looked at memberships — you could make them the *owner* of a workspace in the
+  Members UI, the grant would save, and they would still be read-only there. `read_all`
+  is now a **floor**: viewer everywhere at minimum, raised by an explicit membership on
+  the workspaces where that person is meant to work. Nothing is granted implicitly —
+  with no membership they still read everything and write nothing, and Remote SSH still
+  needs an owner membership carrying the exec capability. The Members dialog also hid
+  the workspace picker for read-only admins, which made the grant impossible to give in
+  the first place; only full admins have nothing to configure there now.
+- **Member edits applied the instant you touched a dropdown.** Changing a role or ticking
+  Remote SSH fired the request immediately, so a mis-click was live before you noticed.
+  The slide-over now edits a draft: **Save changes** is disabled until something differs,
+  only changed fields are sent, and closing with unsaved work asks first. Reset password
+  is unchanged — it is its own explicit action.
+
+### Changed
+- **Notifications say UP / DOWN / STILL DOWN** instead of RECOVERED / ALERT / STILL
+  FIRING — the same words the rest of the product uses for a host or service. The word
+  also feeds the `{{status}}` placeholder in custom webhook templates and the webhook
+  JSON `status` field, so update anything matching the old strings.
+- **Alerts now tell you what was probed.** The notification carries the monitor's target
+  — labelled `URL` for http, `Target` for host:port — so the first move after a Discord
+  ping is not "open the app and find the URL". Connection-string targets (postgres,
+  mysql, mongodb, redis, rabbitmq) are masked to `scheme://user:***@host` before they
+  leave the hub.
+- **The "Alert rules" chip on a service or host names the channels it pages**, or says
+  **No channel** in red when the rule sends nowhere. It used to say "This service" — the
+  page you are already looking at. Scope is mentioned only when the rule is
+  workspace-wide.
+- **The rule editor uses the full width** (it capped itself at `max-w-4xl` even though the
+  shell already caps content at 1440px) and gained a **Test rule** button that fires the
+  whole rule at every channel attached to it, reporting which one failed. The existing
+  per-channel Send test only proves one channel's credentials.
+- **Workspaces: the create form moved to the left**, under the description — pinned right
+  it drifted off-screen on a wide window.
+
+### Added
+- `scripts/check-readall-membership.sh` — proves `read_all` reads everywhere and writes
+  nowhere, that an explicit owner membership does grant writes on that one workspace, and
+  that it does not leak to any other.
+- `console-errors.py` accepts a `##<js>` suffix on a route to run a snippet once the page
+  settles; the check now opens the member slide-over, whose logic loading a route never
+  executed.
+
 ## [3.0.12] — 2026-08-25
 
 ### Changed
