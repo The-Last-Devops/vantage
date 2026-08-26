@@ -85,10 +85,10 @@ const testState = ref({})
 const ruleTest = ref('')
 const ruleTestMsg = ref('')
 async function testRule() {
-  if (!editId) return
+  if (!editId.value) return
   ruleTest.value = 'run'; ruleTestMsg.value = ''
   try {
-    await api.post(`/api/alerts/${editId}/test`)
+    await api.post(`/api/alerts/${editId.value}/test`)
     ruleTest.value = 'ok'
   } catch (e) {
     ruleTest.value = 'fail'

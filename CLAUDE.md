@@ -131,6 +131,14 @@ docker compose up -d
   never ad-hoc one-liners (no inline `curl | python`, piped greps, etc.).** Write the check into a
   script, run it yourself, and don't ask for permission to run it. New checks should be idempotent
   and self-cleaning (e.g. `scripts/check-alerts.sh`).
+- **A ref/computed used without `.value` compiles fine and breaks at runtime — run
+  `npm run lint` in `frontend/`.** `` `/api/alerts/${editId}/test` `` shipped in 3.0.13:
+  `editId` is a `computed`, so the URL interpolated to `[object Object]`. The build was
+  green, and even `check-console-errors.sh` saw nothing because the failure was caught
+  and rendered as UI text — a browser check only catches what reaches the console. The
+  eslint config (`frontend/eslint.config.js`) exists for exactly this class and is
+  deliberately tiny: `vue/no-ref-as-operand`, `no-undef`, unused vars. CI runs it as the
+  "Lint (frontend)" job; errors block, warnings don't. Don't add style rules to it.
 - **A green `vite build` / `cargo build` is not a working page — run the browser check.**
   `const f = (p) = expr` (a missing `>`) is valid JS: it builds, then throws
   `ReferenceError` at setup and blanks the page (that shipped in 3.0.7). After changing a
