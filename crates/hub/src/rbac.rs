@@ -35,7 +35,12 @@ impl Role {
 }
 
 /// Returns the user's effective role in a workspace, or `None` if not a member.
-/// System admins are `Owner` everywhere; read-only admins are `Viewer` everywhere.
+///
+/// System admins are `Owner` everywhere. `read_all` is a **floor, not a ceiling**: it
+/// grants `Viewer` in every workspace, and an explicit membership can still raise that
+/// on the workspaces where the user is meant to do real work. (It used to return
+/// `Viewer` and stop, which silently discarded an `editor`/`owner` membership — a
+/// read-only admin could be made an owner of one workspace in the UI and get nothing.)
 pub async fn role_in(
     state: &AppState,
     user: &CurrentUser,
@@ -43,9 +48,6 @@ pub async fn role_in(
 ) -> Result<Option<Role>, StatusCode> {
     if user.is_admin {
         return Ok(Some(Role::Owner));
-    }
-    if user.read_all {
-        return Ok(Some(Role::Viewer));
     }
     let row: Option<(String,)> = sqlx::query_as(
         "SELECT role::text FROM memberships WHERE user_id = $1 AND workspace_id = $2",
@@ -58,7 +60,12 @@ pub async fn role_in(
         tracing::error!(error = %e, "role lookup");
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    Ok(row.and_then(|(r,)| Role::from_db_str(&r)))
+    let membership = row.and_then(|(r,)| Role::from_db_str(&r));
+    if user.read_all {
+        // Viewer everywhere, or better where a membership says so.
+        return Ok(Some(membership.unwrap_or(Role::Viewer).max(Role::Viewer)));
+    }
+    Ok(membership)
 }
 
 /// Authorizes that `user` has at least `min` role in `workspace_id`.
@@ -77,9 +84,10 @@ pub async fn require_role(
 
 /// Authorizes shell/exec on a workspace's host. The user must be `Owner` of the
 /// workspace **and** hold the dedicated `can_exec` capability — exec is kept
-/// separate from "edit config" (see docs/exec-design.md). System admins bypass;
-/// read-only admins (`read_all`) never get exec. 403 otherwise. The single place the
-/// exec rule lives (mirrors require_role).
+/// separate from "edit config" (see docs/exec-design.md). System admins bypass. Being
+/// `read_all` grants nothing here — exec needs a real `owner` membership carrying
+/// `can_exec`, which an owner has to hand out deliberately. 403 otherwise. The single
+/// place the exec rule lives (mirrors require_role).
 pub async fn require_exec(
     state: &AppState,
     user: &CurrentUser,
@@ -88,7 +96,8 @@ pub async fn require_exec(
     if user.is_admin {
         return Ok(());
     }
-    // A read-only admin (read_all) is intentionally not exec-capable.
+    // read_all by itself is not exec-capable: this reads memberships only, so the
+    // capability has to be granted explicitly on this workspace.
     let row: Option<(String, bool)> = sqlx::query_as(
         "SELECT role::text, can_exec FROM memberships WHERE user_id = $1 AND workspace_id = $2",
     )
