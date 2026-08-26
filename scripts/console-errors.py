@@ -2,6 +2,10 @@
 """Open SPA routes in headless Chrome and report console errors / uncaught exceptions.
 
 Usage: console-errors.py <base-url> <email> <password> <path> [path ...]
+
+A path may carry a JS snippet after "##": the snippet runs once the route has settled,
+so a check can open a dialog / switch a tab and catch errors that only fire there.
+  "/members##document.querySelector('[data-t=edit]').click()"
 Exits non-zero and prints every error it saw. Reuses the CDP plumbing style of
 deploy/shot.py (stdlib websocket, no deps) — the point is to catch runtime errors a
 `vite build` cannot see, e.g. `const f = (p) = expr` (an assignment, not an arrow fn:
@@ -52,14 +56,24 @@ def main():
         shot.cmd(s, nxt(), "Runtime.enable")
         shot.cmd(s, nxt(), "Console.enable")
         shot.cmd(s, nxt(), "Page.enable")
-        for path in paths:
+        for spec_path in paths:
+            path, _, after = spec_path.partition("##")
             shot.cmd(s, nxt(), "Page.navigate", {"url": base + path})
             errs, deadline = [], time.time() + 6
+            fired = not after
             while time.time() < deadline:
+                # Give the route ~2s to render, then run the snippet and keep listening
+                # so anything it throws is captured too.
+                if not fired and time.time() > deadline - 4:
+                    shot.cmd(s, nxt(), "Runtime.evaluate",
+                             {"expression": after, "awaitPromise": True})
+                    fired = True
                 s.settimeout(max(0.2, deadline - time.time()))
                 try:
                     msg = json.loads(shot.ws_recv(s))
                 except Exception:
+                    if not fired:
+                        continue
                     break
                 m = msg.get("method")
                 if m == "Runtime.exceptionThrown":
@@ -72,9 +86,10 @@ def main():
             first = [e.splitlines()[0] for e in errs]
             # Ignore benign network noise (a 404 favicon etc.); keep real JS errors.
             first = [e for e in first if "favicon" not in e]
-            print(f"{'FAIL' if first else 'ok  '}  {path}" + (f"  <- {first[0]}" if first else ""))
+            label = path + ("  (+interaction)" if after else "")
+            print(f"{'FAIL' if first else 'ok  '}  {label}" + (f"  <- {first[0]}" if first else ""))
             if first:
-                failures.append((path, first))
+                failures.append((label, first))
     finally:
         proc.terminate()
     if failures:

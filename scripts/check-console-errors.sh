@@ -69,7 +69,10 @@ if [ -z "$CID" ]; then
   echo "      the main thing this check covers, so treat this as a failure."
   exit 1
 fi
+# A "##" suffix runs JS once the route settles — the member edit slide-over holds real
+# logic (draft diffing, discard-on-close) that opening the route alone never executes.
 ROUTES=(/ /clusters /services /alerts /events /channels /settings /members /workspaces /fleet /metrics /alerts/new
+        "/members##document.querySelector('[data-t=edit]').click()"
         "/cluster/$CID?name=cluster-1"
         "/cluster/$CID?name=cluster-1&tab=nodes"
         "/cluster/$CID?name=cluster-1&sel=default")

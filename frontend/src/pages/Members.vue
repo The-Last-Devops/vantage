@@ -115,6 +115,24 @@ const editWsExec = ref({}) // workspace_id -> can_exec (shell access)
 const editErr = ref('')
 const resetPw = ref('')
 
+// The dialog edits a DRAFT. `orig*` is the snapshot it was opened with, so `dirty`
+// is a real diff and Save only sends what actually changed. (It used to PATCH on every
+// dropdown change — a mis-click was live before you noticed it, with no way back.)
+const origRole = ref('user')
+const origWs = ref({})
+const origWsExec = ref({})
+const savingEdit = ref(false)
+
+const dirty = computed(() => {
+  if (!editing.value) return false
+  if (editRole.value !== origRole.value) return true
+  for (const n of workspaces.value) {
+    if ((editWs.value[n.id] || '') !== (origWs.value[n.id] || '')) return true
+    if (!!editWsExec.value[n.id] !== !!origWsExec.value[n.id]) return true
+  }
+  return false
+})
+
 async function openEdit(u) {
   editErr.value = ''; resetPw.value = ''
   editRole.value = sysOf(u)
@@ -128,32 +146,57 @@ async function openEdit(u) {
   const full = {}; for (const n of workspaces.value) full[n.id] = map[n.id] || ''
   editWs.value = full
   editWsExec.value = execMap
+  origRole.value = editRole.value
+  origWs.value = { ...full }
+  origWsExec.value = { ...execMap }
   editing.value = u
 }
-function closeEdit() { editing.value = null }
+async function closeEdit() {
+  if (dirty.value && !(await confirm({ title: 'Discard changes?', message: 'The changes to this member have not been saved.', danger: true, confirmText: 'Discard' }))) return
+  editing.value = null
+}
 
-async function saveSysRole() {
-  editErr.value = ''
-  try { await api.patch(`/api/users/${editing.value.id}`, { is_admin: editRole.value === 'admin', read_all: editRole.value === 'read_all' }); await loadUsers() }
-  catch (e) { editErr.value = e.status === 400 ? "You can't change your own admin rights." : `Failed (${e.status}).`; editRole.value = sysOf(editing.value) }
+// Draft mutations — local only, nothing leaves the browser until saveEdit().
+function setWsRole(n, role) {
+  editWs.value = { ...editWs.value, [n.id]: role }
+  if (!role) editWsExec.value = { ...editWsExec.value, [n.id]: false } // no membership, no exec
 }
-async function setWsRole(n, role) {
-  editErr.value = ''
-  try {
-    if (role) await api.post(`/api/workspaces/${n.id}/members`, { email: editing.value.email, role })
-    else await api.del(`/api/workspaces/${n.id}/members/${editing.value.id}`)
-    editWs.value[n.id] = role
-    if (!role) editWsExec.value[n.id] = false // dropping membership drops exec
-    await loadUsers()
-  } catch (e) { editErr.value = `Failed (${e.status}).` }
+function setWsExec(n, val) {
+  editWsExec.value = { ...editWsExec.value, [n.id]: val }
 }
-async function setWsExec(n, val) {
-  editErr.value = ''
+
+async function saveEdit() {
+  editErr.value = ''; savingEdit.value = true
+  const u = editing.value
   try {
-    await api.put(`/api/workspaces/${n.id}/members/${editing.value.id}/exec`, { can_exec: val })
-    editWsExec.value[n.id] = val
+    if (editRole.value !== origRole.value) {
+      await api.patch(`/api/users/${u.id}`, { is_admin: editRole.value === 'admin', read_all: editRole.value === 'read_all' })
+    }
+    for (const n of workspaces.value) {
+      const role = editWs.value[n.id] || ''
+      const was = origWs.value[n.id] || ''
+      if (role !== was) {
+        if (role) await api.post(`/api/workspaces/${n.id}/members`, { email: u.email, role })
+        else await api.del(`/api/workspaces/${n.id}/members/${u.id}`)
+      }
+      // Exec only means anything while a membership exists; skip it when access was dropped.
+      const ex = !!editWsExec.value[n.id]
+      if (role && ex !== !!origWsExec.value[n.id]) {
+        await api.put(`/api/workspaces/${n.id}/members/${u.id}/exec`, { can_exec: ex })
+      }
+    }
     await loadUsers()
-  } catch (e) { editErr.value = `Failed (${e.status}).` }
+    editing.value = null
+  } catch (e) {
+    const msg = e.status === 400 ? "You can't change your own admin rights." : `Failed (${e.status}).`
+    // Re-read from the server so the dialog never shows a half-applied state — some of
+    // the calls above may already have landed. openEdit() clears editErr, so set the
+    // message after it.
+    await loadUsers()
+    const still = users.value.find((x) => x.id === u.id)
+    if (still) await openEdit(still)
+    editErr.value = msg
+  } finally { savingEdit.value = false }
 }
 async function doResetPw() {
   editErr.value = ''
@@ -209,7 +252,7 @@ onMounted(async () => {
         </template>
         <template #cell-actions="{ row }">
           <div class="flex items-center justify-end gap-1">
-            <button @click.stop="openEdit(row)" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface2 hover:text-fg" v-tip="`Edit`">
+            <button data-t="edit" @click.stop="openEdit(row)" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface2 hover:text-fg" v-tip="`Edit`">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
             </button>
             <button v-if="row.id !== auth.user?.id" @click.stop="removeUser(row)" class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface2 hover:text-down" v-tip="`Remove`">
@@ -248,8 +291,8 @@ onMounted(async () => {
     <!-- Edit member slide-over -->
     <MemberRoleEditor v-if="editing" :member="editing" :sys="SYS" :ws-roles="WS_ROLES"
       :workspaces="workspaces" :edit-ws="editWs" :edit-ws-exec="editWsExec" :error="editErr" :initials="initials"
-      v-model:edit-role="editRole" v-model:reset-pw="resetPw"
-      @close="closeEdit" @save-sys-role="saveSysRole" @set-ws-role="setWsRole" @set-ws-exec="setWsExec"
+      v-model:edit-role="editRole" v-model:reset-pw="resetPw" :dirty="dirty" :saving="savingEdit"
+      @close="closeEdit" @save="saveEdit" @set-ws-role="setWsRole" @set-ws-exec="setWsExec"
       @gen-password="genResetPw" @reset-password="doResetPw" />
   </AppShell>
 </template>

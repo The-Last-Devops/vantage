@@ -4,6 +4,8 @@
 import UiSelect from './UiSelect.vue'
 
 defineProps({
+  dirty: { type: Boolean, default: false },
+  saving: { type: Boolean, default: false },
   member: { type: Object, required: true }, // the user being edited
   sys: { type: Array, required: true }, // [{ v, label, desc }]
   wsRoles: { type: Array, required: true }, // [{ v, label }]
@@ -15,12 +17,15 @@ defineProps({
   error: { type: String, default: '' },
   initials: { type: Function, required: true },
 })
+// Nothing here calls the API. Edits build up a draft in the parent and only leave
+// the browser when Save is pressed — changing someone's role used to fire a request
+// on every keystroke of the dropdown, so a mis-click was already live.
 const emit = defineEmits([
   'close',
+  'save',
   'update:editRole',
-  'save-sys-role',
-  'set-ws-role', // (workspace, role)
-  'set-ws-exec', // (workspace, can_exec)
+  'set-ws-role', // (workspace, role) — draft only
+  'set-ws-exec', // (workspace, can_exec) — draft only
   'update:resetPw',
   'gen-password',
   'reset-password',
@@ -40,15 +45,20 @@ const emit = defineEmits([
         <!-- system role -->
         <div>
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">System role</div>
-          <UiSelect :model-value="editRole" block @update:model-value="(v) => { emit('update:editRole', v); emit('save-sys-role') }" :options="sys.map((r) => ({ value: r.v, label: r.label }))" />
+          <UiSelect :model-value="editRole" block @update:model-value="(v) => emit('update:editRole', v)" :options="sys.map((r) => ({ value: r.v, label: r.label }))" />
           <p class="mt-1.5 text-xs text-faint">{{ sys.find((r) => r.v === editRole)?.desc }}</p>
         </div>
 
         <!-- workspace access -->
         <div>
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Workspace access</div>
-          <p v-if="editRole !== 'user'" class="rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">{{ editRole === 'admin' ? 'Admins have full access to every workspace.' : 'Read-only admins can view every workspace.' }}</p>
-          <div v-else-if="!workspaces.length" class="text-xs text-faint">No workspaces exist yet.</div>
+          <!-- Only a full admin has nothing to configure here. A read-only admin reads
+               every workspace as a FLOOR, and can still be given a real role on the ones
+               they work in (rbac::role_in) — so they keep the picker. -->
+          <p v-if="editRole === 'admin'" class="rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">Admins have full access to every workspace.</p>
+          <template v-else>
+            <p v-if="editRole === 'read_all'" class="mb-2 rounded-lg border border-line bg-surface2/40 px-3 py-2.5 text-xs text-muted">Read-only admins can view every workspace. Give them a role below on the ones where they should be able to make changes.</p>
+            <div v-if="!workspaces.length" class="text-xs text-faint">No workspaces exist yet.</div>
           <div v-else class="divide-y divide-line/60">
             <div v-for="n in workspaces" :key="n.id" class="py-2.5">
               <div class="flex items-center gap-3">
@@ -69,10 +79,11 @@ const emit = defineEmits([
                 <span v-else>Remote SSH <span class="text-faint">— requires the <b>owner</b> role in this workspace</span></span>
               </label>
             </div>
-          </div>
+            </div>
+          </template>
         </div>
 
-        <!-- reset password -->
+        <!-- reset password — its own explicit action, not part of the draft -->
         <div>
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Reset password</div>
           <div class="flex gap-2">
@@ -85,8 +96,12 @@ const emit = defineEmits([
         <p v-if="error" class="text-xs" :class="error.startsWith('✓') ? 'text-accent' : 'text-down'">{{ error }}</p>
       </div>
 
-      <div class="border-t border-line px-5 py-3.5 text-center">
-        <button @click="emit('close')" class="text-sm text-muted hover:text-fg">Changes save as you make them — Close</button>
+      <div class="flex items-center gap-2.5 border-t border-line px-5 py-3.5">
+        <span v-if="dirty" class="text-xs text-muted">Unsaved changes</span>
+        <span class="ml-auto"></span>
+        <button @click="emit('close')" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">{{ dirty ? 'Cancel' : 'Close' }}</button>
+        <button @click="emit('save')" :disabled="!dirty || saving"
+          class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-40">{{ saving ? 'Saving…' : 'Save changes' }}</button>
       </div>
     </aside>
   </div>
