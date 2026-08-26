@@ -48,8 +48,9 @@ const groups = computed(() =>
       key: 'alert', label: 'Alert', icon: 'flame',
       owns: ['alert-new', 'alert-edit', 'channel'],
       children: [
-        { label: 'Events', name: 'events', icon: 'pulse' },
+        // Rules first: it is the thing you configure, Events is the log it produces.
         { label: 'Rules', name: 'alerts', icon: 'sliders', owns: ['alert-new', 'alert-edit'] },
+        { label: 'Events', name: 'events', icon: 'pulse' },
         { label: 'Notify channel', name: 'notifications', icon: 'bell', owns: ['channel'] },
       ],
     },

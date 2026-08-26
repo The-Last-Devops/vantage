@@ -7,6 +7,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.16] — 2026-08-26
+
+### Added
+- **Pick notify channels while creating a service and the alert rule is created with
+  it.** Adding a check and wanting to be told when it breaks is one intent, but it took
+  two trips — create the service, then build a rule by hand under Rules. The new
+  **Alert me when it goes down** step creates the obvious rule (this service is DOWN →
+  notify the channels you picked) in the same submit. Optional; anything more specific
+  (thresholds, re-notify, workspace-wide scope) still belongs in the rule editor. Offered
+  only while creating — an existing service already lists its rules on its own page.
+  If the service is created but its rule is refused, the form says so and stops rather
+  than letting a retry create a second service.
+
+### Changed
+- **Alert menu: Rules now sits above Events** — Rules is the thing you configure, Events
+  is the log it produces.
+
 ## [3.0.15] — 2026-08-26
 
 ### Changed

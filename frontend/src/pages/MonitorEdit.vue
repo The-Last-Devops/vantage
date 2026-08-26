@@ -15,6 +15,22 @@ const loaded = ref(false)
 const formErr = ref('')
 const saving = ref(false)
 
+// --- quick rule (create only) -------------------------------------------------
+// Adding a service and then being told when it breaks is one intent, but it used to be
+// two trips: create here, then go to Rules and build a rule by hand. Picking channels
+// here creates the obvious rule ("this service is DOWN -> notify these") in the same
+// step. Anything more specific still belongs in the rule editor.
+const channels = ref([])
+const ruleChannels = ref(new Set())
+// Set once the monitor exists but its rule could not be created — the form must not be
+// resubmitted then, or it would create a second monitor.
+const createdOnly = ref(false)
+function toggleRuleChan(id) {
+  const next = new Set(ruleChannels.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  ruleChannels.value = next
+}
+
 const KINDS = [
   { v: 'http', label: 'HTTP(s)', ph: 'https://example.com/health' },
   { v: 'keyword', label: 'HTTP keyword', ph: 'https://example.com' },
@@ -81,7 +97,23 @@ async function submit() {
       await api.patch(`/api/monitors/${v.id}`, { name: v.name.trim(), target, interval_secs: Number(v.interval_secs) || 60, config })
     } else {
       if (!v.wsId) { formErr.value = 'Pick a workspace.'; saving.value = false; return }
-      await api.post(`/api/workspaces/${v.wsId}/monitors`, { name: v.name.trim(), kind: v.kind, target, interval_secs: Number(v.interval_secs) || 60, config })
+      const id = await api.post(`/api/workspaces/${v.wsId}/monitors`, { name: v.name.trim(), kind: v.kind, target, interval_secs: Number(v.interval_secs) || 60, config })
+      const monitorId = typeof id === 'string' ? id : id?.id
+      if (ruleChannels.value.size && monitorId) {
+        // The service now exists. If the rule fails we must NOT fall through to a
+        // retry that creates a second one — say what happened and stop.
+        try {
+          await api.post(`/api/workspaces/${v.wsId}/alerts`, {
+            monitor_id: monitorId,
+            channel_ids: [...ruleChannels.value],
+          })
+        } catch (e) {
+          createdOnly.value = true
+          formErr.value = `Service created, but the alert rule failed (${e.status || '?'}). Add it under Alert › Rules.`
+          saving.value = false
+          return
+        }
+      }
     }
     back()
   } catch (e) { formErr.value = e.status === 403 ? 'You need editor access to that workspace.' : `Failed (${e.status}).` }
@@ -91,6 +123,9 @@ async function submit() {
 onMounted(async () => {
   const work = (async () => {
     workspaces.value = await api.get('/api/workspaces').catch(() => [])
+    // Only offered while creating: on an existing service its rules are already listed
+    // on the service page, and silently adding more from an edit would be surprising.
+    if (!editId.value) channels.value = await api.get('/api/channels').catch(() => [])
     if (editId.value) {
       const all = await api.get('/api/monitors').catch(() => [])
       const m = all.find((x) => x.id === editId.value)
@@ -180,6 +215,27 @@ onMounted(async () => {
           </div>
         </section>
 
+        <!-- Quick rule: create-only -->
+        <section v-if="!isEdit" class="space-y-3 rounded-2xl border border-line bg-surface p-5 xl:col-span-2">
+          <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="bell" :size="13" />Alert me when it goes down<span class="font-normal normal-case tracking-normal text-faint/70">· optional</span></div>
+          <p v-if="!channels.length" class="text-xs text-faint">No notify channels yet — add one under <RouterLink :to="{ name: 'notifications' }" class="text-accent hover:underline">Alert › Notify channel</RouterLink>, then a rule can be created here.</p>
+          <template v-else>
+            <p class="text-xs text-faint">Creates one rule: <b class="text-muted">this service is DOWN → notify the channels you pick</b>. Thresholds, re-notify and workspace-wide scope live in the rule editor.</p>
+            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <button v-for="c in channels" :key="c.id" type="button" @click="toggleRuleChan(c.id)"
+                class="flex items-center gap-2 rounded-lg border px-3 py-2 text-left"
+                :class="ruleChannels.has(c.id) ? 'border-accent/60 bg-accent/8' : 'border-line bg-surface2 hover:border-accent/40'">
+                <svg v-if="ruleChannels.has(c.id)" class="h-4 w-4 shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+                <span v-else class="h-4 w-4 shrink-0 rounded border border-line"></span>
+                <span class="min-w-0 flex-1 truncate text-sm text-fg">{{ c.name }}</span>
+                <!-- Channels are shared across workspaces, so label which one each
+                     belongs to (a rule may use any existing channel). -->
+                <span class="shrink-0 text-[11px] text-faint">{{ c.kind }} · {{ c.workspace }}</span>
+              </button>
+            </div>
+          </template>
+        </section>
+
         <!-- Meta -->
         <section class="space-y-3 rounded-2xl border border-line bg-surface p-5 xl:col-span-2">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="filter" :size="13" />Meta</div>
@@ -191,8 +247,9 @@ onMounted(async () => {
 
         <!-- Footer -->
         <div class="flex items-center gap-3 rounded-2xl border border-line bg-surface px-5 py-4 xl:col-span-2">
-          <button type="submit" :disabled="saving" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create service' }}</button>
-          <button type="button" @click="back" class="text-sm text-muted hover:text-fg">Cancel</button>
+          <button v-if="createdOnly" type="button" @click="back" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Done</button>
+          <button v-else type="submit" :disabled="saving" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create service' }}</button>
+          <button v-if="!createdOnly" type="button" @click="back" class="text-sm text-muted hover:text-fg">Cancel</button>
           <span v-if="formErr" class="text-xs text-down">{{ formErr }}</span>
         </div>
       </form>
