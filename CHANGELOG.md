@@ -7,6 +7,24 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.14] — 2026-08-26
+
+### Fixed
+- **"Test rule" failed with `UUID parsing failed: invalid character '['`.** The request
+  URL interpolated a `computed` ref instead of its value, so it was sent to
+  `/api/alerts/[object Object]/test`. The button shipped broken in 3.0.13; per-channel
+  **Send test** was never affected.
+
+### Added
+- **Frontend lint (`npm run lint` in `frontend/`, "Lint (frontend)" in CI).** There was no
+  JS lint at all, which is why the bug above got through: a ref used without `.value`
+  compiles fine, and the browser check could not see it either because the failure was
+  caught and rendered as UI text rather than reaching the console. The config is
+  deliberately tiny and carries no style rules — `vue/no-ref-as-operand` (verified
+  against this exact bug), `no-undef`, unused vars. Errors block CI; warnings do not.
+- `UplotChart` joined series names on a literal U+0001 control character, now written as
+  an escape — same behaviour, one less parser warning.
+
 ## [3.0.13] — 2026-08-26
 
 ### Fixed
