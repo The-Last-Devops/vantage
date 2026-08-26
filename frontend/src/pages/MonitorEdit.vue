@@ -122,9 +122,13 @@ onMounted(async () => {
   <AppShell :breadcrumb="[{ label: 'Services', to: { name: 'monitors', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: isEdit ? f.name : 'New service' }]">
     <PageLoader v-if="!loaded" />
     <template v-else>
-      <form @submit.prevent="submit" class="mx-auto w-full max-w-[720px] space-y-6 rounded-2xl border border-line bg-surface p-6">
+      <!-- Full width, sections as cards in a 2-up grid on a wide screen. It used to be
+           one max-w-[720px] column, which left most of the window empty and pushed the
+           HTTP textareas into a slot far smaller than what people paste into them.
+           AppShell already caps content at 1440px, so no max-w is needed here. -->
+      <form @submit.prevent="submit" class="grid w-full grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <!-- Basics: name is the headline field, then type/workspace, then target -->
-        <section class="space-y-3">
+        <section class="space-y-3 rounded-2xl border border-line bg-surface p-5">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="service" :size="13" />Basics</div>
           <label class="block text-xs text-muted">Name<input v-model="f.name" placeholder="My service" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-3 text-base font-medium text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -143,7 +147,7 @@ onMounted(async () => {
         </section>
 
         <!-- Schedule -->
-        <section class="space-y-3 border-t border-line pt-6">
+        <section class="space-y-3 rounded-2xl border border-line bg-surface p-5">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="clock" :size="13" />Schedule</div>
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <label class="block text-xs text-muted">Interval (s)<input v-model.number="f.interval_secs" type="number" min="5" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" /></label>
@@ -154,17 +158,17 @@ onMounted(async () => {
         </section>
 
         <!-- HTTP options -->
-        <section v-if="isHttp(f.kind)" class="space-y-3 border-t border-line pt-6">
+        <section v-if="isHttp(f.kind)" class="space-y-3 rounded-2xl border border-line bg-surface p-5 xl:col-span-2">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="globe" :size="13" />HTTP options</div>
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
             <label class="block text-xs text-muted">Method<UiSelect v-model="f.method" block class="mt-1" :options="['GET', 'POST', 'PUT', 'HEAD', 'DELETE', 'PATCH']" /></label>
             <label class="block text-xs text-muted">Accepted status<input v-model="f.accepted_status" placeholder="200-299,301" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
             <label class="block text-xs text-muted">Max redirects<input v-model.number="f.max_redirects" type="number" min="0" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" /></label>
           </div>
           <label class="flex items-center gap-2 text-sm text-fg"><input v-model="f.ignore_tls" type="checkbox" class="h-4 w-4" />Ignore TLS errors</label>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="block text-xs text-muted">Headers (one per line, <code>Key: Value</code>)<textarea v-model="f.headersText" rows="5" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-xs text-fg focus:border-accent/55 focus:outline-none"></textarea></label>
-            <label class="block text-xs text-muted">Body<textarea v-model="f.body" rows="5" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-xs text-fg focus:border-accent/55 focus:outline-none"></textarea></label>
+            <label class="block text-xs text-muted">Headers (one per line, <code>Key: Value</code>)<textarea v-model="f.headersText" rows="9" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-xs text-fg focus:border-accent/55 focus:outline-none"></textarea></label>
+            <label class="block text-xs text-muted">Body<textarea v-model="f.body" rows="9" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-xs text-fg focus:border-accent/55 focus:outline-none"></textarea></label>
           </div>
           <div class="flex flex-wrap items-end gap-3">
             <label class="text-xs text-muted">Auth<UiSelect v-model="f.authType" block class="mt-1" :options="[['none', 'None'], ['basic', 'Basic'], ['bearer', 'Bearer']]" /></label>
@@ -177,7 +181,7 @@ onMounted(async () => {
         </section>
 
         <!-- Meta -->
-        <section class="space-y-3 border-t border-line pt-6">
+        <section class="space-y-3 rounded-2xl border border-line bg-surface p-5 xl:col-span-2">
           <div class="flex items-center gap-1.5 text-micro font-bold uppercase tracking-wider text-faint"><VIcon name="filter" :size="13" />Meta</div>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label class="block text-xs text-muted">Tags (comma-separated)<input v-model="f.tags" placeholder="prod, api" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
@@ -186,7 +190,7 @@ onMounted(async () => {
         </section>
 
         <!-- Footer -->
-        <div class="flex items-center gap-3 border-t border-line pt-5">
+        <div class="flex items-center gap-3 rounded-2xl border border-line bg-surface px-5 py-4 xl:col-span-2">
           <button type="submit" :disabled="saving" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create service' }}</button>
           <button type="button" @click="back" class="text-sm text-muted hover:text-fg">Cancel</button>
           <span v-if="formErr" class="text-xs text-down">{{ formErr }}</span>

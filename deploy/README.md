@@ -102,7 +102,7 @@ so you install straight from the registry — **no `git clone` needed** (Helm �
 > with "migration 1 … has been modified"). New installs only.
 
 ```bash
-helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.14 \
+helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.15 \
   --namespace vantage --create-namespace \
   --set hub.ingress.host=vantage.example.com \
   --set timescaledb.storageClass=standard   # your cluster's StorageClass (kubectl get sc)
@@ -115,7 +115,7 @@ helm install vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.
 > output matches the objects.
 
 > Each release tag publishes `oci://ghcr.io/the-last-devops/charts/vantage` (hub) and
-> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.14`
+> `…/vantage-agent` (agent) at that version. `helm show values oci://…/vantage --version 3.0.15`
 > prints the full defaults. Working from a checkout instead? swap the ref for the local
 > path: `helm install vantage ./deploy/chart …`.
 
@@ -277,7 +277,7 @@ without it the metadata still populates and usage reads 0.
 **and** the cluster-agent (Deployment + read-only ClusterRole). Same public OCI registry,
 no clone needed:
 ```bash
-helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.14 \
+helm install vantage-agent oci://ghcr.io/the-last-devops/charts/vantage-agent --version 3.0.15 \
   --namespace vantage --create-namespace \
   --set hubUrl=https://vantage.example.com \
   --set apiKey=<api-key-from-Add-System> \
@@ -337,7 +337,7 @@ and the whole migration roll back — the hub then crash-looped with an empty da
 Fix: install **3.0.1 or newer**. Already on 3.0.0?
 
 ```bash
-helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.14 \
+helm upgrade vantage oci://ghcr.io/the-last-devops/charts/vantage --version 3.0.15 \
   --namespace vantage --reset-then-reuse-values
 ```
 
@@ -376,7 +376,7 @@ HTTPS upstream (Cloudflare, an LB) while `hub.ingress.tls=false` yields `http://
 
 ## Images & charts
 `ghcr.io/the-last-devops/vantage-{hub,agent}` — tagged releases publish `:<version>`
-(e.g. `:3.0.14`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
+(e.g. `:3.0.15`) + `:latest`; `:main` is the rolling build from `main`. The chart pins
 the chart's appVersion by default.
 
 Helm **charts** ship the same way — public OCI artifacts published per release tag:

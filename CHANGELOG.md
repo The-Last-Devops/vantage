@@ -7,6 +7,40 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.15] — 2026-08-26
+
+### Changed
+- **"Test rule" sends that rule's own notification, in both shapes.** It used to send a
+  generic "your channel is wired up correctly" message, which proved the webhook was
+  reachable and told you nothing about the rule. It now builds the payload from the rule
+  through the same code the live alert engine uses — monitor name, workspace, condition,
+  probed URL — and sends the DOWN page *and* the matching UP recovery, so both can be
+  eyeballed before you rely on them. Only `detail` differs, saying plainly that it is a
+  test and nothing is wrong.
+- **Release notes on the About page render as Markdown, and show when you are up to
+  date.** They were dumped raw into a `<pre>` (asterisks, backticks and link syntax all
+  visible) and only appeared when a newer release existed — so the moment you were
+  current there was no way to read what changed in the version you are running.
+- **The service editor uses the whole window.** New/Edit service was locked to a
+  720px column, which left most of a wide screen empty and squeezed the HTTP headers and
+  body into a slot far smaller than what people paste into them. Sections are now cards
+  in a 2-up grid, with HTTP options and Meta spanning the full width and bigger textareas.
+
+### Fixed
+- **The webhook payload was missing the probed URL** added in 3.0.13. The default JSON
+  body has an explicit key list, so the new field never reached it. Custom body templates
+  also gained `{{endpoint}}`, and the channel form's hint now lists every placeholder
+  (`{{message}}`, `{{title}}`, `{{status}}`, `{{endpoint}}`) instead of only `{{message}}`.
+
+### Added
+- `scripts/check-rule-test.sh` — stands up a webhook sink, creates a monitor, channel and
+  rule, then asserts exactly two deliveries carrying the right status, target, workspace,
+  condition, endpoint and titles.
+- `scripts/check-markdown.mjs` (in CI) — the release-notes renderer is the one place
+  remote text reaches `v-html`, so its escaping is tested: script tags, `img onerror`,
+  `javascript:`/`data:` hrefs, attribute break-out, and HTML inside code spans.
+- `check-console-errors.sh` also opens `/about` and `/monitor/new`.
+
 ## [3.0.14] — 2026-08-26
 
 ### Fixed
