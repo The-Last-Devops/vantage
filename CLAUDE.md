@@ -163,6 +163,13 @@ docker compose up -d
   (`system_metrics_1m`). Any query over `timescaledb_information.jobs` must resolve the view
   via `timescaledb_information.continuous_aggregates` — matching on the view alone silently
   returns nothing (it left every rollup's "Keep for" box blank on Data & retention).
+- **Remote text rendered in the UI goes through `lib/markdown.js`, never a raw `v-html`.**
+  The About page shows GitHub release notes fetched at runtime, so anything that can emit
+  raw HTML there is an XSS hole in the hub. `renderMarkdown` escapes the *entire* input
+  first and only then introduces tags, so no input can produce an element we did not
+  write; links are restricted to http(s). It covers headings, bullets, bold, inline code
+  and links — extend it (and `scripts/check-markdown.mjs`, run in CI) rather than reaching
+  for `marked`/`dompurify`.
 - **Validate every user-supplied field server-side — the API is the source of truth.**
   The Vue SPA can be bypassed, so each create/patch handler must reject bad input with
   `400` *before* the INSERT/UPDATE, and store the trimmed value. Reuse the shared validators

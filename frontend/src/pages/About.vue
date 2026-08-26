@@ -2,11 +2,15 @@
 import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'
 import { api } from '../lib/api'
+import { renderMarkdown } from '../lib/markdown'
 
 const REPO = 'The-Last-Devops/vantage'
 const about = ref(null)
 const latest = ref(null)   // { tag, url, body, published }
 const checking = ref(false)
+// Expanded automatically when there is something new to read; collapsed when you are
+// already current, so the page still leads with the version facts.
+const notesOpen = ref(false)
 const checkErr = ref('')
 
 const isNewer = computed(() => {
@@ -35,6 +39,7 @@ async function checkLatest() {
     if (!r.ok) throw new Error(r.status)
     const j = await r.json()
     latest.value = { tag: j.tag_name, url: j.html_url, body: j.body || '', published: j.published_at }
+    notesOpen.value = isNewer.value
   } catch (e) { checkErr.value = 'Could not reach GitHub.' }
   finally { checking.value = false }
 }
@@ -76,7 +81,18 @@ onMounted(async () => {
           </div>
           <a :href="`https://github.com/${REPO}/releases`" target="_blank" rel="noopener" class="shrink-0 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-sm text-fg hover:border-accent/50">Releases ↗</a>
         </div>
-        <pre v-if="latest?.body && isNewer" class="mt-3 max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg bg-bg p-3 text-xs leading-relaxed text-muted">{{ latest.body }}</pre>
+        <!-- Release notes: shown whenever we have them, not only when behind — "what
+             changed in the version I am running" is the common question, and the notes
+             used to vanish the moment you were up to date. renderMarkdown escapes the
+             whole body before adding tags (it comes from api.github.com). -->
+        <div v-if="latest?.body" class="mt-3">
+          <button @click="notesOpen = !notesOpen" class="flex items-center gap-1.5 text-xs font-semibold text-muted hover:text-fg">
+            <svg class="h-3.5 w-3.5 transition-transform" :class="notesOpen ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 18 6-6-6-6"/></svg>
+            {{ isNewer ? `What's new in ${latest.tag}` : `Release notes — ${latest.tag}` }}
+            <span v-if="latest.published" class="font-normal text-faint">· {{ new Date(latest.published).toLocaleDateString() }}</span>
+          </button>
+          <div v-if="notesOpen" class="mt-2 max-h-[60vh] overflow-auto rounded-lg bg-bg p-3.5 text-xs text-muted" v-html="renderMarkdown(latest.body)"></div>
+        </div>
       </div>
 
       <p class="text-xs text-faint">Changelog &amp; source: <a :href="`https://github.com/${REPO}`" target="_blank" rel="noopener" class="text-accent hover:underline">github.com/{{ REPO }}</a></p>

@@ -37,6 +37,9 @@ jobs:
         working-directory: frontend
       - run: npm run lint
         working-directory: frontend
+      # The release-notes Markdown renderer is the one place remote text reaches v-html,
+      # so its escaping is tested rather than eyeballed.
+      - run: node scripts/check-markdown.mjs
 
   clippy:
     name: Clippy

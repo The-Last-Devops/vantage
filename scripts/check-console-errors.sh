@@ -71,7 +71,7 @@ if [ -z "$CID" ]; then
 fi
 # A "##" suffix runs JS once the route settles — the member edit slide-over holds real
 # logic (draft diffing, discard-on-close) that opening the route alone never executes.
-ROUTES=(/ /clusters /services /alerts /events /channels /settings /members /workspaces /fleet /metrics /alerts/new
+ROUTES=(/ /clusters /services /alerts /events /channels /settings /members /workspaces /fleet /metrics /alerts/new /about
         "/members##document.querySelector('[data-t=edit]').click()"
         "/cluster/$CID?name=cluster-1"
         "/cluster/$CID?name=cluster-1&tab=nodes"
