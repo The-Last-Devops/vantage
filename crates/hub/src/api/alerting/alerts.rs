@@ -490,12 +490,19 @@ pub async fn test_alert(
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    // Send to every channel; report which ones failed.
-    let test = crate::notify::Notification::test();
+    // Send THIS rule's real payload — target, workspace, condition, probed URL — in both
+    // shapes, so the test shows what a page and what a recovery will actually look like.
+    // A generic "your channel works" message proved the webhook and nothing else.
     let mut errors = Vec::new();
-    for (name, kind, config) in &channels {
-        if let Err(e) = crate::notify::dispatch(&client, kind, &config.0, &test).await {
-            errors.push(format!("{name}: {e}"));
+    for firing in [true, false] {
+        let n = crate::alert::test_notification(&state, id, firing)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        for (name, kind, config) in &channels {
+            if let Err(e) = crate::notify::dispatch(&client, kind, &config.0, &n).await {
+                let which = if firing { "DOWN" } else { "UP" };
+                errors.push(format!("{name} ({which}): {e}"));
+            }
         }
     }
     if errors.is_empty() {

@@ -47,7 +47,8 @@ pub async fn dispatch(
                     let rendered = tpl
                         .replace("{{message}}", body)
                         .replace("{{title}}", &n.title())
-                        .replace("{{status}}", n.status_word());
+                        .replace("{{status}}", n.status_word())
+                        .replace("{{endpoint}}", &n.endpoint);
                     serde_json::from_str(&rendered).unwrap_or_else(|_| json!({ "text": body }))
                 }
                 // Default: a structured payload so downstream automation can branch on it.
@@ -60,6 +61,9 @@ pub async fn dispatch(
                     "type": n.kind_label,
                     "workspace": n.workspace,
                     "condition": n.condition,
+                    // What was probed (the monitor's target, credentials masked). Empty
+                    // for host rules and workspace-wide rules, which have no one target.
+                    "endpoint": n.endpoint,
                     "detail": n.detail,
                     "at": n.at,
                     "text": body,

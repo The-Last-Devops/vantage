@@ -144,6 +144,59 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Build the notification a rule WOULD send, for the "Test rule" button.
+///
+/// Deliberately goes through the same `target_info` + `condition_text` the live engine
+/// uses, so a test is not a lookalike — it is the real payload for that rule, with the
+/// only difference in `detail`, which says plainly that nothing is wrong. `firing`
+/// picks the DOWN or the UP shape; the UI sends both so people can see each one.
+pub(crate) async fn test_notification(
+    state: &AppState,
+    alert_id: Uuid,
+    firing: bool,
+) -> anyhow::Result<crate::notify::Notification> {
+    type Row = (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+        Option<Uuid>,
+        Json<Value>,
+    );
+    let (monitor_id, system_id, scope_kind, scope_ns, condition): Row = sqlx::query_as(
+        "SELECT monitor_id, system_id, scope_kind, scope_workspace_id, condition \
+         FROM alerts WHERE id = $1",
+    )
+    .bind(alert_id)
+    .fetch_one(&state.config)
+    .await?;
+    let rule = Rule {
+        id: alert_id,
+        monitor_id,
+        system_id,
+        scope_kind,
+        scope_ns,
+        condition: condition.0,
+        renotify_secs: None,
+        channels: Vec::new(),
+    };
+    let (target, kind_label, workspace, endpoint) = target_info(state, &rule).await;
+    Ok(crate::notify::Notification {
+        firing,
+        repeat: false,
+        target,
+        kind_label: kind_label.to_string(),
+        workspace,
+        condition: condition_text(&rule),
+        endpoint,
+        detail: if firing {
+            "Test alert — this is what a real DOWN notification for this rule looks like. Nothing is wrong.".into()
+        } else {
+            "Test alert — this is what the matching recovery looks like. Nothing is wrong.".into()
+        },
+        at: chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string(),
+    })
+}
+
 async fn load_rules(state: &AppState) -> anyhow::Result<Vec<Rule>> {
     // One row per (rule × channel); a rule with no channels still appears (LEFT
     // JOIN) so it can record fire/recover events even though it can't notify.

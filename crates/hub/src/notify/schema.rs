@@ -124,7 +124,7 @@ pub fn manifest() -> Vec<ProviderMeta> {
                 .ph("Authorization: Bearer …\nX-Source: vantage")
                 .hint("Optional. One `Key: Value` per line — e.g. an auth header."),
             f("body", "Body template", "textarea").adv().ph("{\"text\": \"{{message}}\"}")
-                .hint("Optional JSON template; {{message}} is replaced with the alert text. Default: {\"text\":\"<message>\"}."),
+                .hint("Optional JSON template. Placeholders: {{message}}, {{title}}, {{status}} (UP / DOWN / STILL DOWN), {{endpoint}} (the probed URL). Default sends a structured object."),
         ]),
         p("apprise", "Apprise API", "Generic", "#FF9900", "#241a00", "webhook",
           "One endpoint → 50+ services via a self-hosted apprise-api", vec![

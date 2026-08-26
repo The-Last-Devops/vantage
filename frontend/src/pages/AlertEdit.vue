@@ -246,11 +246,11 @@ onMounted(async () => {
 
           <div class="flex items-center gap-2.5 border-t border-line bg-surface/60 px-5 py-3.5">
             <span v-if="err" class="text-xs text-down">{{ err }}</span>
-            <span v-else-if="ruleTest === 'ok'" class="text-xs text-accent">✓ test sent to every channel on this rule</span>
+            <span v-else-if="ruleTest === 'ok'" class="text-xs text-accent">✓ sent a DOWN + an UP example to every channel on this rule</span>
             <span v-else-if="ruleTest === 'fail'" class="truncate text-xs text-down">✗ {{ ruleTestMsg }}</span>
             <span class="ml-auto"></span>
             <button v-if="editId" @click="testRule" :disabled="ruleTest === 'run' || !ed.channels.size"
-              v-tip="!ed.channels.size ? 'Attach a channel first' : 'Send a test through every channel on this rule'"
+              v-tip="!ed.channels.size ? 'Attach a channel first' : 'Send this rule\'s real DOWN and UP notifications to every channel on it'"
               class="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg hover:border-accent/50 disabled:opacity-50">{{ ruleTest === 'run' ? 'Testing…' : 'Test rule' }}</button>
             <button @click="backToList" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button>
             <button @click="save" :disabled="saving" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ saving ? 'Saving…' : 'Save rule' }}</button>
