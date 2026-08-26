@@ -41,6 +41,16 @@ jobs:
       # so its escaping is tested rather than eyeballed.
       - run: node scripts/check-markdown.mjs
 
+  # Cargo.lock does not follow a Cargo.toml version bump on its own, so a release commit
+  # made without a build in between ships a lockfile naming the previous version (v3.0.16
+  # did). Cheap to check, annoying to notice by eye.
+  versions:
+    name: Versions in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-version-sync.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

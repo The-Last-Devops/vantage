@@ -4,5 +4,9 @@
 tooling/
 .secrets
 .gh-token
-/frontend/dist/*
-!/frontend/dist/.gitkeep
+# Build output. No .gitkeep placeholder: `vite build` empties the directory, which
+# deleted the tracked file and made it flip-flop in and out of six commits. rust_embed
+# 8.x tolerates the folder being absent (verified on a fresh clone), so nothing needs it
+# to exist at checkout time — real builds go through Dockerfile.hub, which builds the
+# frontend and copies dist in.
+/frontend/dist/

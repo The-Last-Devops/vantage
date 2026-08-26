@@ -249,6 +249,12 @@ docker compose up -d
   is the usual cause of a full disk. The script runs `cargo clean` + prunes Docker **build cache**
   (never volumes/DB) + removes stray release tarballs. Safe to run anytime (build output is
   regenerated). For unattended machines, add the weekly cron shown in the script's header.
+- **Release: bump the version in four places and prove it with
+  `bash scripts/check-version-sync.sh`.** `Cargo.toml`, `Cargo.lock` (three workspace
+  members), `deploy/chart/Chart.yaml` (`version` *and* `appVersion`), plus a CHANGELOG
+  entry. `Cargo.lock` is the one that gets missed — bumping `Cargo.toml` does not touch
+  it, so a release commit made without a `cargo build` in between ships a lockfile naming
+  the previous version (v3.0.16 did). CI runs the check as "Versions in sync".
 - **Always run `cargo fmt` immediately before committing Rust** — CI's Format job runs
   `cargo fmt --check` and has failed a release twice because new code was committed unformatted.
   Run `cargo fmt && cargo fmt --check` after the *last* Rust edit, not before it.
