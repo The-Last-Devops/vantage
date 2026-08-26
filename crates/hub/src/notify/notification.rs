@@ -16,8 +16,13 @@ pub struct Notification {
     pub kind_label: String, // "Service" / "Host"
     pub workspace: String,
     pub condition: String, // "is DOWN" / "CPU % > 90" / "offline > 120s"
-    pub detail: String,    // the probe / evaluation message
-    pub at: String,        // formatted UTC timestamp
+    /// What was actually probed — the monitor's target ("https://api.shop/health",
+    /// "db.internal:5432"). Empty for host rules, push monitors and all-services
+    /// rules. **Always pass it through [`redact_endpoint`]** — a target can be a
+    /// connection string with a password in it.
+    pub endpoint: String,
+    pub detail: String, // the probe / evaluation message
+    pub at: String,     // formatted UTC timestamp
 }
 
 impl Notification {
@@ -30,6 +35,7 @@ impl Notification {
             kind_label: String::new(),
             workspace: String::new(),
             condition: String::new(),
+            endpoint: String::new(),
             detail: "Your channel is wired up correctly — real alerts will arrive here.".into(),
             at: now_utc(),
         }
@@ -66,6 +72,16 @@ impl Notification {
         }
         if !self.workspace.is_empty() {
             v.push(("Workspace", &self.workspace));
+        }
+        if !self.endpoint.is_empty() {
+            // "URL" for something a dev can click, "Target" for host:port and the like.
+            let label =
+                if self.endpoint.starts_with("http://") || self.endpoint.starts_with("https://") {
+                    "URL"
+                } else {
+                    "Target"
+                };
+            v.push((label, &self.endpoint));
         }
         if !self.condition.is_empty() {
             v.push(("Condition", &self.condition));
@@ -152,6 +168,32 @@ impl Notification {
     }
 }
 
+/// Strip `user:password@` from a URL-ish target before it leaves the building.
+///
+/// A monitor's target is not just an http URL — `postgres`, `mysql`, `mongodb`,
+/// `redis` and `rabbitmq` monitors all take a connection string, and those routinely
+/// embed a password. Notifications go to Discord/Slack/Telegram, i.e. somewhere far
+/// less protected than the hub, so the credential is masked rather than sent.
+/// Anything without a `//host` part is returned unchanged.
+pub fn redact_endpoint(target: &str) -> String {
+    let Some(scheme_end) = target.find("://") else {
+        return target.to_string();
+    };
+    let (scheme, rest) = target.split_at(scheme_end + 3);
+    // userinfo, if any, runs to the LAST '@' before the first '/' of the path.
+    let host_part_end = rest.find('/').unwrap_or(rest.len());
+    let Some(at) = rest[..host_part_end].rfind('@') else {
+        return target.to_string();
+    };
+    let userinfo = &rest[..at];
+    let after = &rest[at + 1..];
+    // Keep the username (useful for debugging), drop anything after the first ':'.
+    match userinfo.split_once(':') {
+        Some((user, _pw)) => format!("{scheme}{user}:***@{after}"),
+        None => format!("{scheme}{userinfo}@{after}"),
+    }
+}
+
 fn now_utc() -> String {
     chrono::Utc::now().format("%Y-%m-%d %H:%M UTC").to_string()
 }
@@ -168,6 +210,7 @@ mod tests {
             kind_label: "Service".into(),
             workspace: "production".into(),
             condition: "is DOWN".into(),
+            endpoint: "https://api.shop/health".into(),
             detail: "connection refused".into(),
             at: "2026-08-26 03:14 UTC".into(),
         }
@@ -190,6 +233,53 @@ mod tests {
         assert_eq!(n(true, false).title(), "🔴 api.shop — DOWN");
         assert_eq!(n(true, true).title(), "🔴 api.shop — STILL DOWN");
         assert_eq!(n(false, false).title(), "✅ api.shop — UP");
+    }
+
+    #[test]
+    fn endpoint_is_shown_so_a_dev_can_click_it() {
+        let t = n(true, false).text();
+        assert!(t.contains("\nURL: https://api.shop/health"), "{t}");
+        // host:port targets are not URLs — label them honestly
+        let mut m = n(true, false);
+        m.endpoint = "db.internal:5432".into();
+        assert!(
+            m.text().contains("\nTarget: db.internal:5432"),
+            "{}",
+            m.text()
+        );
+        // and an absent endpoint (host rule, push monitor) adds no row at all
+        let mut e = n(true, false);
+        e.endpoint = String::new();
+        assert!(!e.text().contains("URL:") && !e.text().contains("Target:"));
+    }
+
+    /// Connection-string targets carry passwords; notifications land in Discord/Slack.
+    #[test]
+    fn endpoint_password_never_leaves_the_hub() {
+        assert_eq!(
+            redact_endpoint("postgres://app:s3cr3t@db.internal:5432/shop"),
+            "postgres://app:***@db.internal:5432/shop"
+        );
+        assert_eq!(
+            redact_endpoint("https://admin:hunter2@api.shop/health"),
+            "https://admin:***@api.shop/health"
+        );
+        // no credentials → untouched
+        assert_eq!(
+            redact_endpoint("https://api.shop/health"),
+            "https://api.shop/health"
+        );
+        assert_eq!(redact_endpoint("db.internal:5432"), "db.internal:5432");
+        // a bare username is not a secret
+        assert_eq!(
+            redact_endpoint("redis://cache@r1:6379"),
+            "redis://cache@r1:6379"
+        );
+        // an '@' inside the PATH must not be mistaken for userinfo
+        assert_eq!(
+            redact_endpoint("https://api.shop/users/me@example.com"),
+            "https://api.shop/users/me@example.com"
+        );
     }
 
     #[test]

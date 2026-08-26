@@ -41,17 +41,21 @@ const rolePill = (r) => (r === 'owner' || r === 'admin' ? 'bg-accent/12 text-acc
 <template>
   <AppShell title="Workspaces">
     <div class="space-y-5">
-      <!-- create -->
-      <form @submit.prevent="create" class="flex flex-wrap items-start gap-2">
-        <p class="mr-auto max-w-xl text-xs text-faint">Workspaces group systems &amp; services and scope who can see them. Click one to manage members, alert rules and thresholds.</p>
-        <div>
-          <input v-model="newName" placeholder="new-workspace" class="w-48 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
-          <p v-if="err" class="mt-1 text-xs text-down">{{ err }}</p>
-        </div>
-        <button type="submit" :disabled="creating" class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>{{ creating ? 'Creating…' : 'Create' }}
-        </button>
-      </form>
+      <!-- create — kept on the LEFT, where the eye starts and where the cards below
+           line up. Pinned to the right edge it drifted off-screen on a wide window and
+           sat nowhere near the thing it creates. -->
+      <div class="space-y-2">
+        <p class="max-w-xl text-xs text-faint">Workspaces group systems &amp; services and scope who can see them. Click one to manage members, alert rules and thresholds.</p>
+        <form @submit.prevent="create" class="flex flex-wrap items-start gap-2">
+          <div>
+            <input v-model="newName" placeholder="new-workspace" class="w-56 rounded-lg border border-line bg-surface2 px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none" />
+            <p v-if="err" class="mt-1 text-xs text-down">{{ err }}</p>
+          </div>
+          <button type="submit" :disabled="creating" class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>{{ creating ? 'Creating…' : 'Create' }}
+          </button>
+        </form>
+      </div>
 
       <PageLoader v-if="!loaded" />
       <template v-else>

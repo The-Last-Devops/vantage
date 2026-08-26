@@ -69,7 +69,7 @@ if [ -z "$CID" ]; then
   echo "      the main thing this check covers, so treat this as a failure."
   exit 1
 fi
-ROUTES=(/ /clusters /services /alerts /events /channels /settings /members /workspaces /fleet /metrics
+ROUTES=(/ /clusters /services /alerts /events /channels /settings /members /workspaces /fleet /metrics /alerts/new
         "/cluster/$CID?name=cluster-1"
         "/cluster/$CID?name=cluster-1&tab=nodes"
         "/cluster/$CID?name=cluster-1&sel=default")

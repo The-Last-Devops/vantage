@@ -196,7 +196,15 @@ onUnmounted(() => timer && clearInterval(timer))
             <RouterLink v-for="r in rules" :key="r.id" :to="{ name: 'alerts', query: { ...nsq, rule: r.id } }"
               class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-1.5 text-xs hover:border-accent/50">
               <span class="h-1.5 w-1.5 rounded-full" :class="r.firing === true ? 'bg-down' : r.firing === false ? 'bg-ok' : 'bg-faint'"></span>
-              <span class="text-fg">{{ r.scope_kind === 'all_services' ? 'All services in workspace' : 'This service' }}</span>
+              <!-- Show WHO gets paged, not the scope: on this page "this service" is
+                   already obvious, while the channel list is not visible anywhere else.
+                   Scope is kept only when the rule is workspace-wide, which does add
+                   information (it is not a rule specific to this service). -->
+              <span v-if="r.channels?.length" class="flex items-center gap-1.5">
+                <span v-for="c in r.channels" :key="c.id" class="text-fg">{{ c.name }}<span class="text-faint"> · {{ c.kind }}</span></span>
+              </span>
+              <span v-else class="text-down">No channel</span>
+              <span v-if="r.scope_kind === 'all_services'" class="text-faint">· all services</span>
               <span v-if="!r.enabled" class="text-faint">· off</span>
             </RouterLink>
           </div>

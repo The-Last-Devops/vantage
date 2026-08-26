@@ -10,6 +10,10 @@ pub struct AttachedRule {
     pub scope_kind: Option<String>,
     pub enabled: bool,
     pub firing: Option<bool>,
+    /// Where this rule actually sends. On a monitor/host page the scope is already
+    /// obvious ("this service" — you are looking at it); *who gets paged* is the part
+    /// you cannot see anywhere else, so the UI shows these instead.
+    pub channels: Vec<ChannelRef>,
 }
 
 async fn attached_rules(
@@ -32,9 +36,34 @@ async fn attached_rules(
         .fetch_all(&state.config)
         .await
         .map_err(internal)?;
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Channels for all of these rules in ONE query, then grouped in memory (not a
+    // query per rule).
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.0).collect();
+    let chan_rows: Vec<(Uuid, Uuid, String, String)> = sqlx::query_as(
+        "SELECT ac.alert_id, c.id, c.name, c.kind FROM alert_channels ac \
+         JOIN channels c ON c.id = ac.channel_id WHERE ac.alert_id = ANY($1) ORDER BY c.name",
+    )
+    .bind(&ids)
+    .fetch_all(&state.config)
+    .await
+    .map_err(internal)?;
+    let mut by_rule: std::collections::HashMap<Uuid, Vec<ChannelRef>> =
+        std::collections::HashMap::new();
+    for (alert_id, id, name, kind) in chan_rows {
+        by_rule
+            .entry(alert_id)
+            .or_default()
+            .push(ChannelRef { id, name, kind });
+    }
+
     Ok(rows
         .into_iter()
         .map(|(id, scope_kind, enabled, firing)| AttachedRule {
+            channels: by_rule.remove(&id).unwrap_or_default(),
             id,
             scope_kind,
             enabled,

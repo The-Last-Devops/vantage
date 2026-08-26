@@ -13,6 +13,6 @@ mod notification;
 mod schema;
 mod transports;
 
-pub use notification::Notification;
+pub use notification::{redact_endpoint, Notification};
 pub use schema::{is_valid_kind, manifest, redact_secrets, ProviderMeta};
 pub use transports::dispatch;

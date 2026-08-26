@@ -79,6 +79,23 @@ const condText = computed(() => {
 
 // ---- per-channel test (works before the rule is saved) ----
 const testState = ref({})
+// Rule-level test: POST /api/alerts/:id/test fans out to every channel attached to the
+// SAVED rule (per-channel "Send test" above only proves one channel's credentials).
+// Only offered once the rule exists, and it reports which channel failed.
+const ruleTest = ref('')
+const ruleTestMsg = ref('')
+async function testRule() {
+  if (!editId) return
+  ruleTest.value = 'run'; ruleTestMsg.value = ''
+  try {
+    await api.post(`/api/alerts/${editId}/test`)
+    ruleTest.value = 'ok'
+  } catch (e) {
+    ruleTest.value = 'fail'
+    ruleTestMsg.value = e?.body || e?.message || 'failed'
+  }
+  setTimeout(() => { ruleTest.value = ''; ruleTestMsg.value = '' }, 6000)
+}
 async function testChan(id) {
   testState.value = { ...testState.value, [id]: 'run' }
   try { await api.post(`/api/channels/${id}/test`); testState.value = { ...testState.value, [id]: 'ok' } }
@@ -157,7 +174,7 @@ onMounted(async () => {
   <AppShell :breadcrumb="[{ label: 'Rules', to: { name: 'alerts', query: route.query.ws ? { ws: route.query.ws } : {} } }, { label: editId ? 'Edit rule' : 'New rule' }]">
     <PageLoader v-if="!loaded" />
     <template v-else>
-      <div class="mx-auto grid w-full max-w-4xl gap-4 lg:grid-cols-[1fr_320px]">
+      <div class="grid w-full gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <!-- form -->
         <div class="overflow-hidden rounded-2xl border border-line bg-surface">
           <!-- 1. source -->
@@ -229,7 +246,12 @@ onMounted(async () => {
 
           <div class="flex items-center gap-2.5 border-t border-line bg-surface/60 px-5 py-3.5">
             <span v-if="err" class="text-xs text-down">{{ err }}</span>
+            <span v-else-if="ruleTest === 'ok'" class="text-xs text-accent">✓ test sent to every channel on this rule</span>
+            <span v-else-if="ruleTest === 'fail'" class="truncate text-xs text-down">✗ {{ ruleTestMsg }}</span>
             <span class="ml-auto"></span>
+            <button v-if="editId" @click="testRule" :disabled="ruleTest === 'run' || !ed.channels.size"
+              v-tip="!ed.channels.size ? 'Attach a channel first' : 'Send a test through every channel on this rule'"
+              class="rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg hover:border-accent/50 disabled:opacity-50">{{ ruleTest === 'run' ? 'Testing…' : 'Test rule' }}</button>
             <button @click="backToList" class="rounded-lg px-3 py-2 text-sm text-muted hover:text-fg">Cancel</button>
             <button @click="save" :disabled="saving" class="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accentfg hover:opacity-90 disabled:opacity-50">{{ saving ? 'Saving…' : 'Save rule' }}</button>
           </div>

@@ -94,7 +94,7 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
         };
 
         if should_notify {
-            let (target, kind_label, workspace) = target_info(state, &rule).await;
+            let (target, kind_label, workspace, endpoint) = target_info(state, &rule).await;
             let n = crate::notify::Notification {
                 firing: eval.firing,
                 repeat: was_firing && eval.firing, // a re-notify while still firing
@@ -102,6 +102,7 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
                 kind_label: kind_label.to_string(),
                 workspace,
                 condition: condition_text(&rule),
+                endpoint,
                 detail: eval.message.clone(),
                 at: now.format("%Y-%m-%d %H:%M UTC").to_string(),
             };
@@ -434,18 +435,24 @@ async fn notify(client: &reqwest::Client, rule: &Rule, n: &crate::notify::Notifi
 }
 
 /// Human description of a rule's target: (name, "Service"|"Host", workspace).
-async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, String) {
+/// (display name, kind label, workspace, probed endpoint). The endpoint is what the
+/// on-call dev actually needs — the URL/host being checked — and is empty for host
+/// rules and all-services rules, which have no single target.
+async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, String, String) {
     if let Some(mid) = rule.monitor_id {
-        let r: Option<(String, String)> = sqlx::query_as(
-            "SELECT m.name, n.name FROM monitors m JOIN workspaces n ON n.id = m.workspace_id WHERE m.id = $1",
+        let r: Option<(String, String, String)> = sqlx::query_as(
+            "SELECT m.name, n.name, COALESCE(m.target, '') FROM monitors m \
+             JOIN workspaces n ON n.id = m.workspace_id WHERE m.id = $1",
         )
         .bind(mid)
         .fetch_optional(&state.config)
         .await
         .ok()
         .flatten();
-        let (t, ws) = r.unwrap_or_else(|| ("service".into(), String::new()));
-        return (t, "Service", ws);
+        let (t, ws, endpoint) =
+            r.unwrap_or_else(|| ("service".into(), String::new(), String::new()));
+        // A target can be a connection string with a password in it.
+        return (t, "Service", ws, crate::notify::redact_endpoint(&endpoint));
     }
     if let Some(sid) = rule.system_id {
         let r: Option<(String, String)> = sqlx::query_as(
@@ -457,7 +464,7 @@ async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, St
         .ok()
         .flatten();
         let (t, ws) = r.unwrap_or_else(|| ("host".into(), String::new()));
-        return (t, "Host", ws);
+        return (t, "Host", ws, String::new());
     }
     let ws = match rule.scope_ns {
         Some(id) => sqlx::query_as::<_, (String,)>("SELECT name FROM workspaces WHERE id = $1")
@@ -471,8 +478,8 @@ async fn target_info(state: &AppState, rule: &Rule) -> (String, &'static str, St
         None => String::new(),
     };
     match rule.scope_kind.as_deref() {
-        Some("all_hosts") => ("All hosts".into(), "Host", ws),
-        _ => ("All services".into(), "Service", ws),
+        Some("all_hosts") => ("All hosts".into(), "Host", ws, String::new()),
+        _ => ("All services".into(), "Service", ws, String::new()),
     }
 }
 
