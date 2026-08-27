@@ -22,12 +22,33 @@ const props = defineProps({
   focusNames: { type: Array, default: null },
   selectedNames: { type: Array, default: () => [] },
   viewRange: { type: Array, default: null }, // [minTs, maxTs] zoom window (persisted by parent); null = full
+  // y-axis window as [min, max]; null in either slot = let uPlot auto-fit that end.
+  // Default (unset): percentages get a fixed 0..100, everything else auto-fits.
+  // A fixed 0..100 keeps the baseline on the floor, so a host idling at 12-18% reads
+  // as flat instead of being stretched to fill the panel and looking volatile.
+  yRange: { type: Array, default: null },
 })
 const emit = defineEmits(['legend-hover', 'legend-toggle', 'cursor-time', 'zoom'])
 const isSel = (n) => props.selectedNames.includes(n)
 const isDim = (n) => props.focusNames != null && !props.focusNames.includes(n)
 const isHi = (n) => lineHover.value === n || (props.focusNames != null && props.focusNames.includes(n)) // bright
 const short = (n) => (n && n.length > 10 ? n.slice(0, 10) + '…' : n)
+
+// uPlot `scales.y.range`. Resolves, in order: an explicit `yRange` prop → a fixed
+// 0..100 for percentage charts → uPlot's own auto-fit. A `null` in either slot of
+// `yRange` means "auto-fit that end", so [0, null] pins the floor and lets the top
+// follow the data.
+const yScaleRange = (u, dataMin, dataMax) => {
+  const auto = () => uPlot.rangeNum(dataMin, dataMax, 0.1, true)
+  if (props.yRange) {
+    const [lo, hi] = props.yRange
+    if (lo != null && hi != null) return [lo, hi]
+    const a = auto()
+    return [lo != null ? lo : a[0], hi != null ? hi : a[1]]
+  }
+  if (props.unit === '%') return [0, 100]
+  return auto()
+}
 
 const ui = useUi()
 const el = ref(null)
@@ -106,7 +127,7 @@ function opts() {
       drag: { x: true, y: false, setScale: false }, // we zoom manually in setSelect (more reliable here)
       sync: props.syncKey ? { key: props.syncKey, scales: ['x', null] } : undefined,
     },
-    scales: { x: { time: true } },
+    scales: { x: { time: true }, y: { range: yScaleRange } },
     series: [
       {},
       ...props.series.map((s) => ({
