@@ -18,7 +18,7 @@ Run the hub + databases with the released images — no clone, no build. The hub
 # compose.yaml
 services:
   db:
-    image: timescale/timescaledb:latest-pg18
+    image: timescale/timescaledb:2.17.2-pg16
     environment:
       POSTGRES_USER: vantage
       POSTGRES_PASSWORD: ${DB_PASSWORD:?set a strong password}

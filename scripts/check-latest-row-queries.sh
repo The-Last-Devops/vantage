@@ -18,7 +18,7 @@ trap cleanup EXIT
 echo "starting throwaway TimescaleDB…"
 docker run -d --name "$CID" \
   -e POSTGRES_USER=vantage -e POSTGRES_PASSWORD=vantage -e POSTGRES_DB=vantage_data \
-  timescale/timescaledb:latest-pg18 >/dev/null
+  timescale/timescaledb:2.17.2-pg16 >/dev/null
 
 echo "waiting for readiness…"
 ok=0

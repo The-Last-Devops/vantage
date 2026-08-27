@@ -13,7 +13,7 @@ trap cleanup EXIT
 echo "starting throwaway Postgres…"
 docker run -d --name "$CID" \
   -e POSTGRES_USER=vantage -e POSTGRES_PASSWORD=vantage -e POSTGRES_DB=vantage_config \
-  timescale/timescaledb:latest-pg18 >/dev/null
+  timescale/timescaledb:2.17.2-pg16 >/dev/null
 
 echo "waiting for readiness…"
 # initdb brings up a temporary server (local socket) to run init, then restarts to

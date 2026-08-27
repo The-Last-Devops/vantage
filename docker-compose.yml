@@ -1,12 +1,15 @@
 services:
   db:
-    image: timescale/timescaledb:latest-pg18
+    # Pinned to match deploy/chart/values.yaml and every scripts/check-*.sh — dev,
+    # CI and production must run the same major. A moving `latest-pg*` tag can hand
+    # you a new PG major that refuses to start on an existing data dir.
+    image: timescale/timescaledb:2.17.2-pg16
     environment:
       POSTGRES_USER: vantage
       POSTGRES_PASSWORD: vantage
       POSTGRES_DB: vantage_config
-      # Postgres 18 moved the image's default data dir; init into an explicit
-      # subdir of our mount so the entrypoint doesn't trip over the mount root.
+      # Init into an explicit subdir of the mount so the entrypoint never trips
+      # over the mount root itself.
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - db_data:/var/lib/postgresql/data
