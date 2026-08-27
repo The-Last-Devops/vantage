@@ -7,6 +7,30 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.0.17] — 2026-08-27
+
+### Changed
+- **Percentage charts now scale 0-100 instead of auto-fitting the data.** Only the
+  time axis was configured, so the value axis silently rescaled itself to whatever
+  the data happened to span. A host idling between 12% and 18% had that six-point
+  band stretched over the full panel height and read as violent swings, and two
+  hosts side by side were drawn against different implicit scales, so their charts
+  could not be compared by eye. CPU, memory, disk, swap and disk-utilisation panels
+  — on a system, across the fleet, and for containers — now share one fixed 0-100
+  axis. Charts without a natural ceiling (latency, memory in bytes, network
+  throughput, cluster CPU cores) still fit themselves to the data.
+
+### Fixed
+- **Local development ran a different PostgreSQL major than production.** The v3.0.0
+  release pinned the Helm chart to TimescaleDB 2.17.2-pg16 so that a moving
+  `latest-pg*` tag could never hand a running cluster a new major that refuses to
+  start on its existing data directory — but `docker-compose.yml` and three of the
+  check scripts were missed and stayed on PostgreSQL 18. Everything is pinned to the
+  same image now. **If you run the local Docker stack**, its volume holds a
+  PostgreSQL 18 data directory that PostgreSQL 16 will not open: run
+  `docker compose down -v` before starting it again. Deployments are unaffected —
+  the chart already used the pinned image.
+
 ## [3.0.16] — 2026-08-26
 
 ### Added
