@@ -249,6 +249,15 @@ docker compose up -d
   is the usual cause of a full disk. The script runs `cargo clean` + prunes Docker **build cache**
   (never volumes/DB) + removes stray release tarballs. Safe to run anytime (build output is
   regenerated). For unattended machines, add the weekly cron shown in the script's header.
+- **Keep only the latest build's cache — sweep `target/` after every build, unprompted.**
+  Wrap the build in `cargo sweep --stamp` … `cargo sweep --file`: the stamp records the
+  moment, the build touches what it needs, and `--file` deletes every artifact the build
+  did not touch. Do this on your own after building; the user should never have to ask.
+  Do NOT use `cargo clean` for this — it drops the dependency cache too and the next build
+  starts from scratch. When you run several configurations in a row (debug + release,
+  `clippy --all-targets`), stamp before the **whole sequence** and sweep after it, or the
+  sweep throws away the other configuration's cache. `scripts/disk-cleanup.sh` stays the
+  bigger hammer for when the disk is actually full.
 - **Release: bump the version in four places and prove it with
   `bash scripts/check-version-sync.sh`.** `Cargo.toml`, `Cargo.lock` (three workspace
   members), `deploy/chart/Chart.yaml` (`version` *and* `appVersion`), plus a CHANGELOG

@@ -10,3 +10,4 @@ tooling/
 # to exist at checkout time — real builds go through Dockerfile.hub, which builds the
 # frontend and copies dist in.
 /frontend/dist/
+sweep.timestamp
