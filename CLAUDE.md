@@ -85,6 +85,28 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   `CurrentUser` extractor accepts cookie *or* PAT, so a PAT acts AS its user and inherits that
   user's RBAC — scope a token by issuing it to a limited service-account user. PATs live in
   `api_pats` (sha256-hashed, revocable), distinct from agent enrollment keys (`api_keys`).
+- **KHÔNG THAY ĐỔI NÀO XONG CHO TỚI KHI MCP THEO KỊP** (chủ dự án chốt 23.09.2026). Áp cho
+  **mọi** thay đổi, không riêng tính năng mới: thêm endpoint, đổi tên trường, nới một tập
+  giá trị hợp lệ, đổi luật nghiệp vụ, bỏ một tuỳ chọn — tất cả. Hub nay được điều khiển bởi
+  trợ lý AI ngang với bởi web UI, và **một thay đổi mà MCP không theo kịp thì tệ hơn không
+  làm gì**: schema cũ nói sai về hệ thống, trợ lý tin schema, rồi thất bại theo kiểu khó đoán.
+  `api_request` khiến endpoint mới *gọi được* ngay hôm nó ra đời — phần đó miễn phí — nhưng
+  gọi được không phải là dùng được: trợ lý chọn tool bằng schema và không bao giờ đọc repo này.
+  Với mỗi thay đổi:
+  1. mọi route mới/đổi phải có trong `ENDPOINTS` (có test chặn);
+  2. thêm/sửa tool curated trong `curated()` + `tool_defs()` — một tool cho một VIỆC người ta
+     thật sự nhờ, không phải một tool cho mỗi URL;
+  3. **mọi tập giá trị đóng phải nằm trong schema** (`enum`, hoặc dạng chính xác trong
+     `description`). Trường nào có giá trị hợp lệ chỉ tồn tại trong handler là trường trợ lý
+     sẽ đoán sai, mà hub thì từ chối cái đoán đó. **Nới tập giá trị mà quên schema cũng là
+     lỗi** — trợ lý sẽ không bao giờ dùng giá trị mới;
+  4. đổi/thêm KHÁI NIỆM (chứ không chỉ thêm lời gọi) thì sửa `INSTRUCTIONS` — đó là chỗ duy
+     nhất nói các đối tượng LÀ GÌ và phải dựng theo thứ tự nào;
+  5. bỏ/đổi tên thứ gì thì gỡ luôn tool và mô tả trỏ tới nó — mô tả trỏ vào thứ không còn
+     tồn tại thì không có test nào đỏ, y như luật `RulesDialog.vue` ở dự án khác;
+  6. mở rộng `scripts/check-mcp.sh`.
+  Bỏ bước 3 và 4 chính là cách `kind`, `condition` và `config` của channel ra đời với mô tả
+  "…" và phải vá lại ở 3.1.1.
 - **MCP server is embedded in the hub** at `POST /mcp` (JSON-RPC 2.0, PAT-authed) — see `mcp.rs`.
   Tools run with the caller's RBAC: reads scoped to their workspaces, writes via `require_role`.
   **Two layers.** `api_request` dispatches any method+path into the hub's *own router
