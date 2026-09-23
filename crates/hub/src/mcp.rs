@@ -122,6 +122,48 @@ workspace and are recorded in the audit log under the token owner's name, so
 prefer changing one thing and checking the result over batching blind.
 ";
 
+/// GET /mcp — a self-check you can open in a browser.
+///
+/// The endpoint only speaks POST, so a browser used to get a bare `405` with an
+/// empty body — which cannot tell apart "the hub is down", "Cloudflare Access
+/// blocked me" and "my token is wrong". Those three failures look identical from
+/// the outside and are fixed in three completely different places, so this answers
+/// them apart:
+///   · a redirect to a login page → Access, the request never reached the hub
+///   · `authenticated: false`     → hub is up, the PAT is missing or invalid
+///   · an email + tool count      → everything works; this is what MCP will see
+///
+/// It stays useful without credentials on purpose (that is the whole point), so it
+/// says nothing an anonymous caller shouldn't see until it knows who is asking.
+pub async fn info(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let user = crate::auth::current_user_opt(&state, &headers).await;
+    let mut body = json!({
+        "server": "vantage",
+        "transport": "streamable-http",
+        "protocolVersion": PROTOCOL,
+        "method": "POST this URL with JSON-RPC 2.0",
+        "authentication": "Authorization: Bearer <personal access token>",
+        "authenticated": user.is_some(),
+    });
+    match &user {
+        Some(u) => {
+            body["version"] = json!(env!("CARGO_PKG_VERSION"));
+            body["identity"] = json!(u.email);
+            body["tools"] = json!(tool_defs().as_array().map(Vec::len).unwrap_or(0));
+            body["ok"] = json!("this token can drive the MCP server");
+        }
+        None => {
+            body["hint"] = json!(concat!(
+                "No valid token on this request. From a browser you are simply not ",
+                "logged in; from a client, check the Authorization header. If you ",
+                "were redirected to a login page instead of seeing this JSON, the ",
+                "block is in front of the hub, not in it."
+            ));
+        }
+    }
+    Json(body).into_response()
+}
+
 fn tool_defs() -> Value {
     let empty = json!({ "type": "object", "properties": {} });
     let mut defs = vec![
@@ -332,7 +374,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/api/events"),
     ("GET|POST", "/api/ssh-keys"),
     ("DELETE", "/api/ssh-keys/{id}"),
-    ("POST", "/mcp"),
+    ("GET|POST", "/mcp"),
 ];
 
 async fn call_tool(

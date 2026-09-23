@@ -155,6 +155,20 @@ PAT to a service-account user with membership only where it belongs.
 
 Methods: `initialize`, `tools/list`, `tools/call`, `ping`.
 
+**Open `<hub>/mcp` in a browser to check it works.** A `GET` answers a small JSON
+self-check, and it deliberately answers without credentials, because the three
+ways this endpoint fails look identical from outside and are fixed in three
+different places:
+
+| What you see | What is wrong | Where to fix it |
+|---|---|---|
+| a login page / redirect | something in front of the hub (e.g. Cloudflare Access) blocked the request — it never arrived | your access gateway |
+| `"authenticated": false` | the hub is up; the token is missing or invalid | the `Authorization` header |
+| `"identity"` + `"tools"` | nothing — this is what an MCP client will see | — |
+
+Anonymous callers get only the server name, transport and protocol; version,
+identity and tool count appear once it knows who is asking.
+
 ### The whole API, in one tool
 
 `api_request` dispatches any `{method, path, body}` into the hub's **own router,

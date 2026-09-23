@@ -118,6 +118,24 @@ printf '%s' "$(mcp '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"nam
   | py "import sys,json;d=json.load(sys.stdin);print('err' if d.get('error') or d['result'].get('isError') else 'no')" | grep -qx err \
   && echo "ok" || { echo "FAIL"; fail=1; }
 
+# GET /mcp is the self-check you can open in a browser. It must answer WITHOUT a
+# token — that is the case it exists for: it separates "hub down" from "blocked in
+# front of the hub" from "bad token", which otherwise look identical.
+say "GET /mcp without a token -> JSON"
+printf '%s' "$(curl -s "$BASE/mcp")" \
+  | py "import sys,json;d=json.load(sys.stdin);print('ok' if d['server']=='vantage' and d['authenticated'] is False else 'no')" \
+  | grep -qx ok && echo "ok" || { echo "FAIL"; fail=1; }
+
+say "GET /mcp anonymous leaks nothing"
+printf '%s' "$(curl -s "$BASE/mcp")" \
+  | py "import sys,json;d=json.load(sys.stdin);print('ok' if 'identity' not in d and 'version' not in d else 'LEAK')" \
+  | grep -qx ok && echo "ok" || { echo "FAIL"; fail=1; }
+
+say "GET /mcp with a token -> identity + tools"
+printf '%s' "$(curl -s -H "Authorization: Bearer $TOKEN" "$BASE/mcp")" \
+  | py "import sys,json;d=json.load(sys.stdin);print('ok' if d['authenticated'] and d.get('identity') and d.get('tools',0)>=25 else 'no')" \
+  | grep -qx ok && echo "ok" || { echo "FAIL"; fail=1; }
+
 say "no auth rejected (401)"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/mcp" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}')" = 401 ] \
   && echo "ok" || { echo "FAIL"; fail=1; }

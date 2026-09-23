@@ -7,6 +7,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.1.2] — 2026-09-23
+
+### Added
+- **Opening `/mcp` in a browser now tells you whether it works.** The endpoint only
+  speaks POST, so a browser got a bare `405` with an empty body — which cannot
+  tell apart a hub that is down, a gateway in front of it refusing the request,
+  and a token the hub rejected. Those three are fixed in three completely
+  different places. A `GET` now answers a small JSON self-check that separates
+  them: a redirect to a login page means the block is in front of the hub;
+  `"authenticated": false` means the hub is up and the token is the problem; an
+  identity and a tool count mean an MCP client will work. It answers without
+  credentials on purpose — that is the case it exists for — and tells an
+  anonymous caller nothing beyond the server name, transport and protocol.
+
 ## [3.1.1] — 2026-09-23
 
 ### Changed

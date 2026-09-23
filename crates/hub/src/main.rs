@@ -155,7 +155,7 @@ async fn main() -> Result<()> {
             post(api::register_finish),
         )
         // admin user provisioning + data management
-        .route("/mcp", post(mcp::handle))
+        .route("/mcp", get(mcp::info).post(mcp::handle))
         .route("/api/pats", get(api::list_pats).post(api::create_pat))
         .route("/api/pats/{id}", delete(api::delete_pat))
         .route("/api/users", get(api::list_users).post(api::create_user))

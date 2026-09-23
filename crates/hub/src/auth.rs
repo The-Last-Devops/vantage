@@ -138,6 +138,29 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
+/// Same resolution as the `CurrentUser` extractor, but answering "who is this, if
+/// anyone" instead of rejecting. For endpoints that must stay useful while
+/// unauthenticated — the MCP self-check, which has to be able to say "the hub is
+/// up, your token is what's wrong".
+pub async fn current_user_opt(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Option<CurrentUser> {
+    let jar = CookieJar::from_headers(headers);
+    if let Some(c) = jar.get(SESSION_COOKIE) {
+        if let Ok(Some(u)) = user_from_session(state, c.value()).await {
+            return Some(u);
+        }
+    }
+    let tok = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+    user_from_pat(state, tok).await.ok().flatten()
+}
+
 async fn user_from_session(
     state: &AppState,
     token: &str,
