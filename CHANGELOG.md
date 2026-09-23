@@ -7,7 +7,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
-## [Unreleased]
+## [3.0.18] — 2026-09-23
 
 ### Added
 - **The MCP server now covers the whole API, so an assistant can actually operate
