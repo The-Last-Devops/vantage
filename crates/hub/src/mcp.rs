@@ -98,7 +98,6 @@ fn tool_defs() -> Value {
         json!({ "name": "list_endpoints", "description":
             "Every HTTP endpoint this hub serves, with the methods it accepts — the map for `api_request`.",
             "inputSchema": empty }),
-
         // ---- reads ------------------------------------------------------------
         json!({ "name": "list_systems", "description": "List monitored hosts with their workspace and online state.", "inputSchema": empty }),
         json!({ "name": "list_services", "description": "List service checks (monitors) with up/down state and workspace.", "inputSchema": empty }),
@@ -127,7 +126,6 @@ fn tool_defs() -> Value {
         json!({ "name": "list_channels", "description": "Notification channels the caller can see.", "inputSchema": empty }),
         json!({ "name": "audit_log", "description": "Recent audited (mutating) API calls — who changed what.", "inputSchema": {
             "type": "object", "properties": { "limit": { "type": "integer", "description": "max entries (default 50)" } } } }),
-
         // ---- writes (each requires editor+ in the target workspace) ------------
         json!({ "name": "run_service_check", "description": "Probe a service immediately and return its result. Requires editor access to its workspace.", "inputSchema": {
             "type": "object", "required": ["monitor_id"], "properties": { "monitor_id": { "type": "string", "description": "the monitor's UUID (from list_services)" } } } }),
@@ -374,7 +372,12 @@ async fn dispatch(
     let status = resp.status();
     let bytes = axum::body::to_bytes(resp.into_body(), MAX_BODY)
         .await
-        .map_err(|_| format!("response larger than {} KB — narrow the range or add a limit", MAX_BODY / 1024))?;
+        .map_err(|_| {
+            format!(
+                "response larger than {} KB — narrow the range or add a limit",
+                MAX_BODY / 1024
+            )
+        })?;
     let body = if bytes.is_empty() {
         Value::Null
     } else {
@@ -477,16 +480,14 @@ fn curated(name: &str, args: &Value) -> Option<Result<Call, String>> {
         "audit_log" => get(format!("/api/audit?limit={}", limit_arg(args, 50))),
         "system_metrics" => uuid_arg(args, "system_id").and_then(|id| {
             let range = args.get("range").and_then(Value::as_str).unwrap_or("1h");
-            if !range
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric())
-            {
+            if !range.chars().all(|c| c.is_ascii_alphanumeric()) {
                 return Err("range must be something like 1h, 24h or 7d".to_string());
             }
             get(format!("/api/systems/{id}/metrics?range={range}"))
         }),
-        "system_containers" => uuid_arg(args, "system_id")
-            .and_then(|id| get(format!("/api/systems/{id}/containers"))),
+        "system_containers" => {
+            uuid_arg(args, "system_id").and_then(|id| get(format!("/api/systems/{id}/containers")))
+        }
         "get_service" => {
             uuid_arg(args, "monitor_id").and_then(|id| get(format!("/api/monitors/{id}")))
         }
@@ -893,7 +894,11 @@ mod tests {
             let err = check_path(path).unwrap_err();
             assert!(err.contains(want), "path {path} gave: {err}");
         }
-        for path in ["/api/systems", "/api/systems/x/console/ticket", "/pub/ingest"] {
+        for path in [
+            "/api/systems",
+            "/api/systems/x/console/ticket",
+            "/pub/ingest",
+        ] {
             assert!(check_path(path).is_ok(), "{path} should be allowed");
         }
     }
