@@ -7,6 +7,29 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.1.1] — 2026-09-23
+
+### Changed
+- **The MCP server now tells an assistant what the objects are, not just what the
+  calls take.** Three fields carried closed sets of values that lived only in the
+  server: a check's `kind` was described as "http | tcp | ping | …", an alert
+  rule's `condition` as "threshold condition", and a channel's `config` as "call
+  the API first". An assistant reads the schema and nothing else, so each of
+  those was a field it had to guess at — and the hub rejects anything outside the
+  set. All three are spelled out now (twelve check kinds, seventeen channel
+  providers, and the metric/operator names a threshold accepts), and a test
+  compares them against what the handlers actually allow.
+- **An orientation is handed over when a client connects** (MCP's `initialize`
+  instructions): what a workspace, system, service, channel and alert rule are,
+  and the order they have to be built in — an alert rule needs its channels to
+  exist first. A flat list of thirty tools cannot carry that, and without it an
+  assistant's first attempt at wiring up an alert tends to fail on the ordering.
+
+### Added
+- **`channel_types` tool** — the notification providers this hub supports and the
+  `config` fields each one needs. Guessing them produces a channel that saves
+  cleanly and then silently never delivers.
+
 ## [3.1.0] — 2026-09-23
 
 ### Added

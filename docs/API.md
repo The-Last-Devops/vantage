@@ -171,6 +171,36 @@ console, the agent tunnel — cannot be driven this way.
 | `api_request` | as the PAT's user | `method`, `path`, `body?` |
 | `list_endpoints` | read | — |
 
+### What the objects are
+
+The hub hands an assistant a short orientation in the `initialize` response
+(MCP's `instructions`), because a flat list of 30 tools does not say what the
+things are or what order they go in:
+
+    workspace  — the tenant boundary; everything belongs to one
+    system     — a monitored host, pushing metrics from its agent
+    service    — an outbound check the hub runs (called a `monitor` in URLs)
+    channel    — where a notification goes; shared across workspaces
+    alert rule — a condition on a system or service + the channels to notify;
+                 its channels must exist first
+
+Two shapes of rule. On a **service**, omit `condition` — it fires when the check
+goes down. On a **host**, pass a threshold:
+
+```json
+{"metric": "cpu_percent", "op": ">", "value": 90}
+```
+
+`metric` is `cpu_percent` | `mem_percent` | `load1`; `op` is `>` `>=` `<` `<=`.
+
+Service `kind` is one of `http` `tcp` `ping` `keyword` `postgres` `redis` `dns`
+`rabbitmq` `mysql` `mongodb` `tls` `push`. All but `push` need a `target`
+(`push` is passive — the hub generates a URL and waits to be pinged).
+
+Channel `kind` is one of 17 providers, each with **different** `config` fields —
+call `channel_types` for them rather than guessing, since a wrong config yields a
+channel that silently never delivers. `test_channel` proves one works.
+
 ### Curated tools
 
 Named front doors onto single endpoints, with a real input schema so an
@@ -181,6 +211,7 @@ same dispatch, so a tool cannot drift from its endpoint.
 |---|---|---|
 | `list_systems` · `list_services` · `alerts_firing` | read | — |
 | `list_workspaces` · `list_channels` · `fleet` · `kube_summaries` | read | — |
+| `channel_types` | read | — |
 | `recent_events` · `audit_log` | read | `limit?` |
 | `system_metrics` | read | `system_id`, `range?` |
 | `system_containers` | read | `system_id` |

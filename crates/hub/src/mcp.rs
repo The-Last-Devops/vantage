@@ -66,6 +66,7 @@ pub async fn handle(
                 "protocolVersion": pv,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "vantage", "version": env!("CARGO_PKG_VERSION") },
+                "instructions": INSTRUCTIONS,
             }))
         }
         "ping" => Ok(json!({})),
@@ -82,6 +83,44 @@ pub async fn handle(
     };
     Json(body).into_response()
 }
+
+/// Orientation handed to the assistant at `initialize`. Per-tool schemas say what
+/// each call takes; this says what the things ARE and what order they go in —
+/// which is what an assistant cannot infer from a flat list of 30 tools. Keep it
+/// short: it is prepended to the model's context on every session.
+const INSTRUCTIONS: &str = "\
+Vantage watches hosts and services, and alerts when something breaks.
+
+The model, in the order you have to build it:
+  workspace  — the tenant boundary. Everything belongs to one. `list_workspaces`.
+  system     — a monitored host; an agent on it pushes metrics. `list_systems`.
+  service    — an outbound check the hub runs (http, tcp, ping, database…).
+               Called a `monitor` in the API and in URLs.
+  channel    — where a notification goes (Slack, Telegram, email…). Shared: a
+               rule in one workspace may use a channel from another.
+  alert rule — a condition on a system or a service, plus the channels to notify.
+               A rule needs its channels to exist FIRST (`channel_ids`).
+
+Reading the fleet: `list_systems` / `list_services` for state, `alerts_firing`
+for what is broken now, `recent_events` for what broke recently, and
+`system_metrics` (never `list_systems`) for a host's CPU/memory over time.
+`service_heartbeats` is the probe history behind one check's up/down.
+
+Two kinds of alert rule. On a SERVICE, omit `condition` — the rule fires when the
+check goes down. On a HOST, pass a threshold:
+{\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}; metric is
+cpu_percent, mem_percent or load1.
+
+Before `create_channel`, call `channel_types` for that provider's `config`
+fields — they differ per provider and guessing produces a channel that silently
+never delivers. `test_channel` proves it works.
+
+Anything with no tool of its own — users, members, API keys, thresholds, status
+pages, backups, Kubernetes series — is reachable with `api_request`; call
+`list_endpoints` for the map. Writes require editor rights in the target
+workspace and are recorded in the audit log under the token owner's name, so
+prefer changing one thing and checking the result over batching blind.
+";
 
 fn tool_defs() -> Value {
     let empty = json!({ "type": "object", "properties": {} });
@@ -136,8 +175,9 @@ fn tool_defs() -> Value {
             "type": "object", "required": ["workspace_id", "name", "kind", "target"], "properties": {
                 "workspace_id": { "type": "string" },
                 "name": { "type": "string" },
-                "kind": { "type": "string", "description": "http | tcp | ping | keyword | … (see an existing check for the set this build accepts)" },
-                "target": { "type": "string", "description": "URL for http/keyword, host:port for tcp, host for ping" },
+                "kind": { "type": "string", "enum": ["http","tcp","ping","keyword","postgres","redis","dns","rabbitmq","mysql","mongodb","tls","push"],
+                    "description": "what to probe. `push` is the passive kind: the hub generates a URL and waits to be pinged." },
+                "target": { "type": "string", "description": "URL for http/keyword/tls, host:port for tcp and the database kinds, hostname for ping/dns. Leave empty for `push` — it has no target." },
                 "interval_secs": { "type": "integer" },
                 "config": { "type": "object", "description": "kind-specific settings (keyword, expected status, timeout…)" } } } }),
         json!({ "name": "update_service", "description": "Edit a service check (any subset of fields).", "inputSchema": {
@@ -155,7 +195,10 @@ fn tool_defs() -> Value {
                 "system_id": { "type": "string", "description": "target one host" },
                 "scope_kind": { "type": "string", "enum": ["all_services", "all_hosts"], "description": "workspace-wide instead of a single target" },
                 "channel_ids": { "type": "array", "items": { "type": "string" }, "description": "channels to notify (from list_channels)" },
-                "condition": { "type": "object", "description": "threshold condition; omit for plain down/up" },
+                "condition": { "type": "object", "description":
+                    "Metric threshold, e.g. {\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}. \
+                     metric: cpu_percent | mem_percent | load1 (host rules only); op: > >= < <=. \
+                     Omit entirely for a plain down/up rule — that is the right choice for a service check." },
                 "cooldown_secs": { "type": "integer" },
                 "renotify_secs": { "type": "integer", "description": "re-notify cadence while firing; omit for off" } } } }),
         json!({ "name": "update_alert_rule", "description": "Edit an alert rule (any subset: enabled, condition, channels, cooldown, target).", "inputSchema": {
@@ -171,10 +214,14 @@ fn tool_defs() -> Value {
             "type": "object", "required": ["alert_id"], "properties": { "alert_id": { "type": "string" } } } }),
         json!({ "name": "test_alert_rule", "description": "Send the rule's own notification (DOWN then UP) to its channels, without changing state.", "inputSchema": {
             "type": "object", "required": ["alert_id"], "properties": { "alert_id": { "type": "string" } } } }),
-        json!({ "name": "create_channel", "description": "Add a notification channel to a workspace. Call `api_request` on GET /api/channel-types first for the kinds and their config fields.", "inputSchema": {
+        json!({ "name": "create_channel", "description":
+            "Add a notification channel to a workspace. Each kind takes different `config` fields — call `channel_types` first to get them, do not guess.", "inputSchema": {
             "type": "object", "required": ["workspace_id", "name", "kind"], "properties": {
                 "workspace_id": { "type": "string" }, "name": { "type": "string" },
-                "kind": { "type": "string" }, "config": { "type": "object" } } } }),
+                "kind": { "type": "string", "enum": ["webhook","apprise","telegram","slack","discord","mattermost","teams","gchat","matrix","ntfy","pushover","gotify","bark","pagerduty","opsgenie","twilio","email"] },
+                "config": { "type": "object", "description": "kind-specific, from `channel_types` (e.g. slack → {url}; telegram → {bot_token, chat_id})" } } } }),
+        json!({ "name": "channel_types", "description":
+            "The notification providers this hub supports and the `config` fields each one needs. Call before `create_channel`.", "inputSchema": empty }),
         json!({ "name": "test_channel", "description": "Send a test notification through a saved channel.", "inputSchema": {
             "type": "object", "required": ["channel_id"], "properties": { "channel_id": { "type": "string" } } } }),
         json!({ "name": "delete_channel", "description": "Delete a notification channel.", "inputSchema": {
@@ -477,6 +524,7 @@ fn curated(name: &str, args: &Value) -> Option<Result<Call, String>> {
         "fleet" => get("/api/fleet".into()),
         "kube_summaries" => get("/api/kube/summaries".into()),
         "list_channels" => get("/api/channels".into()),
+        "channel_types" => get("/api/channel-types".into()),
         "audit_log" => get(format!("/api/audit?limit={}", limit_arg(args, 50))),
         "system_metrics" => uuid_arg(args, "system_id").and_then(|id| {
             let range = args.get("range").and_then(Value::as_str).unwrap_or("1h");
@@ -880,6 +928,83 @@ mod tests {
         for n in ["create_service", "delete_channel", "system_metrics"] {
             assert!(names.contains(&n), "`{n}` dropped out of tool_defs");
         }
+    }
+
+    /// An assistant only ever sees the schema, so a field whose legal values live
+    /// in the handler and not in the schema is a field it will guess wrong. These
+    /// three were exactly that — `kind` said "…", `condition` said "threshold
+    /// condition", `create_channel` said "call the API first" — and each one is a
+    /// closed set the hub rejects anything outside of.
+    #[test]
+    fn closed_value_sets_are_spelled_out_in_the_schema() {
+        let defs = tool_defs();
+        let by_name = |n: &str| {
+            defs.as_array()
+                .unwrap()
+                .iter()
+                .find(|d| d["name"] == n)
+                .unwrap()
+                .clone()
+        };
+        let kinds = by_name("create_service")["inputSchema"]["properties"]["kind"]["enum"].clone();
+        // Every kind main's create_monitor accepts, none it doesn't.
+        let src = include_str!("api/monitors.rs");
+        let allowed: Vec<&str> = src
+            .split("req.kind.as_str(),")
+            .nth(1)
+            .unwrap()
+            .split(") {")
+            .next()
+            .unwrap()
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .collect();
+        assert!(allowed.len() >= 10, "parsed too few kinds: {allowed:?}");
+        for k in &allowed {
+            assert!(
+                kinds.as_array().unwrap().iter().any(|v| v == k),
+                "service kind `{k}` is accepted by the API but missing from the schema"
+            );
+        }
+
+        // The threshold condition must name its metrics and operators.
+        let cond = by_name("create_alert_rule")["inputSchema"]["properties"]["condition"]
+            ["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        for want in ["cpu_percent", "mem_percent", "load1", "op"] {
+            assert!(cond.contains(want), "condition description omits `{want}`");
+        }
+
+        // Channel kinds are a closed set too, and `channel_types` is how an
+        // assistant learns each one's config fields.
+        let ch = by_name("create_channel")["inputSchema"]["properties"]["kind"]["enum"].clone();
+        assert!(
+            ch.as_array().unwrap().len() >= 15,
+            "channel kinds look thin"
+        );
+        assert!(curated("channel_types", &json!({})).is_some());
+    }
+
+    /// The initialize instructions are the only place that says what the objects
+    /// ARE and what order they go in. A flat tool list cannot carry that.
+    #[test]
+    fn initialize_instructions_orient_the_assistant() {
+        for want in [
+            "workspace",
+            "channel",
+            "alert rule",
+            "api_request",
+            "audit log",
+        ] {
+            assert!(
+                INSTRUCTIONS.contains(want),
+                "instructions no longer mention `{want}`"
+            );
+        }
+        assert!(INSTRUCTIONS.len() < 2500, "instructions are getting long");
     }
 
     /// `api_request` must not become a way to read the SPA shell or re-enter
