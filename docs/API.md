@@ -63,7 +63,15 @@ writes require `editor`+ in the target's workspace.
 | GET | `/api/fleet` | fleet-wide overview |
 | PATCH | `/api/systems/{id}` | rename (editor+) |
 | DELETE | `/api/systems/{id}` | remove (editor+) |
-| GET/POST | `/api/thresholds` | per-workspace alert thresholds |
+| GET | `/api/thresholds` | alert thresholds for every workspace you can see |
+| PUT | `/api/workspaces/{id}/thresholds` | set that workspace's thresholds (editor+) |
+| GET/PUT | `/api/systems/{id}/shell` | per-host shell/exec config (see docs/exec-design.md) |
+| POST | `/api/systems/{id}/console/ticket` | mint a short-lived step-up ticket for the console |
+| GET | `/api/systems/{id}/console` | console **WebSocket** (not reachable over MCP) |
+| GET | `/api/systems/{id}/alerts` | rules targeting this host |
+| GET/POST | `/api/ssh-keys` · DELETE `/api/ssh-keys/{id}` | your account's SSH key library |
+| GET | `/api/kube/summaries` | Kubernetes clusters reporting in |
+| GET | `/api/systems/{id}/kube/summary` · `/aggregate` · `/containers` · `/series` · `/series-by` | per-cluster views |
 
 ### Services (monitors)
 | Method | Path | Notes |
@@ -71,14 +79,16 @@ writes require `editor`+ in the target's workspace.
 | GET | `/api/monitors` | all service checks you can see, with up/down |
 | POST | `/api/workspaces/{id}/monitors` | create (editor+); probed immediately |
 | PATCH/DELETE | `/api/monitors/{id}` | edit / delete (editor+) |
-| GET | `/api/monitors/{id}/debug` · `/events` | last request/response · status history |
+| GET | `/api/monitors/{id}` | one check in full (config, state, uptime) |
+| GET | `/api/monitors/{id}/debug` · `/events` · `/heartbeats` | last request/response · status history · raw probe results |
+| GET | `/api/monitors/{id}/alerts` | rules targeting this check |
 
 ### Alerts
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/workspaces/{id}/alerts` | rules whose target is in this workspace |
 | POST | `/api/workspaces/{id}/alerts` | create rule (editor+); `channel_ids` may be any channel |
-| PATCH/DELETE | `/api/alerts/{id}` | edit / delete (editor+) |
+| GET/PATCH/DELETE | `/api/alerts/{id}` | read / edit / delete (editor+) |
 | POST | `/api/alerts/{id}/test` | send a test through the rule's channels |
 | GET | `/api/workspaces/{id}/alert-events` | fire/recover history |
 | GET | `/api/events` | recent service status changes |
@@ -101,6 +111,14 @@ writes require `editor`+ in the target's workspace.
 | GET/POST/DELETE | `/api/workspaces/{id}/members` | membership + role |
 | GET/POST | `/api/users` · PATCH/DELETE `/api/users/{id}` | accounts (admin) |
 | GET | `/api/users/{id}/memberships` | a user's per-workspace roles |
+| DELETE | `/api/workspaces/{id}/members/{user_id}` | remove a member (owner+) |
+| PUT | `/api/workspaces/{id}/members/{user_id}/exec` | grant/revoke shell access for a member |
+| GET | `/api/workspaces/{id}/member-candidates` | users who could be added |
+| GET/POST | `/api/workspaces/{id}/keys` · DELETE `/api/keys/{id}` | agent enrollment keys |
+| GET | `/api/keys/{id}/systems` | hosts enrolled with a key |
+| POST | `/api/workspaces/{id}/status-pages` · DELETE `/api/status-pages/{id}` | public status pages |
+| GET/POST | `/api/me/2fa*` · `/api/me/passkeys*` · POST `/api/me/password` | your own account security |
+| GET | `/api/about` | version + release notes |
 | GET | `/api/audit` | action log (admin); filters `?q=&method=&status=ok\|client\|server&limit=&offset=`, returns `{rows, total, retention_days}` |
 | PUT | `/api/admin/audit/retention` | `{days}` — keep window for the audit log; `null`/0 = forever (admin) |
 
@@ -108,7 +126,16 @@ writes require `editor`+ in the target's workspace.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/admin/data` · POST `/api/admin/retention` | retention tiers |
+| POST | `/api/admin/data-cap` · `/api/admin/data-cap/enforce` | data-DB size cap + manual eviction |
+| POST | `/api/admin/config-retention` | config-DB log retention |
+| GET/POST | `/api/admin/ingest-intervals` | agent push cadence |
+| GET | `/api/admin/logs` | the hub's in-memory log ring |
+| POST | `/api/admin/exposure-check` | public-exposure self-check |
 | GET/POST | `/api/admin/backup*` | download/restore + S3 (secrets redacted on read) |
+
+The full, always-current list is the `list_endpoints` MCP tool — it is asserted
+against the router in `crates/hub/src/mcp.rs`, so it cannot drift the way this
+hand-written table can.
 
 ### Public (no session)
 | Method | Path | Notes |
@@ -121,18 +148,56 @@ writes require `editor`+ in the target's workspace.
 ## MCP server
 
 `POST /mcp` speaks **JSON-RPC 2.0** (MCP). Authenticate with a PAT
-(`Authorization: Bearer <pat>`); tools run with that user's RBAC.
+(`Authorization: Bearer <pat>`); every tool runs with that user's RBAC — reads
+scoped to their workspaces, writes requiring `editor` there. There is no
+separate permission layer for MCP: to limit what an assistant can do, issue its
+PAT to a service-account user with membership only where it belongs.
 
 Methods: `initialize`, `tools/list`, `tools/call`, `ping`.
 
+### The whole API, in one tool
+
+`api_request` dispatches any `{method, path, body}` into the hub's **own router,
+in-process** — the same handlers, the same `require_role`, the same audit trail,
+with no network hop. So every endpoint above is reachable from an MCP client the
+day it is added, and `list_endpoints` returns the route map to go with it.
+
+Only `/api/**` and `/pub/**` are addressable (anything else would hit the SPA
+fallback and answer `index.html` with a 200), and WebSocket routes — the host
+console, the agent tunnel — cannot be driven this way.
+
 | Tool | Access | Args |
 |---|---|---|
-| `list_systems` | read | — |
-| `list_services` | read | — |
-| `alerts_firing` | read | — |
-| `recent_events` | read | `limit?` |
+| `api_request` | as the PAT's user | `method`, `path`, `body?` |
+| `list_endpoints` | read | — |
+
+### Curated tools
+
+Named front doors onto single endpoints, with a real input schema so an
+assistant picks them without reading this page. Each is a thin wrapper over the
+same dispatch, so a tool cannot drift from its endpoint.
+
+| Tool | Access | Args |
+|---|---|---|
+| `list_systems` · `list_services` · `alerts_firing` | read | — |
+| `list_workspaces` · `list_channels` · `fleet` · `kube_summaries` | read | — |
+| `recent_events` · `audit_log` | read | `limit?` |
+| `system_metrics` | read | `system_id`, `range?` |
+| `system_containers` | read | `system_id` |
+| `get_service` | read | `monitor_id` |
+| `service_heartbeats` | read | `monitor_id`, `limit?` |
+| `list_alert_rules` | read | `workspace_id` |
+| `get_alert_rule` | read | `alert_id` |
 | `run_service_check` | editor of target ws | `monitor_id` |
-| `toggle_alert_rule` | editor of target ws | `alert_id`, `enabled` |
+| `create_service` | editor | `workspace_id`, `name`, `kind`, `target`, `interval_secs?`, `config?` |
+| `update_service` | editor | `monitor_id` + any of `name`, `target`, `interval_secs`, `enabled`, `config` |
+| `delete_service` | editor | `monitor_id` |
+| `create_alert_rule` | editor | `workspace_id`, `channel_ids` + a target (`monitor_id` / `system_id` / `scope_kind`) |
+| `update_alert_rule` | editor | `alert_id` + any rule field |
+| `toggle_alert_rule` | editor | `alert_id`, `enabled` |
+| `delete_alert_rule` · `test_alert_rule` | editor | `alert_id` |
+| `create_channel` | editor | `workspace_id`, `name`, `kind`, `config?` |
+| `test_channel` · `delete_channel` | editor | `channel_id` |
 
 ```bash
 # list available tools
@@ -140,11 +205,19 @@ curl -s -X POST https://vantage.example.com/mcp \
   -H "Authorization: Bearer $LM_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
-# call a tool
+# call a curated tool
 curl -s -X POST https://vantage.example.com/mcp \
   -H "Authorization: Bearer $LM_TOKEN" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"alerts_firing","arguments":{}}}'
+
+# reach an endpoint that has no curated tool
+curl -s -X POST https://vantage.example.com/mcp \
+  -H "Authorization: Bearer $LM_TOKEN" -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"api_request",
+       "arguments":{"method":"GET","path":"/api/systems/<uuid>/kube/summary"}}}'
 ```
 
 To connect an MCP client (e.g. Claude), point it at `<hub>/mcp` as a *streamable HTTP* MCP
 server and set the `Authorization: Bearer <pat>` header.
+
+`bash scripts/check-mcp.sh` smoke-tests all of this against a running hub.

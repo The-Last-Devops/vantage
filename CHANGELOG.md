@@ -7,6 +7,36 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [Unreleased]
+
+### Added
+- **The MCP server now covers the whole API, so an assistant can actually operate
+  the hub.** It shipped with six tools against ninety-odd endpoints: an assistant
+  could list hosts and services, but not read a host's metrics, create a check, or
+  wire up an alert — the things you would ask it to do. Alongside the curated tools
+  (now twenty-nine, each with a proper input schema) there is `api_request`, which
+  dispatches any method and path into the hub's own router in-process: the same
+  handlers, the same permission checks, the same audit trail, with no network hop.
+  Every endpoint is reachable from an MCP client, including ones added later, and
+  `list_endpoints` returns the route map to go with it. Permissions are unchanged —
+  a token still acts as its owner, so scope an assistant by issuing its token to a
+  service account with membership only where it belongs.
+- **New curated MCP tools** for the everyday jobs: host metrics and containers,
+  Kubernetes summaries, a service's full detail and its raw probe history, alert
+  rules and channels, the audit log, and create / edit / delete for service checks,
+  alert rules and notification channels.
+
+### Fixed
+- **Writes made with an API token were missing from the audit log.** The log
+  resolved who was calling from the session cookie only, so anything driven by a
+  personal access token — your own scripts, and everything an AI assistant does —
+  changed the system without leaving a trace, while the same change made in the UI
+  was recorded. Both paths are recorded now, under the token owner's name.
+
+### Documentation
+- `docs/API.md` listed 42 of the hub's 98 routes; the endpoint tables and the MCP
+  section have been brought up to date.
+
 ## [3.0.17] — 2026-08-27
 
 ### Changed

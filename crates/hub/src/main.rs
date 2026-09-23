@@ -62,6 +62,11 @@ pub struct AppState {
     /// Cached hub-decided push intervals (host, kube) so ingest doesn't hit the DB
     /// per push at a fast cadence. See `ingest::IntervalCache`.
     pub intervals: std::sync::Arc<ingest::IntervalCache>,
+    /// The built router, so the MCP server can re-enter the API in-process
+    /// (`mcp::api_request`) instead of looping back over HTTP. Set once, right
+    /// after the router is built — every handler holds a clone of the same
+    /// `Arc`, so filling it here fills it everywhere. See `mcp.rs`.
+    pub router: std::sync::Arc<std::sync::OnceLock<axum::Router>>,
 }
 
 /// Readiness probe: OK only when the config DB is reachable.
@@ -326,8 +331,13 @@ async fn main() -> Result<()> {
             state.clone(),
             audit::record,
         ))
-        .with_state(state)
+        .with_state(state.clone())
         .layer(TraceLayer::new_for_http());
+
+    // Hand the finished router back to the state every handler already holds, so
+    // MCP's `api_request` can dispatch into the very same stack (same handlers,
+    // same RBAC, same audit middleware) without a network round-trip.
+    let _ = state.router.set(app.clone());
 
     let addr: SocketAddr = std::env::var("BIND_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:8080".into())

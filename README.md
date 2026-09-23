@@ -75,7 +75,10 @@ CPU / memory / disk / disk-I/O), with per-workspace thresholds.
 
 **API & automation** — a token-authed JSON API (**personal access tokens** under Settings)
 and an **embedded MCP server** (`POST /mcp`) so AI assistants (Claude, etc.) can read and
-operate the monitor with your RBAC. See [docs/API.md](docs/API.md).
+operate the monitor with your RBAC. The MCP surface covers the **whole** API: curated tools
+for the everyday jobs, plus an `api_request` tool that reaches every endpoint in-process, so
+an assistant can diagnose a host, add a check, or wire up an alert without leaving the chat.
+Every write lands in the audit log under the token's owner. See [docs/API.md](docs/API.md).
 
 **Admin & data** — a human-readable **audit log** (action + affected object), an **About**
 page (version + update check), **data retention** tiers (TimescaleDB continuous aggregates +

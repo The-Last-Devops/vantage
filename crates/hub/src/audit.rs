@@ -59,26 +59,42 @@ async fn object_name(state: &AppState, path: &str) -> Option<String> {
         .and_then(|(n,)| n)
 }
 
-/// Resolve the caller's email from the session cookie (best-effort; None if absent).
-async fn caller_email(state: &AppState, jar: &CookieJar) -> Option<String> {
-    let token = jar.get(SESSION_COOKIE)?.value().to_owned();
-    sqlx::query_as::<_, (String,)>(
-        "SELECT u.email FROM sessions s JOIN users u ON u.id = s.user_id \
-         WHERE s.token = $1 AND s.expires_at > now()",
-    )
-    .bind(&token)
-    .fetch_optional(&state.config)
-    .await
-    .ok()
-    .flatten()
-    .map(|(e,)| e)
+/// Resolve the caller's email (best-effort; None if the request is anonymous).
+///
+/// Both human paths count: the session cookie, and `Authorization: Bearer <pat>`
+/// — a PAT acts AS a user, so its writes are that person's actions. Reading only
+/// the cookie left every token-authed write (scripts, and everything the MCP
+/// server does) out of the audit log entirely, which is precisely the traffic an
+/// admin most needs to be able to review.
+async fn caller_email(state: &AppState, headers: &axum::http::HeaderMap) -> Option<String> {
+    let jar = CookieJar::from_headers(headers);
+    if let Some(c) = jar.get(SESSION_COOKIE) {
+        let found = sqlx::query_as::<_, (String,)>(
+            "SELECT u.email FROM sessions s JOIN users u ON u.id = s.user_id \
+             WHERE s.token = $1 AND s.expires_at > now()",
+        )
+        .bind(c.value())
+        .fetch_optional(&state.config)
+        .await
+        .ok()
+        .flatten()
+        .map(|(e,)| e);
+        if found.is_some() {
+            return found;
+        }
+    }
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))?;
+    crate::auth::email_from_pat(state, bearer).await
 }
 
 /// Middleware: record mutating /api calls after they run.
 pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
-    let jar = CookieJar::from_headers(req.headers());
+    let headers = req.headers().clone();
     let mutating = matches!(method.as_str(), "POST" | "PATCH" | "PUT" | "DELETE");
     // This is a *user* action log. Skip login (would log before a session exists),
     // agent ingest (machine traffic, no session, fires constantly), and non-API paths.
@@ -91,7 +107,7 @@ pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> 
     // name the row it's about to remove.
     let (email, object) = if interesting {
         (
-            caller_email(&state, &jar).await,
+            caller_email(&state, &headers).await,
             object_name(&state, &path).await,
         )
     } else {

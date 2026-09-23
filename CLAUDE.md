@@ -87,7 +87,23 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   `api_pats` (sha256-hashed, revocable), distinct from agent enrollment keys (`api_keys`).
 - **MCP server is embedded in the hub** at `POST /mcp` (JSON-RPC 2.0, PAT-authed) — see `mcp.rs`.
   Tools run with the caller's RBAC: reads scoped to their workspaces, writes via `require_role`.
-  Adding a tool = one arm in `call_tool` + an entry in `tool_defs`; it must enforce RBAC itself.
+  **Two layers.** `api_request` dispatches any method+path into the hub's *own router
+  in-process* (`AppState.router`, filled once in `main.rs` after the router is built), so the
+  whole API is reachable and every new endpoint arrives free — same handlers, same RBAC, same
+  audit middleware, no network hop. Curated tools (`create_service`, `system_metrics`, …) are
+  thin wrappers over that same dispatch, existing only to carry an input schema; adding one is
+  an arm in `curated()` + an entry in `tool_defs`, never a second copy of the endpoint's logic.
+  New route in `main.rs` ⇒ add it to `ENDPOINTS` too, or `endpoint_table_covers_every_route`
+  fails — `list_endpoints` is how an assistant discovers the surface.
+  There is **no deny-list**: a PAT acts as its user, so scope an assistant by issuing its token
+  to a service-account user. Forward the caller's `Authorization`/`Cookie` headers into the
+  dispatched request rather than trusting the resolved `CurrentUser` — that is what makes the
+  handler re-authorize honestly and the audit row land under the right person.
+- **The audit log follows the PAT, not just the cookie.** `audit::caller_email` reads the
+  session cookie *and* `Authorization: Bearer` — it used to read only the cookie, so every
+  token-authed write (scripts, and everything MCP does) was silently missing from the log.
+  That is exactly the traffic an admin most needs to review. `scripts/check-mcp.sh` asserts a
+  write dispatched through MCP shows up in `/api/audit`.
 - **sqlx with runtime queries** (`sqlx::query` / `query_as`), not the compile-time `query!`
   macros, so the workspace builds without a live database / `DATABASE_URL` at compile time.
 

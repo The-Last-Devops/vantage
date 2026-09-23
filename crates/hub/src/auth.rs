@@ -169,6 +169,21 @@ pub fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
+/// Email behind a PAT, for the audit trail — a lookup only, with no `last_used`
+/// stamp and no error path, so logging can never affect authentication.
+pub async fn email_from_pat(state: &AppState, token: &str) -> Option<String> {
+    sqlx::query_as::<_, (String,)>(
+        "SELECT u.email FROM api_pats p JOIN users u ON u.id = p.user_id \
+         WHERE p.token_hash = $1 AND (p.expires_at IS NULL OR p.expires_at > now())",
+    )
+    .bind(token_hash(token))
+    .fetch_optional(&state.config)
+    .await
+    .ok()
+    .flatten()
+    .map(|(e,)| e)
+}
+
 async fn user_from_pat(state: &AppState, token: &str) -> Result<Option<CurrentUser>, StatusCode> {
     let row: Option<(Uuid, String, bool, bool, Uuid)> = sqlx::query_as(
         "SELECT u.id, u.email, u.is_admin, u.read_all, p.id FROM api_pats p \

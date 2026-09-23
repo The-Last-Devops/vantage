@@ -54,6 +54,7 @@ pub async fn connect() -> Result<AppState> {
         passkey: std::sync::Arc::new(crate::passkey::PasskeyState::from_env()),
         login_throttle: std::sync::Arc::new(crate::auth::LoginThrottle::new()),
         intervals: std::sync::Arc::new(crate::ingest::IntervalCache::new()),
+        router: std::sync::Arc::new(std::sync::OnceLock::new()),
     })
 }
 
