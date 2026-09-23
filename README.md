@@ -193,6 +193,33 @@ command also **enables** the secret for the first time on an existing deployment
 > mints a fresh master key and drops that user's stored SSH keys — they re-add them. A user
 > changing **their own** password (with the old one) keeps their keys.
 
+## Connecting an AI assistant (MCP)
+
+The hub is its own MCP server, so an assistant can read the fleet and act on it —
+"why is web-3 unhappy?", "add an HTTP check for status.example.com", "page me on
+Slack if the database host runs out of disk".
+
+1. **Settings → API tokens → New token.** The secret is shown once.
+2. Point the client at `<hub>/mcp` as a *streamable HTTP* MCP server, with the
+   header `Authorization: Bearer <token>`. In Claude Code:
+
+   ```bash
+   claude mcp add --transport http vantage https://vantage.example.com/mcp \
+     --header "Authorization: Bearer $LM_TOKEN"
+   ```
+
+3. Ask it something. `list_endpoints` + `api_request` mean nothing in the API is
+   out of reach, and the curated tools cover the everyday jobs.
+
+**A token acts as the user who created it and inherits that user's RBAC** — there
+is no separate permission model for assistants. To keep one on a short leash,
+make a service-account user, give it membership (and a role) only where it
+belongs, and issue the token as that user; give it `viewer` and it can look but
+not touch. Every write is recorded in the audit log under the token's owner, so
+**Settings → Audit** shows exactly what the assistant did.
+
+See [docs/API.md](docs/API.md) for the full tool list.
+
 ## Adding servers
 
 In the UI: **Add system** → pick Node / Docker / Kubernetes → copy the install snippet. The
@@ -278,7 +305,7 @@ rebuilds. The hub serves the built SPA at **:8080**.
 
 Service monitors (12 types), **multi-channel alerting** + events feed, the audit log,
 TimescaleDB rollups + tunable retention, **backup/restore (S3, scheduled)**, and a
-**token-authed API + embedded MCP server** are all **shipped**. Planned next: **web
+**token-authed API + a full-coverage MCP server** are all **shipped**. Planned next: **web
 SSH/terminal** into hosts and an **adaptive report interval** (realtime only while a host
 is being viewed). See [docs/ROADMAP.md](docs/ROADMAP.md).
 
