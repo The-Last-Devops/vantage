@@ -150,6 +150,22 @@ required — the defaults give a working single-node hub with bundled databases.
 | `timescaledb.dataStorage` | `25Gi` | Data DB volume size. Keep it above the app storage cap (default 20 GiB) — see *Resizing the DB volume*. |
 | `timescaledb.resources` | `100m/256Mi req, 1Gi limit` | Per-DB pod resources. |
 
+**What actually fills the data volume.** Host metrics are cheap — they downsample to a
+1-hour tier that costs tens of MB per year for dozens of hosts. **Kubernetes is the one
+that scales badly**, because the raw tier stores a row per *container* per scrape: a few
+thousand containers at a 15-second cadence is several GB per day, which will reach any
+cap you set within days. Two knobs, both under *Settings → Data & retention*:
+the **cluster sampling cadence** (60s is the default and is already fine-grained for
+cluster-wide trends) and the **raw k8s retention** (2 days — the 5-minute and hourly
+rollups are what long ranges read from anyway). Charts past 24 hours are served from the
+rollups, so shortening raw costs drill-down detail, not history.
+
+When the cap is reached the hub evicts the oldest chunks of the largest tier, which means
+**it can delete data newer than that tier's configured window**. The *Has* column on that
+page shows how much history each tier really holds — if it reads lower than *Keep for*,
+eviction is the reason, and the fix is to lower a greedy tier's window (or raise the cap
+*and* `timescaledb.dataStorage`), not to raise the window that is being ignored.
+
 **Hub pod**
 | Key | Default | Purpose |
 |---|---|---|

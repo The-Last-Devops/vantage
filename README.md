@@ -81,9 +81,13 @@ an assistant can diagnose a host, add a check, or wire up an alert without leavi
 Every write lands in the audit log under the token's owner. See [docs/API.md](docs/API.md).
 
 **Admin & data** — a human-readable **audit log** (action + affected object), an **About**
-page (version + update check), **data retention** tiers (TimescaleDB continuous aggregates +
-retention policies), and **backup / restore** — download/upload or scheduled to
-S3-compatible storage.
+page (version + update check), **data retention** tiers, and **backup / restore** —
+download/upload or scheduled to S3-compatible storage. Metrics downsample through a
+ladder so a long lookback stays cheap: host samples roll up to 1m / 5m / 15m / 1h, and
+Kubernetes per-container samples to 5m / 1h. Each tier shows both the window it is
+configured to keep **and the age of the oldest row it actually holds** — those two
+diverge whenever the storage cap has had to evict, and a page that only showed the
+intention hid real data loss for weeks.
 
 **Multi-tenant** — workspaces (k8s-style names), workspace-scoped RBAC plus a system
 `admin`, opaque revocable cookie sessions (argon2), and a first-run wizard to create

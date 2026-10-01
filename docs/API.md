@@ -71,7 +71,7 @@ writes require `editor`+ in the target's workspace.
 | GET | `/api/systems/{id}/alerts` | rules targeting this host |
 | GET/POST | `/api/ssh-keys` · DELETE `/api/ssh-keys/{id}` | your account's SSH key library |
 | GET | `/api/kube/summaries` | Kubernetes clusters reporting in |
-| GET | `/api/systems/{id}/kube/summary` · `/aggregate` · `/containers` · `/series` · `/series-by` | per-cluster views |
+| GET | `/api/systems/{id}/kube/summary` · `/aggregate` · `/containers` · `/series` · `/series-by` | per-cluster views. `range` is an allowlist (`1h`, `24h`, `7d`, `30d`) and **selects the storage tier**: up to 24h reads raw per-container rows, `7d` a 5-minute rollup, `30d` and longer an hourly one. The rollups are grouped by namespace / workload / node and carry **no pod labels**, so a label filter (`lk`+`lv`) or `by=label` is answered from raw only — i.e. only inside the raw window. An unknown `range` silently falls back to one hour instead of erroring, so a short-looking answer may just be a bad range. |
 
 ### Services (monitors)
 | Method | Path | Notes |
@@ -125,8 +125,8 @@ writes require `editor`+ in the target's workspace.
 ### Admin: backup & retention
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/admin/data` · POST `/api/admin/retention` | retention tiers |
-| POST | `/api/admin/data-cap` · `/api/admin/data-cap/enforce` | data-DB size cap + manual eviction |
+| GET | `/api/admin/data` · POST `/api/admin/retention` | retention tiers. Each tier reports `value` (the configured window) **and** `oldest_days` (how much history is really stored). They disagree whenever the cap has evicted inside a tier's window — treat `oldest_days` as the truth. |
+| POST | `/api/admin/data-cap` · `/api/admin/data-cap/enforce` | data-DB size cap + manual eviction. Eviction drops the oldest chunks of the largest tier, **skipping the long-horizon tiers** (`system_metrics_1h`, `kube_rollup_1h`, `heartbeats`) until nothing else can give. It can delete data newer than a tier's configured window — that is normal, and why `oldest_days` exists. |
 | POST | `/api/admin/config-retention` | config-DB log retention |
 | GET/POST | `/api/admin/ingest-intervals` | agent push cadence |
 | GET | `/api/admin/logs` | the hub's in-memory log ring |
