@@ -115,6 +115,14 @@ Before `create_channel`, call `channel_types` for that provider's `config`
 fields — they differ per provider and guessing produces a channel that silently
 never delivers. `test_channel` proves it works.
 
+Kubernetes series are tiered by range, so what you can ask for depends on how far
+back you look: up to 24h reads raw per-container rows, 7d reads a 5-minute rollup,
+30d and beyond an hourly one. The rollups are grouped by namespace / workload /
+node and carry no pod labels, so a label filter (`lk`/`lv`) or `by=label` is only
+answered from raw — i.e. only within the raw window. `range` is an allowlist
+(1h, 24h, 7d, 30d); anything else silently falls back to one hour rather than
+erroring, so an empty-looking answer may just be a bad range.
+
 Anything with no tool of its own — users, members, API keys, thresholds, status
 pages, backups, Kubernetes series — is reachable with `api_request`; call
 `list_endpoints` for the map. Writes require editor rights in the target

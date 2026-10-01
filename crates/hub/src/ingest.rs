@@ -261,53 +261,11 @@ pub async fn ingest_kube(
     let system_id = system.0;
     let ts = chrono::DateTime::from_timestamp(report.ts, 0).unwrap_or_else(chrono::Utc::now);
 
-    // Per-namespace tallies.
-    for n in &report.namespaces {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO kube_namespace_stats \
-             (time, system_id, namespace, phase, pods_total, pods_running, pods_pending, pods_failed, pods_succeeded, restarts) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-        )
-        .bind(ts)
-        .bind(system_id)
-        .bind(&n.name)
-        .bind(&n.phase)
-        .bind(n.pods_total as i32)
-        .bind(n.pods_running as i32)
-        .bind(n.pods_pending as i32)
-        .bind(n.pods_failed as i32)
-        .bind(n.pods_succeeded as i32)
-        .bind(n.restarts as i32)
-        .execute(&state.data)
-        .await
-        {
-            tracing::error!(error = %e, "kube namespace insert");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    }
-
-    // Per-deployment replica health.
-    for d in &report.deployments {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO kube_deployment_stats \
-             (time, system_id, namespace, name, desired, ready, available, updated) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-        )
-        .bind(ts)
-        .bind(system_id)
-        .bind(&d.namespace)
-        .bind(&d.name)
-        .bind(d.desired as i32)
-        .bind(d.ready as i32)
-        .bind(d.available as i32)
-        .bind(d.updated as i32)
-        .execute(&state.data)
-        .await
-        {
-            tracing::error!(error = %e, "kube deployment insert");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    }
+    // `report.namespaces` and `report.deployments` are accepted and discarded. They used
+    // to be stored per scrape in `kube_namespace_stats` / `kube_deployment_stats`, which
+    // nothing ever read back (see migrations/data/0003) — 5.6 GB that existed only to
+    // trip the data cap and get real cluster history evicted in its place. The agent
+    // still sends them, so old agents keep working; the hub just stops writing them.
 
     // Per-container usage + pod metadata. Potentially hundreds of rows per push,
     // so insert them in ONE statement via UNNEST (parallel arrays) instead of a

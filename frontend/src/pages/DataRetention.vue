@@ -128,16 +128,44 @@ const configHalves = computed(() => {
   const mid = Math.ceil(t.length / 2)
   return [t.slice(0, mid), t.slice(mid)]
 })
-// Bytes for a tier (via its joined size row) — used for sorting + colouring.
+// Bytes for a tier (via its joined size row) — used for colouring.
 const tierBytes = (t) => sizeByLabel.value[t.label]?.size_bytes ?? 0
+const tierRows = (t) => sizeByLabel.value[t.label]?.rows ?? 0
+// Order tiers by their place on the ladder, finest first — NOT by size. Sorting by size
+// rendered the chain as raw → 15m → 1m → 5m → 1h, which is unreadable precisely when you
+// are trying to reason about how data flows down it.
+const LADDER = ['', '_1m', '_5m', '_15m', '_1h']
+const rungOf = (table) => {
+  const i = LADDER.findIndex((sfx) => sfx && table.endsWith(sfx))
+  return i === -1 ? 0 : i
+}
 const tierGroups = computed(() => {
   const r = data.value?.retention || []
   return GROUPS.map((g) => ({
-    // Biggest tier first within each group so the space hogs are obvious.
     label: g.label,
-    tiers: r.filter(g.match).slice().sort((a, b) => tierBytes(b) - tierBytes(a)),
-  })).filter((g) => g.tiers.length)
+    tiers: r.filter(g.match).slice().sort((a, b) => rungOf(a.table) - rungOf(b.table)),
+  }))
+    // Hide a group only when EVERY tier in it is empty (no Docker agents reporting =
+    // five rows of zeroes taking up half the page). A single empty tier stays visible,
+    // because a freshly added rollup is legitimately empty until its job first runs.
+    .filter((g) => g.tiers.length && g.tiers.some((t) => tierRows(t) > 0))
 })
+// Days of history a tier ACTUALLY holds, and whether that falls short of its policy.
+// These two disagreeing is the normal state, not an edge case: cap eviction deletes
+// inside a tier's window, and a rebuilt rollup chain can only refill from the tier below.
+const heldDays = (t) => sizeByLabel.value[t.label] && t.oldest_days != null ? t.oldest_days : null
+function shortfall(t) {
+  const held = heldDays(t)
+  if (held == null || t.value == null) return false
+  const want = t.unit === 'hours' ? t.value / 24 : t.value
+  return held < want * 0.9 && tierRows(t) > 0
+}
+function heldText(t) {
+  const d = heldDays(t)
+  if (d == null) return '—'
+  if (d < 1) return `${Math.round(d * 24)}h`
+  return `${d < 10 ? d.toFixed(1) : Math.round(d)}d`
+}
 // pg_size_pretty gives "1929 MB" — group the number part so it reads "1,929 MB".
 function withCommas(s) {
   if (!s || s === '—') return s
@@ -239,12 +267,13 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                   <th :class="TH">Tier</th>
                   <th :class="TH" class="text-right">Rows</th>
                   <th :class="TH" class="text-right">Size</th>
+                  <th :class="TH" class="text-right">Has</th>
                   <th :class="TH">Keep for</th>
                   <th :class="TH"></th>
                 </tr></thead>
                 <tbody>
                   <template v-for="g in col" :key="g.label">
-                    <tr class="bg-surface2/40"><td colspan="5" class="px-4 py-1.5 text-micro font-bold uppercase tracking-wider text-faint">{{ g.label }}</td></tr>
+                    <tr class="bg-surface2/40"><td colspan="6" class="px-4 py-1.5 text-micro font-bold uppercase tracking-wider text-faint">{{ g.label }}</td></tr>
                     <tr v-for="t in g.tiers" :key="t.table" class="border-b border-line/60 last:border-0 align-top">
                       <td class="px-4 py-2.5">
                         <div class="whitespace-nowrap font-mono text-fg">{{ t.table }}</div>
@@ -252,6 +281,9 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                       </td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
                       <td class="px-4 py-2.5 text-right font-mono font-semibold tabular-nums" :class="sizeClass(sizeByLabel[t.label]?.size_bytes ?? 0)">{{ withCommas(sizeByLabel[t.label]?.size ?? '—') }}</td>
+                      <td class="px-4 py-2.5 text-right font-mono tabular-nums" :class="shortfall(t) ? 'text-warn' : 'text-muted'">
+                        <span v-tip="shortfall(t) ? 'Holds less than the policy asks for — the cap evicted inside this window, or a rebuilt rollup could only refill from the tier below.' : 'Age of the oldest row actually stored.'">{{ heldText(t) }}</span>
+                      </td>
                       <td class="px-4 py-2.5">
                         <div class="flex items-center gap-1.5">
                           <input v-model.number="draft[t.table]" type="number" min="1" class="w-20 rounded-md border border-line2 bg-surface2 px-2 py-1 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" />

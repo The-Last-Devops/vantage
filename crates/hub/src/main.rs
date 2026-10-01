@@ -20,6 +20,7 @@ mod db;
 mod exec_crypto;
 mod ingest;
 mod install;
+mod kube_rollup;
 mod logbuf;
 mod masterkey;
 mod mcp;
@@ -113,6 +114,7 @@ async fn main() -> Result<()> {
     backup::spawn(state.clone());
     data_admin::spawn_enforce(state.config.clone(), state.data.clone()); // Data-DB cap eviction
     data_admin::spawn_config_prune(state.config.clone()); // config-DB log retention
+    kube_rollup::spawn(state.data.clone()); // k8s raw -> 5m -> 1h ladder
 
     use axum::routing::{delete, patch, post, put};
     let app = Router::new()

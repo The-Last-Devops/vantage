@@ -196,6 +196,37 @@ docker compose up -d
   the answer must survive a long silence (a monitor's up/down state), where `LIMIT 1` stops
   early anyway. `scripts/check-latest-row-queries.sh` asserts the plan from `EXPLAIN` — extend
   it when you add such a read.
+- **K8s rollups are PLAIN TABLES filled by a job (`kube_rollup.rs`), not continuous
+  aggregates — don't "fix" that.** A CAgg can't be `ALTER`ed, so adding one metric column
+  makes `setup()` drop and rebuild the whole chain, after which the long tier can only
+  refill from the tier below it. Measured consequence on the real hub:
+  `system_metrics_1h` carried **44 days** under a 365-day policy, because 15m keeps 45.
+  A long-horizon tier that silently resets on every upgrade is not a long-horizon tier.
+  A real table takes `ADD COLUMN` and keeps its history.
+  The aggregation is two-stage everywhere (`sum` across containers **within a snapshot**,
+  then `avg` across snapshots): a chart plots cluster totals over time, so a plain
+  `avg(cpu_millicores)` yields one container's average — a smooth, believable, wrong
+  line. `scripts/check-kube-rollup.sh` asserts the exact number and that it differs from
+  the naive one.
+- **`kube_namespace_stats` / `kube_deployment_stats` are DELETED and must stay deleted**
+  (`migrations/data/0003`). They were written every scrape and read by nothing — the
+  namespace/workload breakdowns aggregate on read from `kube_container_stats`, which has
+  those columns. 5.6 GB of a 17 GB DB, which is what kept the 20 GB cap tripping, which is
+  what made eviction delete a day of real cluster history **every night for three weeks**.
+  If deployment rollout health is wanted later, add a small purpose-built table sized to an
+  actual query — not another unbounded 365-day firehose. The check script asserts they stay
+  dropped.
+- **Eviction has a protected set (`PROTECTED_TIERS`), and largest-first is not a
+  guarantee.** The long tiers were spared only because they were small; a year of hourly
+  rollup eventually becomes the largest table, at which point plain largest-first starts
+  eating the one history worth keeping. Also: an eviction log line that doesn't name the
+  table and the cut-off date is useless — `freed 4.7 GB (1 chunks)` ran nightly for three
+  weeks and nobody connected it to the charts that were visibly short.
+- **Retention policy ≠ data actually held; show both.** The Data & retention page used to
+  display only the configured window, and on the live hub every long-term number was
+  fiction (k8s 14d→2.3d, host 1h 365d→44d). `RetentionTier.oldest_days` carries the real
+  age and the UI flags the gap. When you touch retention, verify with the real age, not
+  the policy.
 - **A rollup tier is a continuous aggregate, so TimescaleDB reports its jobs against the
   MATERIALIZATION hypertable** (`_materialized_hypertable_7`), never the view name
   (`system_metrics_1m`). Any query over `timescaledb_information.jobs` must resolve the view

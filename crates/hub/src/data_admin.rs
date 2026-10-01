@@ -24,8 +24,6 @@ const SYS_AGG: &str = "avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_use
      avg(cpu_steal) AS cpu_steal, avg(disk_util) AS disk_util, \
      avg(mem_available) AS mem_available, avg(mem_buffers) AS mem_buffers, \
      avg(mem_cached) AS mem_cached, avg(mem_free) AS mem_free";
-const CTR_AGG: &str = "avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_used, \
-     max(net_rx) AS net_rx, max(net_tx) AS net_tx";
 
 /// One rollup tier: (suffix, bucket, source-table, source-time-column).
 const SYS_TIERS: &[(&str, &str, &str, &str)] = &[
@@ -33,12 +31,6 @@ const SYS_TIERS: &[(&str, &str, &str, &str)] = &[
     ("5m", "5 minutes", "system_metrics_1m", "bucket"),
     ("15m", "15 minutes", "system_metrics_5m", "bucket"),
     ("1h", "1 hour", "system_metrics_15m", "bucket"),
-];
-const CTR_TIERS: &[(&str, &str, &str, &str)] = &[
-    ("1m", "1 minute", "container_metrics", "time"),
-    ("5m", "5 minutes", "container_metrics_1m", "bucket"),
-    ("15m", "15 minutes", "container_metrics_5m", "bucket"),
-    ("1h", "1 hour", "container_metrics_15m", "bucket"),
 ];
 /// Refresh start_offset per tier — must stay within the SOURCE tier's retention
 /// (raw 8h, 1m 2d, 5m 10d, 15m 45d) so a refresh never blanks materialized rows.
@@ -126,13 +118,20 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
         "SELECT set_chunk_time_interval('heartbeats', INTERVAL '1 day')".into(),
     ];
 
-    // Hierarchical rollup chains: raw → 1m → 5m → 15m → 1h (system + container).
-    for (chain, agg, group_extra) in [(SYS_TIERS, SYS_AGG, ""), (CTR_TIERS, CTR_AGG, "name, ")] {
-        let table_base = if group_extra.is_empty() {
-            "system_metrics"
-        } else {
-            "container_metrics"
-        };
+    // The container rollup ladder was built and maintained but never read: the only
+    // reader of Docker stats is the system-detail page, which queries `container_metrics`
+    // raw. Four continuous aggregates, each with a refresh job, a compression policy and
+    // a retention policy, all churning over a table that is empty on every install we
+    // have. Drop them; the raw tier stays.
+    for suffix in ["1h", "15m", "5m", "1m"] {
+        stmts.push(format!(
+            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_{suffix} CASCADE"
+        ));
+    }
+
+    // Hierarchical rollup chain for host metrics: raw → 1m → 5m → 15m → 1h.
+    for (chain, agg, group_extra) in [(SYS_TIERS, SYS_AGG, "")] {
+        let table_base = "system_metrics";
         for (suffix, bucket, src, srccol) in chain {
             stmts.push(format!(
                 "CREATE MATERIALIZED VIEW IF NOT EXISTS {table_base}_{suffix} \
@@ -177,6 +176,18 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
         }
     }
 
+    // Docker container stats: raw only, kept the same 8 hours as host raw. Its rollup
+    // ladder was removed (nothing read it), and this policy has to be stated explicitly
+    // now that the shared loop above only walks the system-metrics chain — otherwise the
+    // table silently has NO retention at all and grows without limit.
+    if !is_override("container_metrics") {
+        stmts.push("SELECT remove_retention_policy('container_metrics', if_exists => true)".into());
+    }
+    stmts.push(
+        "SELECT add_retention_policy('container_metrics', INTERVAL '8 hours', if_not_exists => true)"
+            .into(),
+    );
+
     // Heartbeats: kept a year so uptime history + incidents span long ranges.
     if !is_override("heartbeats") {
         stmts.push("SELECT remove_retention_policy('heartbeats', if_exists => true)".into());
@@ -192,20 +203,41 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
     );
     stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
 
-    // Kubernetes cluster-state series. namespace/deployment are low-volume (one row
-    // per object per snapshot) → keep a year. kube_container_stats is per-CONTAINER
-    // (high volume at a 15s cadence: a 300-pod cluster ≈ 630M rows/yr) with no rollup
-    // ladder, so keep raw only ~14 days and compress after 2 — enough for the Cluster
-    // page's short ranges, and it stops the data-cap evicting host metrics to hold a
-    // year of container rows. (Overridable per-table from the Data & retention UI.)
-    for (tbl, keep, compress_after) in [
-        ("kube_namespace_stats", "365 days", "7 days"),
-        ("kube_deployment_stats", "365 days", "7 days"),
-        ("kube_container_stats", "14 days", "2 days"),
+    // Kubernetes series, now a real ladder (see kube_rollup.rs): raw is the detail tier
+    // and is deliberately SHORT, because it is per-container and dominates the database
+    // at any cadence; 5m carries the week view; 1h is the long one worth keeping, and at
+    // ~1.3 GB/year it is affordable in a way the raw table never was at 4.7 GB/DAY.
+    //
+    // Raw dropping to 2 days is not a reduction in practice — the data cap was already
+    // evicting it down to ~2.3 days every single day. The difference is that the limit is
+    // now declared and honest instead of being an invisible side effect of running out of
+    // room. (All overridable per-table from the Data & retention UI.)
+    // The time column differs per tier (`time` on raw, `bucket` on the rollups) and
+    // compress_orderby must name the real one — a wrong name makes the ALTER fail, which
+    // this function swallows, so the table would silently never compress.
+    for (tbl, keep, compress_after, tcol, segment) in [
+        (
+            "kube_container_stats",
+            "2 days",
+            "1 day",
+            "time",
+            "system_id, namespace",
+        ),
+        (
+            "kube_rollup_5m",
+            "10 days",
+            "2 days",
+            "bucket",
+            "system_id, namespace",
+        ),
+        (
+            "kube_rollup_1h",
+            "365 days",
+            "14 days",
+            "bucket",
+            "system_id, namespace",
+        ),
     ] {
-        stmts.push(format!(
-            "SELECT set_chunk_time_interval('{tbl}', INTERVAL '1 day')"
-        ));
         if !is_override(tbl) {
             stmts.push(format!(
                 "SELECT remove_retention_policy('{tbl}', if_exists => true)"
@@ -216,7 +248,7 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
         ));
         stmts.push(format!(
             "ALTER TABLE {tbl} SET (timescaledb.compress, \
-                timescaledb.compress_segmentby = 'system_id', timescaledb.compress_orderby = 'time DESC')"
+                timescaledb.compress_segmentby = '{segment}', timescaledb.compress_orderby = '{tcol} DESC')"
         ));
         stmts.push(format!(
             "SELECT add_compression_policy('{tbl}', INTERVAL '{compress_after}')"
@@ -255,6 +287,13 @@ pub struct RetentionTier {
     /// "hours" for the raw realtime tier, "days" for the downsampled tiers.
     pub unit: String,
     pub value: Option<i64>,
+    /// Age of the OLDEST row actually present, in days. The policy above says what the
+    /// hub intends to keep; this says what it really has, and the two are not the same
+    /// thing — cap eviction deletes data newer than a tier's window, and a rollup chain
+    /// that gets rebuilt can only refill from the tier below it. Both were happening
+    /// here unnoticed (14-day k8s retention holding 2.3 days, 365-day host rollup
+    /// holding 44), because the UI only ever showed the intention.
+    pub oldest_days: Option<f64>,
 }
 
 /// The raw realtime tiers (system + container) are managed in hours; the
@@ -346,6 +385,36 @@ async fn retention_value(data: &PgPool, table: &str) -> Option<i64> {
     row.and_then(|(d,)| d)
 }
 
+/// Time column of a tier: the rollup tiers bucket into `bucket`, everything else
+/// timestamps into `time`.
+fn time_col(table: &str) -> &'static str {
+    if table.ends_with("_1m")
+        || table.ends_with("_5m")
+        || table.ends_with("_15m")
+        || table.ends_with("_1h")
+    {
+        "bucket"
+    } else {
+        "time"
+    }
+}
+
+/// How old the oldest row in a tier is, in days. `min()` on the partitioning column is
+/// the one unbounded aggregate that is safe on a hypertable: TimescaleDB walks chunks in
+/// time order and stops at the first hit, so it costs one index probe rather than the
+/// full scan that an unbounded `max(time)` per id would (see the query conventions).
+async fn oldest_days(data: &PgPool, table: &str) -> Option<f64> {
+    let tcol = time_col(table);
+    let row: Option<(Option<f64>,)> = sqlx::query_as(&format!(
+        "SELECT EXTRACT(EPOCH FROM (now() - min({tcol})))::float8 / 86400 FROM {table}"
+    ))
+    .fetch_optional(data)
+    .await
+    .ok()
+    .flatten();
+    row.and_then(|(d,)| d)
+}
+
 pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
     let db_size = sqlx::query_as::<_, (String,)>(
         "SELECT pg_size_pretty(pg_database_size(current_database()))",
@@ -363,14 +432,10 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
         ("system_metrics_15m", "15-minute rollup"),
         ("system_metrics_1h", "1-hour rollup"),
         ("container_metrics", "Container (raw)"),
-        ("container_metrics_1m", "Container 1-minute"),
-        ("container_metrics_5m", "Container 5-minute"),
-        ("container_metrics_15m", "Container 15-minute"),
-        ("container_metrics_1h", "Container 1-hour"),
         ("heartbeats", "Heartbeats"),
-        ("kube_namespace_stats", "K8s namespaces"),
-        ("kube_deployment_stats", "K8s deployments"),
-        ("kube_container_stats", "K8s containers"),
+        ("kube_container_stats", "K8s raw (detail)"),
+        ("kube_rollup_5m", "K8s 5-minute"),
+        ("kube_rollup_1h", "K8s 1-hour"),
     ];
     let mut tables = Vec::with_capacity(tiers.len());
     for (table, label) in tiers {
@@ -383,6 +448,7 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
             label: label.into(),
             unit: unit_for(table).into(),
             value: retention_value(data, table).await,
+            oldest_days: oldest_days(data, table).await,
         });
     }
 
@@ -611,6 +677,36 @@ pub fn spawn_enforce(config: PgPool, data: PgPool) {
     });
 }
 
+/// Tiers eviction leaves alone while any other tier still has a chunk to drop. These are
+/// the small, slow, long-horizon series — the ones whose whole value is that they go back
+/// far — and they are cheap enough that evicting them buys almost no space. Everything
+/// else (raw samples, short rollups) is regenerable detail and is fair game.
+const PROTECTED_TIERS: &[&str] = &["system_metrics_1h", "kube_rollup_1h", "heartbeats"];
+
+/// Oldest droppable chunk of the largest hypertable, skipping `protected`. Returns the
+/// hypertable name and the boundary to drop below. Continuous-aggregate rollups live
+/// under `_timescaledb_internal` and are dropped via their view, not by chunk name, so
+/// they are not candidates here (they're small anyway).
+async fn evict_target(data: &PgPool, protected: &[&str]) -> Option<(String, DateTime<Utc>)> {
+    sqlx::query_as(
+        "SELECT c.hypertable_name, \
+                (SELECT ch.range_end FROM timescaledb_information.chunks ch \
+                 WHERE ch.hypertable_schema = 'public' \
+                   AND ch.hypertable_name = c.hypertable_name \
+                   AND ch.range_end IS NOT NULL \
+                 ORDER BY ch.range_end ASC LIMIT 1) \
+         FROM timescaledb_information.hypertables c \
+         WHERE c.hypertable_schema = 'public' AND c.hypertable_name <> ALL($1) \
+         ORDER BY hypertable_size(format('%I.%I', c.hypertable_schema, c.hypertable_name)::regclass) DESC NULLS LAST \
+         LIMIT 1",
+    )
+    .bind(protected.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+    .fetch_optional(data)
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Upper bound on chunk drops per enforcement pass — a runaway-loop backstop, set far
 /// above any realistic need (e.g. a year of daily heartbeat chunks + several tiers).
 const MAX_DROPS_PER_PASS: u32 = 2000;
@@ -646,6 +742,9 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
     let start = db_size_bytes(data).await;
     let mut used = start;
     let mut dropped_total: u32 = 0;
+    // table -> (chunks dropped, newest boundary cut away)
+    let mut per_table: std::collections::BTreeMap<String, (u32, DateTime<Utc>)> =
+        std::collections::BTreeMap::new();
     // Being over the cap and doing nothing used to be completely silent, which reads as
     // "auto-delete is broken". Say why: the cap is off, or nothing was droppable.
     if !enabled && start > limit {
@@ -667,22 +766,20 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
             // Oldest chunk of the LARGEST real (public) hypertable. Continuous-aggregate
             // rollups live under `_timescaledb_internal` and are dropped via their view,
             // not by chunk name, so we skip them here (they're small anyway).
-            let target: Option<(String, DateTime<Utc>)> = sqlx::query_as(
-                "SELECT c.hypertable_name, \
-                        (SELECT ch.range_end FROM timescaledb_information.chunks ch \
-                         WHERE ch.hypertable_schema = 'public' \
-                           AND ch.hypertable_name = c.hypertable_name \
-                           AND ch.range_end IS NOT NULL \
-                         ORDER BY ch.range_end ASC LIMIT 1) \
-                 FROM timescaledb_information.hypertables c \
-                 WHERE c.hypertable_schema = 'public' \
-                 ORDER BY hypertable_size(format('%I.%I', c.hypertable_schema, c.hypertable_name)::regclass) DESC NULLS LAST \
-                 LIMIT 1",
-            )
-            .fetch_optional(data)
-            .await
-            .ok()
-            .flatten();
+            // Largest SACRIFICIAL tier first; the long-term tiers are only considered
+            // once nothing else has a chunk left to give. Largest-first alone used to be
+            // enough by luck — the long tiers are tiny today — but luck is not a
+            // guarantee: let a year of hourly rollup actually accumulate and it becomes
+            // the biggest table, at which point the plain largest-first rule would start
+            // eating the one history worth keeping.
+            let mut target = evict_target(data, PROTECTED_TIERS).await;
+            if target.is_none() {
+                tracing::warn!(
+                    "data cap: every sacrificial tier is exhausted — falling back to the \
+                     long-term tiers (raise the cap or shorten a retention window)"
+                );
+                target = evict_target(data, &[]).await;
+            }
             let Some((ht, range_end)) = target else {
                 break; // no hypertable / no droppable chunk left
             };
@@ -694,7 +791,16 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
                     .fetch_all(data)
                     .await;
             match dropped {
-                Ok(rows) if !rows.is_empty() => dropped_total += rows.len() as u32,
+                Ok(rows) if !rows.is_empty() => {
+                    dropped_total += rows.len() as u32;
+                    // Remember WHICH tier lost data and up to when. "freed 4.7 GB
+                    // (1 chunks)" repeated nightly for three weeks never once said that
+                    // every one of those chunks was a day of cluster history, so nobody
+                    // connected the log to the charts that were visibly cut short.
+                    let e = per_table.entry(ht.clone()).or_insert((0, range_end));
+                    e.0 += rows.len() as u32;
+                    e.1 = e.1.max(range_end);
+                }
                 Ok(_) => break, // couldn't drop the chosen chunk — avoid a tight loop
                 Err(e) => {
                     tracing::warn!(error = %e, hypertable = %ht, "data cap: drop_chunks failed");
@@ -714,12 +820,23 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
         );
     }
     if freed > 0 {
+        let detail = per_table
+            .iter()
+            .map(|(t, (n, upto))| {
+                format!(
+                    "{t} ({n} chunks, deleted everything before {})",
+                    upto.to_rfc3339()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
         let msg = format!(
-            "data cap eviction: freed {} ({} chunks), now {} / limit {}",
+            "data cap eviction: freed {} ({} chunks), now {} / limit {} — {}",
             human_bytes(freed),
             dropped_total,
             human_bytes(used),
-            human_bytes(limit)
+            human_bytes(limit),
+            detail
         );
         tracing::warn!("{msg}");
         let _ = sqlx::query(
@@ -747,14 +864,10 @@ const RETENTION_TABLES: &[&str] = &[
     "system_metrics_15m",
     "system_metrics_1h",
     "container_metrics",
-    "container_metrics_1m",
-    "container_metrics_5m",
-    "container_metrics_15m",
-    "container_metrics_1h",
     "heartbeats",
-    "kube_namespace_stats",
-    "kube_deployment_stats",
     "kube_container_stats",
+    "kube_rollup_5m",
+    "kube_rollup_1h",
 ];
 
 /// `value` is interpreted in the tier's unit (hours for the raw tier, days else).

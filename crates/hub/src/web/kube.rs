@@ -330,6 +330,43 @@ pub async fn kube_containers(
     Ok(Json(rows))
 }
 
+/// Which k8s tier answers a range: `(table, time column, cpu column, mem column)`.
+///
+/// The shape of the aggregation is the same at every tier — sum across groups within a
+/// snapshot/bucket, then average those totals over the display bucket — so only the
+/// column names change. That is deliberate: the rollup stores `cpu_avg` already summed
+/// per group, so summing groups and averaging buckets composes exactly as it does on raw
+/// rows, and the two code paths cannot drift apart.
+///
+/// `has_label` forces the raw tier: pod labels are the one dimension the rollups drop
+/// (they are per-pod, and pods are what made raw unaffordable), so a label filter can
+/// only be answered from raw — and raw is kept days, not months.
+fn kube_tier(
+    range: &Option<String>,
+    has_label: bool,
+) -> (&'static str, &'static str, &'static str) {
+    const RAW: (&str, &str, &str) = ("kube_container_stats", "cpu_millicores", "mem_bytes");
+    const T5M: (&str, &str, &str) = ("kube_rollup_5m", "cpu_avg", "mem_avg");
+    const T1H: (&str, &str, &str) = ("kube_rollup_1h", "cpu_avg", "mem_avg");
+    if has_label {
+        return RAW;
+    }
+    match range.as_deref() {
+        Some("7d") => T5M,
+        Some("30d") | Some("90d") | Some("1y") => T1H,
+        _ => RAW,
+    }
+}
+
+/// The rollup tiers bucket into `bucket`; the raw tier timestamps into `time`.
+fn kube_timecol(table: &str) -> &'static str {
+    if table == "kube_container_stats" {
+        "time"
+    } else {
+        "bucket"
+    }
+}
+
 #[derive(Serialize)]
 pub struct KubeSeries {
     pub t: Vec<i64>,
@@ -353,15 +390,21 @@ pub async fn kube_series(
     }
     // Window + bucket come from the shared allowlist (constants, safe to inline).
     let (_suffix, _timecol, interval, bucket) = chart_tier(&f.range);
+    let has_label =
+        !f.lk.as_deref().unwrap_or("").is_empty() && !f.lv.as_deref().unwrap_or("").is_empty();
+    let (table, cpucol, memcol) = kube_tier(&f.range, has_label);
+    let tcol = kube_timecol(table);
     let mut qb = sqlx::QueryBuilder::new(format!(
-        "SELECT time_bucket('{bucket}', time) AS t, avg(scpu)::float8 AS cpu, avg(smem)::float8 AS mem FROM ( \
-             SELECT time, sum(cpu_millicores) AS scpu, sum(mem_bytes) AS smem \
-             FROM kube_container_stats WHERE system_id = "
+        "SELECT time_bucket('{bucket}', t0) AS t, avg(scpu)::float8 AS cpu, avg(smem)::float8 AS mem FROM ( \
+             SELECT {tcol} AS t0, sum({cpucol}) AS scpu, sum({memcol}) AS smem \
+             FROM {table} WHERE system_id = "
     ));
     qb.push_bind(id)
-        .push(format!(" AND time > now() - interval '{interval}'"));
+        .push(format!(" AND {tcol} > now() - interval '{interval}'"));
     push_filters(&mut qb, &f);
-    qb.push(" GROUP BY time) s GROUP BY 1 ORDER BY 1 LIMIT 4000");
+    qb.push(format!(
+        " GROUP BY {tcol}) s GROUP BY 1 ORDER BY 1 LIMIT 4000"
+    ));
 
     #[derive(sqlx::FromRow)]
     struct Row {
@@ -428,13 +471,16 @@ pub async fn kube_series_by(
         return Err(StatusCode::BAD_REQUEST);
     }
     let (_s, _tc, interval, bucket) = chart_tier(&f.range);
+    // Grouping BY label can only come from the raw tier — the rollups drop `labels`.
+    let (table, cpucol, memcol) = kube_tier(&f.range, by == "label");
+    let tcol = kube_timecol(table);
 
     // Per (bucket, group): sum per snapshot, then average across snapshots in the bucket.
     // bucket/interval are constants from chart_tier's allowlist — safe to inline (a bound
     // text param can't stand in for time_bucket's INTERVAL argument).
     let mut qb = sqlx::QueryBuilder::new(format!(
         "SELECT tb, grp, avg(scpu)::float8 AS cpu, avg(smem)::float8 AS mem FROM ( \
-         SELECT time_bucket('{bucket}', time) AS tb, time, "
+         SELECT time_bucket('{bucket}', {tcol}) AS tb, {tcol}, "
     ));
     match by {
         "namespace" => {
@@ -453,13 +499,17 @@ pub async fn kube_series_by(
                 .push(", '—') AS grp");
         }
     }
-    qb.push(", sum(cpu_millicores) AS scpu, sum(mem_bytes) AS smem FROM kube_container_stats WHERE system_id = ");
+    qb.push(format!(
+        ", sum({cpucol}) AS scpu, sum({memcol}) AS smem FROM {table} WHERE system_id = "
+    ));
     qb.push_bind(id)
-        .push(format!(" AND time > now() - interval '{interval}'"));
+        .push(format!(" AND {tcol} > now() - interval '{interval}'"));
     if let Some(ns) = q.ns.filter(|s| !s.is_empty()) {
         qb.push(" AND namespace = ").push_bind(ns);
     }
-    qb.push(" GROUP BY tb, time, grp) s GROUP BY tb, grp ORDER BY tb LIMIT 20000");
+    qb.push(format!(
+        " GROUP BY tb, {tcol}, grp) s GROUP BY tb, grp ORDER BY tb LIMIT 20000"
+    ));
 
     #[derive(sqlx::FromRow)]
     struct Row {

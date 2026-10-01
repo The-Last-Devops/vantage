@@ -7,6 +7,60 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.2.0] — 2026-10-01
+
+### Fixed
+- **Cluster charts no longer lose their history.** Picking `7d` or `30d` on a cluster
+  drew a full-width axis with only the last ~2 days of data on it. Nothing was broken in
+  the chart: the data really had been deleted, every night, for three weeks. K8s metrics
+  were stored in one per-container table sampled every 15 seconds with no downsampling
+  at all, which grew about 4.7 GB per day; that pushed the database into its 20 GB cap,
+  and cap eviction then reclaimed space from the largest table — the same one. Its stated
+  14-day retention was really holding 2.3 days. K8s metrics now roll up the way host
+  metrics always have (raw → 5-minute → 1-hour), so a long lookback costs about 1.3 GB a
+  year instead of 4.7 GB a day, and long ranges are answered from the rollups rather than
+  by scanning tens of millions of raw rows — which is also why the busiest cluster's 7-day
+  chart used to time out instead of merely being slow.
+- **Deleted two tables nothing ever read.** `kube_namespace_stats` and
+  `kube_deployment_stats` were written on every scrape and had no `SELECT` anywhere in the
+  hub — the namespace and workload breakdowns are aggregated on read from the container
+  table, which already carries those columns. They held 5.6 GB of a 17 GB database, so
+  they were not merely idle: they are what kept the cap tripping and therefore what got
+  real cluster history evicted in their place.
+- **Cap eviction can no longer eat the long-term tiers while cheap detail remains.**
+  `system_metrics_1h`, `kube_rollup_1h` and `heartbeats` are now considered only once every
+  other tier is exhausted. Largest-tier-first happened to spare them while they were small,
+  but a year of hourly rollup eventually becomes the largest table, at which point the old
+  rule would have started deleting the one history worth keeping.
+- **Eviction says what it deleted.** The audit entry was `freed 4.7 GB (1 chunks)` — the
+  same line every night, never naming a table or a date, so nothing connected it to the
+  charts that were visibly cut short. It now names each tier and how far up it cut.
+- **K8s history is included in backups.** `kube_rollup_1h` is built from raw samples that
+  are kept days, so once those age out it is the only copy — and backups contained no
+  cluster data at all.
+
+### Added
+- **"Has" column on Data & retention.** Next to each tier's configured window, the age of
+  the oldest row actually stored, highlighted when it falls short. The page could only ever
+  show intent, and intent and reality had quietly diverged everywhere that mattered:
+  k8s containers said 14 days and held 2.3; the hourly host rollup said 365 days and held
+  44, because rebuilding the rollup chain (which any new metric column forces) can only
+  refill it from the tier below.
+
+### Changed
+- **Cluster sampling now defaults to 60 seconds** instead of 15. Four times less data for
+  a resolution nobody reads cluster-wide trends at.
+- **K8s raw retention is 2 days, declared.** It was already being evicted to ~2.3 days
+  every night; the limit is now honest rather than an invisible side effect of running out
+  of room. The 5-minute tier covers a week and the 1-hour tier a year.
+- K8s rollups are plain tables filled by a background job, not continuous aggregates. A
+  continuous aggregate cannot be `ALTER`ed, so adding one metric column drops and rebuilds
+  the whole chain — which is exactly how the 365-day host rollup came to hold 44 days.
+- Tiers on Data & retention are ordered along the ladder instead of by size (it used to
+  read raw → 15m → 1m → 5m → 1h), and tier groups with no data at all are hidden.
+- Removed the container-metrics rollup ladder: four continuous aggregates with refresh,
+  compression and retention jobs that no read path ever queried.
+
 ## [3.1.2] — 2026-09-23
 
 ### Added
