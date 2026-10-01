@@ -128,8 +128,6 @@ const configHalves = computed(() => {
   const mid = Math.ceil(t.length / 2)
   return [t.slice(0, mid), t.slice(mid)]
 })
-// Bytes for a tier (via its joined size row) — used for colouring.
-const tierBytes = (t) => sizeByLabel.value[t.label]?.size_bytes ?? 0
 const tierRows = (t) => sizeByLabel.value[t.label]?.rows ?? 0
 // Order tiers by their place on the ladder, finest first — NOT by size. Sorting by size
 // rendered the chain as raw → 15m → 1m → 5m → 1h, which is unreadable precisely when you
@@ -241,7 +239,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                 <button @click="saveCap" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Save</button>
               </div>
             </div>
-            <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />When over cap, eviction reclaims space from the <strong>largest tier first</strong>, dropping its oldest chunks — so a runaway tier shrinks before the rest. This can drop data newer than a tier's Keep-for window above.</p>
+            <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />When over cap, eviction reclaims space from the <strong>largest tier first</strong>, dropping its oldest chunks — so a runaway tier shrinks before the rest. The long-horizon tiers (<code>system_metrics_1h</code>, <code>kube_rollup_1h</code>, <code>heartbeats</code>) are skipped until nothing else can give. This can drop data newer than a tier's Keep-for window above — compare <strong>Has</strong> with <strong>Keep for</strong> to see where it already has.</p>
           </div>
 
           <!-- sampling cadence (hub-decided push interval) -->
