@@ -352,7 +352,12 @@ fn kube_tier(
         return RAW;
     }
     match range.as_deref() {
-        Some("7d") => T5M,
+        // 12h and 24h display in 10- and 15-minute buckets, so the 5-minute rollup is
+        // finer than anything that reaches the screen — and measured on the busiest
+        // cluster, reading raw for 24h took 16s against 2s for 7d and 1s for 30d, i.e.
+        // the SHORT range had become the slow one. Below 12h the display bucket drops to
+        // 5 minutes or less, where raw is both needed and cheap.
+        Some("12h") | Some("24h") | Some("7d") => T5M,
         Some("30d") | Some("90d") | Some("1y") => T1H,
         _ => RAW,
     }

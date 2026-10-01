@@ -104,11 +104,11 @@ echo "  ✓ 1h tier keeps the peak snapshot, not a flattened average"
 
 # The hub must never answer a long range from the raw tier again — that is what made
 # /kube/series scan tens of millions of rows and time out on the busiest cluster.
-grep -q 'Some("7d") => T5M' "$REPO/crates/hub/src/web/kube.rs" \
-  || { echo "FAIL: kube_tier no longer routes 7d to the 5m rollup"; exit 1; }
+grep -q 'Some("12h") | Some("24h") | Some("7d") => T5M' "$REPO/crates/hub/src/web/kube.rs" \
+  || { echo "FAIL: kube_tier no longer routes 12h/24h/7d to the 5m rollup"; exit 1; }
 grep -q 'Some("30d") | Some("90d") | Some("1y") => T1H' "$REPO/crates/hub/src/web/kube.rs" \
   || { echo "FAIL: kube_tier no longer routes long ranges to the 1h rollup"; exit 1; }
-echo "  ✓ read path routes 7d → 5m and 30d/90d/1y → 1h"
+echo "  ✓ read path routes 12h/24h/7d → 5m and 30d/90d/1y → 1h"
 
 # Eviction must not be free to eat the long tiers while cheap detail is still droppable.
 grep -q '"system_metrics_1h", "kube_rollup_1h", "heartbeats"' "$REPO/crates/hub/src/data_admin.rs" \

@@ -48,6 +48,13 @@ const RETENTION: &[(&str, &str)] = &[
     ("15m", "45 days"),
     ("1h", "365 days"),
 ];
+// Compression policies must be REMOVED before being re-added, exactly like retention
+// above. `add_compression_policy` errors when a policy already exists — and every error in
+// this function is swallowed — so on an install that already has one, a changed interval
+// here silently does nothing and the old value lives on forever. That is not theoretical:
+// shipping kube raw as "compress after 1 day" left the pre-existing 2-day policy in place,
+// and since raw is only KEPT 2 days, every chunk was dropped at the exact moment it became
+// eligible. The tier was 100% uncompressed while the code said otherwise.
 const COMPRESS_AFTER: &[(&str, &str)] = &[
     ("1m", "1 day"),
     ("5m", "2 days"),
@@ -171,6 +178,9 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
                 "ALTER MATERIALIZED VIEW {table_base}_{suffix} SET (timescaledb.compress = true)"
             ));
             stmts.push(format!(
+                "SELECT remove_compression_policy('{table_base}_{suffix}', if_exists => true)"
+            ));
+            stmts.push(format!(
                 "SELECT add_compression_policy('{table_base}_{suffix}', INTERVAL '{after}')"
             ));
         }
@@ -201,6 +211,7 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
             timescaledb.compress_segmentby = 'monitor_id', timescaledb.compress_orderby = 'time DESC')"
             .into(),
     );
+    stmts.push("SELECT remove_compression_policy('heartbeats', if_exists => true)".into());
     stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
 
     // Kubernetes series, now a real ladder (see kube_rollup.rs): raw is the detail tier
@@ -249,6 +260,9 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
         stmts.push(format!(
             "ALTER TABLE {tbl} SET (timescaledb.compress, \
                 timescaledb.compress_segmentby = '{segment}', timescaledb.compress_orderby = '{tcol} DESC')"
+        ));
+        stmts.push(format!(
+            "SELECT remove_compression_policy('{tbl}', if_exists => true)"
         ));
         stmts.push(format!(
             "SELECT add_compression_policy('{tbl}', INTERVAL '{compress_after}')"
