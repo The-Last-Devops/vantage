@@ -7,6 +7,25 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.3.2] — 2026-10-02
+
+### Fixed
+- **The eviction warning on Data & retention rendered as scrambled text.** The paragraph
+  is a flex container, which was harmless when it held an icon and one run of text — but
+  every `<strong>` and `<code>` added to it became its own flex item, so the sentence was
+  laid out as a row of disconnected fragments. The prose is wrapped in a single element
+  again.
+- That warning also still named `kube_rollup_1h`, a table 3.3.0 renamed, and its last
+  sentence stopped mid-thought.
+- **The two database totals had no thousands separator**, so the largest numbers on the
+  page ("3380 MB", "9796 kB") were the only ones that were hard to read — every per-tier
+  size already went through the formatter.
+
+### Changed
+- **Cluster charts offer 30d, 90d and 1y.** The 7-day cap dated from when the only k8s
+  table was the per-container detail one; the hourly rollup now keeps a year and the API
+  already routed those ranges to it. A long range simply starts wherever that tier does.
+
 ## [3.3.1] — 2026-10-02
 
 ### Fixed

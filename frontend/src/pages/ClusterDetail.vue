@@ -15,10 +15,15 @@ const id = computed(() => route.params.id)
 const name = computed(() => route.query.name || id.value)
 
 // ---- URL-persisted view state ----
-// Capped at 7d: kube_container_stats keeps raw ~14d (no rollup ladder), so longer
-// ranges would chart an empty/partial window.
-const RANGES = ['30m', '1h', '6h', '24h', '7d']
-const SPAN = { '30m': 1800, '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800 }
+// Matches the host charts. The 7d cap here predated the rollup ladder, when the only
+// k8s table was the per-container detail one; `kube_metrics_1h` now keeps a year and the
+// API already routes 30d/90d/1y to it. A long range simply starts wherever the hourly
+// tier does — the Has column on Data & retention says where that is.
+const RANGES = ['30m', '1h', '6h', '24h', '7d', '30d', '90d', '1y']
+const SPAN = {
+  '30m': 1800, '1h': 3600, '6h': 21600, '24h': 86400,
+  '7d': 604800, '30d': 2592000, '90d': 7776000, '1y': 31536000,
+}
 const range = computed(() => route.query.range || '1h')
 const setRange = (r) => router.replace({ query: { ...route.query, range: r } })
 const spanSeconds = computed(() => SPAN[range.value] || 3600)

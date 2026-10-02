@@ -214,7 +214,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-accent"><VIcon name="disk" :size="18" /></span>
             <h2 class="font-mono text-h2 text-fg">vantage_data</h2>
             <span class="rounded-pill bg-surface2 px-2 py-0.5 text-micro uppercase tracking-wide text-muted">TimescaleDB · time-series</span>
-            <span class="ml-auto font-mono text-metric text-fg">{{ data.db_size }}</span>
+            <span class="ml-auto font-mono text-metric text-fg">{{ withCommas(data.db_size) }}</span>
           </div>
 
           <!-- cap card -->
@@ -243,7 +243,10 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                 <button @click="saveCap" class="rounded-lg bg-accent px-3.5 py-2 text-sm font-semibold text-accentfg hover:opacity-90">Save</button>
               </div>
             </div>
-            <p class="flex items-start gap-1.5 text-xs text-warn"><VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />When over cap, eviction reclaims space from the <strong>largest tier first</strong>, dropping its oldest chunks — so a runaway tier shrinks before the rest. The long-horizon tiers (<code>system_metrics_1h</code>, <code>kube_rollup_1h</code>, <code>heartbeats</code>) are skipped until nothing else can give. This can drop data newer than a tier's Keep-for window above — compare <strong>Has</strong> with <strong>Keep for</strong> to see where it already has.</p>
+            <p class="flex items-start gap-1.5 text-xs text-warn">
+              <VIcon name="alert-triangle" :size="14" class="mt-0.5 shrink-0" />
+              <span>When over cap, eviction reclaims space from the <strong>largest tier first</strong>, dropping its oldest chunks — so a runaway tier shrinks before the rest. The long-horizon tiers (<code>system_metrics_1h</code>, <code>kube_metrics_1h</code>, <code>heartbeats</code>) are skipped until nothing else can give. This can delete data that is newer than a tier's Keep-for window — compare <strong>Has</strong> with <strong>Keep for</strong> to see where that has already happened.</span>
+            </p>
           </div>
 
           <!-- sampling cadence (hub-decided push interval) -->
@@ -310,7 +313,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-muted"><VIcon name="settings" :size="18" /></span>
             <h2 class="font-mono text-h2 text-fg">vantage_config</h2>
             <span class="rounded-pill bg-surface2 px-2 py-0.5 text-micro uppercase tracking-wide text-muted">PostgreSQL · relational</span>
-            <span class="ml-auto font-mono text-metric text-fg">{{ config.db_size }}</span>
+            <span class="ml-auto font-mono text-metric text-fg">{{ withCommas(config.db_size) }}</span>
           </div>
 
           <!-- log cleanup: editable retention for the time-growing log tables -->
