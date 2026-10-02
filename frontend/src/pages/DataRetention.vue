@@ -82,12 +82,20 @@ const overFactor = computed(() => {
   return c && c.limit_bytes ? (c.used_bytes / c.limit_bytes).toFixed(1) : '0'
 })
 const meterColor = computed(() => (usedPct.value >= 90 ? 'bg-down' : usedPct.value >= 70 ? 'bg-warn' : 'bg-accent'))
+// Always format from raw bytes, never from pg_size_pretty's string: Postgres only steps
+// up a unit at 10x, so it reports "3125 MB" and "7968 MB" where a reader expects GB.
 const fmtBytes = (n) => {
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']
+  if (n == null) return '—'
+  const u = ['B', 'kB', 'MB', 'GB', 'TB']
   let v = n, i = 0
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++ }
-  return `${v.toFixed(1)} ${u[i]}`
+  // Decimals only where the unit is coarse enough for them to carry information.
+  return `${v.toFixed(i >= 3 ? (v < 10 ? 2 : 1) : 0)} ${u[i]}`
 }
+// "2.4×" beside a tier's size. Compression did nothing at all until 3.3.1 and nothing on
+// this page would have revealed that; a tier that should compress and shows no ratio is
+// the signal that its policy never ran.
+const fmtRatio = (r) => (r == null ? '' : `${r.toFixed(1)}×`)
 
 const evicting = ref(false)
 async function enforceNow() {
@@ -168,14 +176,6 @@ function heldText(t) {
   if (d < 1) return `${Math.round(d * 24)}h`
   return `${d < 10 ? d.toFixed(1) : Math.round(d)}d`
 }
-// pg_size_pretty gives "1929 MB" — group the number part so it reads "1,929 MB".
-function withCommas(s) {
-  if (!s || s === '—') return s
-  const m = String(s).match(/^([\d.]+)\s*(.*)$/)
-  if (!m) return s
-  const num = m[1].includes('.') ? m[1] : Number(m[1]).toLocaleString()
-  return m[2] ? `${num} ${m[2]}` : num
-}
 // Colour the size so large tiers stand out: red ≥ 1 GiB, amber ≥ 256 MiB.
 function sizeClass(bytes) {
   if (bytes >= 2 ** 30) return 'text-down'
@@ -214,7 +214,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-accent"><VIcon name="disk" :size="18" /></span>
             <h2 class="font-mono text-h2 text-fg">vantage_data</h2>
             <span class="rounded-pill bg-surface2 px-2 py-0.5 text-micro uppercase tracking-wide text-muted">TimescaleDB · time-series</span>
-            <span class="ml-auto font-mono text-metric text-fg">{{ withCommas(data.db_size) }}</span>
+            <span class="ml-auto font-mono text-metric text-fg">{{ fmtBytes(data.db_size_bytes) }}</span>
           </div>
 
           <!-- cap card -->
@@ -285,7 +285,10 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                         <div class="whitespace-nowrap text-xs text-faint">{{ t.label }}</div>
                       </td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ (sizeByLabel[t.label]?.rows ?? 0).toLocaleString() }}</td>
-                      <td class="px-4 py-2.5 text-right font-mono font-semibold tabular-nums" :class="sizeClass(sizeByLabel[t.label]?.size_bytes ?? 0)">{{ withCommas(sizeByLabel[t.label]?.size ?? '—') }}</td>
+                      <td class="px-4 py-2.5 text-right font-mono tabular-nums">
+                        <div class="font-semibold" :class="sizeClass(sizeByLabel[t.label]?.size_bytes ?? 0)">{{ fmtBytes(sizeByLabel[t.label]?.size_bytes) }}</div>
+                        <div v-if="sizeByLabel[t.label]?.compression_ratio" class="text-micro text-faint" v-tip="'Compressed chunks are this many times smaller than they were'">{{ fmtRatio(sizeByLabel[t.label].compression_ratio) }}</div>
+                      </td>
                       <td class="px-4 py-2.5 text-right font-mono tabular-nums" :class="shortfall(t) ? 'text-warn' : 'text-muted'">
                         <span v-tip="shortfall(t) ? 'Holds less than the policy asks for — the cap evicted inside this window, or a rebuilt rollup could only refill from the tier below.' : 'Age of the oldest row actually stored.'">{{ heldText(t) }}</span>
                       </td>
@@ -313,7 +316,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-muted"><VIcon name="settings" :size="18" /></span>
             <h2 class="font-mono text-h2 text-fg">vantage_config</h2>
             <span class="rounded-pill bg-surface2 px-2 py-0.5 text-micro uppercase tracking-wide text-muted">PostgreSQL · relational</span>
-            <span class="ml-auto font-mono text-metric text-fg">{{ withCommas(config.db_size) }}</span>
+            <span class="ml-auto font-mono text-metric text-fg">{{ fmtBytes(config.db_size_bytes) }}</span>
           </div>
 
           <!-- log cleanup: editable retention for the time-growing log tables -->
@@ -360,7 +363,7 @@ const TH = 'border-b border-line2 bg-head px-4 py-3 text-xs font-extrabold upper
                       <div v-if="t.note" class="mt-0.5 text-xs text-faint">{{ t.note }}</div>
                     </td>
                     <td class="px-4 py-2.5 text-right font-mono tabular-nums text-muted">{{ t.rows.toLocaleString() }}</td>
-                    <td class="px-4 py-2.5 text-right font-mono tabular-nums" :class="sizeClass(t.size_bytes ?? 0)">{{ withCommas(t.size) }}</td>
+                    <td class="px-4 py-2.5 text-right font-mono tabular-nums" :class="sizeClass(t.size_bytes ?? 0)">{{ fmtBytes(t.size_bytes) }}</td>
                   </tr>
                 </tbody>
               </table>

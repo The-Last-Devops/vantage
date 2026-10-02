@@ -71,7 +71,11 @@ const CHUNKS: &[(&str, &str)] = &[
     ("container_metrics_5s", "1 hour"),
     ("system_metrics_1m", "1 day"),
     ("system_metrics_1h", "7 days"),
-    ("kube_metrics_1m", "1 day"),
+    // 6h, not a day: retention drops WHOLE chunks, so a chunk only goes once all of its
+    // data is past the window — a 1-day chunk against a 2-day window means holding up to
+    // 3 days. On this tier that overshoot is over a gigabyte (measured: keep=2d, holding
+    // 2.33d of a 1.34 GB/day table). Smaller chunks make the window mean what it says.
+    ("kube_metrics_1m", "6 hours"),
     ("kube_metrics_1h", "7 days"),
     ("heartbeats", "1 day"),
 ];
@@ -140,6 +144,11 @@ pub struct TableStat {
     /// the table isn't auto-pruned. Editable via POST /api/admin/config-retention.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<i32>,
+    /// How many times smaller the compressed chunks are than they were. None when the
+    /// tier has no compressed chunk yet. Worth showing: compression silently did nothing
+    /// at all until 3.3.1, and nothing on the page would have revealed that.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compression_ratio: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -172,6 +181,9 @@ fn unit_for(table: &str) -> &'static str {
 #[derive(Serialize)]
 pub struct DbStats {
     pub db_size: String,
+    /// Raw size so the UI can pick its own units. `pg_size_pretty` only switches to the
+    /// next unit at 10x, so it reports "7968 MB" where a reader expects "7.8 GB".
+    pub db_size_bytes: i64,
     pub tables: Vec<TableStat>,
 }
 
@@ -186,6 +198,7 @@ pub struct CapStatus {
 #[derive(Serialize)]
 pub struct DataDbStats {
     pub db_size: String,
+    pub db_size_bytes: i64,
     pub tables: Vec<TableStat>,
     pub retention: Vec<RetentionTier>,
     pub cap: CapStatus,
@@ -217,7 +230,26 @@ async fn hypertable_stat(data: &PgPool, name: &str, label: &str) -> TableStat {
         rows: rows.map(|(r,)| r).unwrap_or(0),
         note: None,
         retention_days: None,
+        compression_ratio: compression_ratio(data, name).await,
     }
+}
+
+/// Ratio of pre- to post-compression bytes across a tier's compressed chunks. `None`
+/// when nothing is compressed yet (or the relation isn't a compressed hypertable), which
+/// is itself the useful signal — a tier that should be compressing and shows nothing is
+/// a tier whose policy never ran.
+async fn compression_ratio(data: &PgPool, table: &str) -> Option<f64> {
+    let row: Option<(Option<f64>,)> = sqlx::query_as(
+        "SELECT (sum(before_compression_total_bytes)::float8 \
+                 / nullif(sum(after_compression_total_bytes), 0))::float8 \
+         FROM chunk_compression_stats($1)",
+    )
+    .bind(table)
+    .fetch_optional(data)
+    .await
+    .ok()
+    .flatten();
+    row.and_then(|(r,)| r).filter(|r| r.is_finite() && *r > 1.0)
 }
 
 /// Reads a retention policy's `drop_after` interval for a hypertable, expressed
@@ -309,6 +341,7 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
     }
 
     DataDbStats {
+        db_size_bytes: db_size_bytes(data).await,
         db_size,
         tables,
         retention,
@@ -380,9 +413,15 @@ pub async fn config_stats(config: &PgPool) -> DbStats {
             rows,
             note,
             retention_days,
+            // The config DB is plain Postgres — no hypertables, so no compression.
+            compression_ratio: None,
         });
     }
-    DbStats { db_size, tables }
+    DbStats {
+        db_size_bytes: db_size_bytes(config).await,
+        db_size,
+        tables,
+    }
 }
 
 /// Above this on-disk size a config table's row count comes from the planner estimate
@@ -473,6 +512,43 @@ pub async fn prune_config_logs(config: &PgPool) {
                 }
             }
         }
+    }
+}
+
+/// Every Data-DB table keyed by `system_id`, for cleanup when a system is deleted.
+/// A fixed allowlist — never interpolate a caller-supplied name into SQL.
+const SYSTEM_TABLES: &[&str] = &[
+    "system_metrics_5s",
+    "system_metrics_1m",
+    "system_metrics_1h",
+    "container_metrics_5s",
+    "kube_metrics_1m",
+    "kube_metrics_1h",
+];
+
+/// Delete every metric belonging to a system. Best-effort: errors are logged, not
+/// returned, because the system itself is already gone from the config DB and anything
+/// left behind still expires on its normal schedule.
+pub async fn purge_system(data: &PgPool, id: uuid::Uuid) {
+    for t in SYSTEM_TABLES {
+        if let Err(e) = sqlx::query(&format!("DELETE FROM {t} WHERE system_id = $1"))
+            .bind(id)
+            .execute(data)
+            .await
+        {
+            tracing::warn!(error = %e, table = t, %id, "purging metrics for a deleted system");
+        }
+    }
+}
+
+/// Delete every heartbeat belonging to a monitor. Best-effort, as above.
+pub async fn purge_monitor(data: &PgPool, id: uuid::Uuid) {
+    if let Err(e) = sqlx::query("DELETE FROM heartbeats WHERE monitor_id = $1")
+        .bind(id)
+        .execute(data)
+        .await
+    {
+        tracing::warn!(error = %e, %id, "purging heartbeats for a deleted monitor");
     }
 }
 

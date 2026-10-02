@@ -7,6 +7,32 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.4.0] — 2026-10-02
+
+### Fixed
+- **Sizes above a gigabyte were still shown in megabytes.** `pg_size_pretty` only steps up
+  a unit at ten times it, so the biggest numbers on Data & retention read "3125 MB" and
+  "7968 MB". Every size is now formatted from raw bytes and switches at one gigabyte.
+- **Deleting a host or a service left all of its data behind.** The two databases are
+  linked only by id at the application layer, so `DELETE FROM systems` removed the config
+  row and nothing else — every metric that host ever pushed stayed until retention
+  expired, which for the hourly tier is a year. Invisible, unnameable, and unreachable by
+  any query. Deleting a system now clears its rows from all six metric tiers, and deleting
+  a monitor clears its heartbeats. Best-effort: the delete itself still succeeds, and
+  anything missed ages out exactly as before.
+
+### Added
+- **A compression ratio next to each tier's size.** Compression silently did nothing at
+  all until 3.3.1 — the policy existed, the code said it was enabled, and no part of the
+  page would have shown otherwise. A tier that ought to compress and shows no ratio is a
+  tier whose policy never ran.
+
+### Changed
+- `kube_metrics_1m` moves to 6-hour chunks. Retention drops whole chunks, so a chunk only
+  goes once *all* of its data is past the window — day-sized chunks against a two-day
+  window meant holding up to three days. On a tier producing ~1.3 GB/day that overshoot
+  was over a gigabyte; measured, it was holding 2.33 days against a 2-day policy.
+
 ## [3.3.2] — 2026-10-02
 
 ### Fixed

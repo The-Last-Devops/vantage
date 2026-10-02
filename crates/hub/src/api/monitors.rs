@@ -209,5 +209,8 @@ pub async fn delete_monitor(
         .execute(&state.config)
         .await
         .map_err(internal)?;
+    // Heartbeats are kept a year, so without this a deleted check leaves a year of rows
+    // nothing can ever name again. Best-effort — see purge_system.
+    crate::data_admin::purge_monitor(&state.data, id).await;
     Ok(StatusCode::NO_CONTENT)
 }

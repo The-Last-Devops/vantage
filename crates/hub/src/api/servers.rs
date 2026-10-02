@@ -40,5 +40,14 @@ pub async fn delete_system(
         .execute(&state.config)
         .await
         .map_err(internal)?;
+    // The two databases are linked only by id at the application layer, so deleting the
+    // config row leaves every metric this host ever pushed behind — invisible, nameless,
+    // and alive until retention expires, which for the hourly tier is a year. Clean it up
+    // here; this is the only moment anything knows the id is finished with.
+    //
+    // Best-effort on purpose: the system IS deleted either way, and anything missed still
+    // ages out exactly as before. Failing the request over leftover rows would be worse
+    // than leaving them.
+    crate::data_admin::purge_system(&state.data, id).await;
     Ok(StatusCode::NO_CONTENT)
 }
