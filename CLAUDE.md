@@ -221,6 +221,22 @@ docker compose up -d
   `avg` across snapshots): a chart plots cluster totals over time, so a plain
   `avg(cpu_millicores)` yields one container's average — a smooth, believable, wrong line.
   `scripts/check-rollup.sh` asserts the exact number and that it differs from the naive one.
+- **TEST A MIGRATION AGAINST THE STATE THE RUNNING HUB CREATES, NOT THE STATE THE
+  MIGRATIONS CREATE.** Applying `migrations/data/*.sql` to an empty database reproduces a
+  schema no installation actually has: `data_admin::setup` runs at every startup and adds
+  compression, retention policies and (before 3.3.0) the whole continuous-aggregate chain
+  on top. 3.3.0 shipped a migration that passed a green check and then could not start on
+  any real install, because TimescaleDB refuses `CREATE UNIQUE INDEX` (and several other
+  DDL operations) on a hypertable **that has compression enabled** — uniqueness can't be
+  enforced across compressed chunks. Renaming a table or an index is fine; creating an
+  index is not. `scripts/check-upgrade-ladder.sh` now rebuilds the previous release's
+  startup state, compression included, and compresses a chunk before running the new
+  migration.
+- **`psql` IN A CHECK SCRIPT MUST HAVE `-v ON_ERROR_STOP=1`.** Without it psql prints the
+  error, skips that statement and runs the rest, so the script asserts against a
+  half-applied schema and reports success. That is literally what happened with 3.3.0: the
+  failing `CREATE UNIQUE INDEX` was visible in the check's own output while the check said
+  `OK`. A migration the hub would refuse to start on must fail the check.
 - **`REMOVE` A COMPRESSION POLICY BEFORE ADDING IT.** `add_compression_policy` errors when
   one exists and every error in `setup()` is swallowed, so a changed interval silently
   never lands on an existing install. Shipped once already: "compress k8s raw after 1 day"
