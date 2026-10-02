@@ -116,12 +116,20 @@ ALTER TABLE kube_container_stats RENAME TO kube_metrics_1m;
 ALTER INDEX idx_kube_container_sys_time RENAME TO idx_km_1m_sys_time;
 ALTER INDEX idx_kube_container_sys_ns_time RENAME TO idx_km_1m_sys_ns_time;
 
+-- Renaming a hypertable and its indexes is fine with compression on; CREATING one is
+-- NOT. `CREATE UNIQUE INDEX` on a hypertable that has compression enabled fails with
+-- "operation not supported on hypertables that have compression enabled", because
+-- uniqueness cannot be enforced across compressed chunks. This table has had compression
+-- enabled since 3.2.0, so its existing indexes are carried across as they are.
+--
+-- That costs an index-layout optimisation (leading with system_id would let one index
+-- serve both the fill job's conflict check and the read path, saving roughly a fifth of
+-- the rollup's size). Doing it here would mean decompressing every chunk inside the
+-- migration transaction — far more risk than the saving is worth. It belongs in its own
+-- migration that decompresses, rebuilds and re-enables deliberately.
 ALTER TABLE kube_rollup_1h RENAME TO kube_metrics_1h;
-ALTER INDEX idx_kube_1h_key RENAME TO idx_km_1h_key_old;
-DROP INDEX IF EXISTS idx_kube_1h_sys_bucket;
-CREATE UNIQUE INDEX idx_km_1h_key
-    ON kube_metrics_1h (system_id, bucket DESC, namespace, workload, workload_kind, node);
-DROP INDEX IF EXISTS idx_km_1h_key_old;
+ALTER INDEX idx_kube_1h_key RENAME TO idx_km_1h_key;
+ALTER INDEX idx_kube_1h_sys_bucket RENAME TO idx_km_1h_sys_bucket;
 
 -- The 5-minute rung goes away with the ladder it belonged to. Nothing is lost that the
 -- 1m tier (2 days) and the 1h tier (a year) do not already cover.

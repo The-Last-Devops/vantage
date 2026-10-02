@@ -7,6 +7,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.3.1] — 2026-10-02
+
+### Fixed
+- **3.3.0 could not be installed over an existing database.** Its migration rebuilt an
+  index on the hourly Kubernetes rollup, and TimescaleDB refuses `CREATE UNIQUE INDEX` on
+  a hypertable that has compression enabled — uniqueness cannot be enforced across
+  compressed chunks. The hub exited with *"operation not supported on hypertables that
+  have compression enabled"* and the upgrade rolled back cleanly, so no data was affected,
+  but no 3.3.0 install could start. The index is now carried across under its new name
+  instead of being rebuilt; the layout optimisation it was reaching for needs its own
+  migration that decompresses deliberately.
+- The upgrade check never enabled compression, so it tested a database no running hub ever
+  has — and it invoked `psql` without `ON_ERROR_STOP`, which meant a failing statement was
+  shrugged off and the check still reported success. Both are fixed: it now mirrors the
+  hub's compression settings, compresses a chunk, and fails on the first SQL error.
+
 ## [3.3.0] — 2026-10-02
 
 ### Changed

@@ -34,7 +34,7 @@ done
 
 echo "applying migrations up to 0003 (the 3.2.x schema)…"
 for f in "$REPO"/migrations/data/0001_init.sql "$REPO"/migrations/data/0002_*.sql "$REPO"/migrations/data/0003_*.sql; do
-  docker exec -i "$CID" psql -qX -U vantage -d vantage_data < "$f" >/dev/null
+  docker exec -i "$CID" psql -qX -v ON_ERROR_STOP=1 -U vantage -d vantage_data < "$f" >/dev/null
 done
 
 echo "seeding raw host samples spanning 3 hours…"
@@ -66,6 +66,29 @@ mk system_metrics_5m  "5 minutes"  system_metrics_1m   bucket
 mk system_metrics_15m "15 minutes" system_metrics_5m   bucket
 mk system_metrics_1h  "1 hour"     system_metrics_15m  bucket
 
+# Turn on compression exactly as data_admin::setup does, and actually compress a chunk.
+# Leaving this out is what let a broken migration pass review: TimescaleDB refuses a
+# number of DDL operations on a hypertable that has compression enabled, and the real hub
+# ALWAYS has it enabled by the time an upgrade runs.
+echo "enabling compression like the running hub does…"
+q "ALTER TABLE kube_container_stats SET (timescaledb.compress,
+      timescaledb.compress_segmentby = 'system_id, namespace',
+      timescaledb.compress_orderby = 'time DESC');" >/dev/null
+q "ALTER TABLE heartbeats SET (timescaledb.compress,
+      timescaledb.compress_segmentby = 'monitor_id',
+      timescaledb.compress_orderby = 'time DESC');" >/dev/null
+q "ALTER TABLE kube_rollup_1h SET (timescaledb.compress,
+      timescaledb.compress_segmentby = 'system_id',
+      timescaledb.compress_orderby = 'bucket DESC');" >/dev/null
+q "ALTER TABLE kube_rollup_5m SET (timescaledb.compress,
+      timescaledb.compress_segmentby = 'system_id',
+      timescaledb.compress_orderby = 'bucket DESC');" >/dev/null
+for v in system_metrics_1m system_metrics_5m system_metrics_15m system_metrics_1h; do
+  q "ALTER MATERIALIZED VIEW $v SET (timescaledb.compress = true);" >/dev/null
+done
+# And compress something, so the migration meets real compressed chunks, not just the flag.
+q "SELECT compress_chunk(c) FROM show_chunks('kube_container_stats') c;" >/dev/null 2>&1 || true
+
 before_1h=$(q "SELECT count(*) FROM system_metrics_1h")
 before_1m=$(q "SELECT count(*) FROM system_metrics_1m")
 before_cpu=$(q "SELECT round(avg(cpu_percent)::numeric, 3) FROM system_metrics_1h")
@@ -79,7 +102,11 @@ q "INSERT INTO kube_container_stats
    VALUES (now() - interval '1 hour','$SID','prod','p','c','n1','Running','web','Deployment',7,70,3,'{}');" >/dev/null
 
 echo "applying 0004…"
-docker exec -i "$CID" psql -qX -U vantage -d vantage_data < "$REPO"/migrations/data/0004_*.sql >/dev/null
+# ON_ERROR_STOP is not optional here. Without it psql shrugs off a failing statement and
+# runs the rest, so a migration that the hub would refuse to start on still "passes" —
+# which is exactly how a broken 0004 got released.
+docker exec -i "$CID" psql -qX -v ON_ERROR_STOP=1 -U vantage -d vantage_data < "$REPO"/migrations/data/0004_*.sql >/dev/null \
+  || { echo "FAIL: migration 0004 errored — the hub would refuse to start"; exit 1; }
 
 after_1h=$(q "SELECT count(*) FROM system_metrics_1h")
 after_1m=$(q "SELECT count(*) FROM system_metrics_1m")

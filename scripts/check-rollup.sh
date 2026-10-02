@@ -33,7 +33,7 @@ done
 
 echo "applying data migrations…"
 for f in "$REPO"/migrations/data/*.sql; do
-  docker exec -i "$CID" psql -qX -U vantage -d vantage_data < "$f" >/dev/null
+  docker exec -i "$CID" psql -qX -v ON_ERROR_STOP=1 -U vantage -d vantage_data < "$f" >/dev/null
 done
 
 # --- shape -----------------------------------------------------------------------
