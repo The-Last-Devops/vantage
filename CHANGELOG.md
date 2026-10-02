@@ -7,6 +7,52 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.3.0] — 2026-10-02
+
+### Changed
+- **One ladder for every metric, and every table says what it holds.** Host metrics had
+  five rungs, Kubernetes had three, and they shared neither names, mechanism nor
+  reasoning. Both now step `raw → 1 minute → 1 hour`, and the tables are named for their
+  resolution: `system_metrics_5s`, `system_metrics_1m`, `system_metrics_1h`,
+  `kube_metrics_1m`, `kube_metrics_1h`, `container_metrics_5s`. A table called
+  `system_metrics` sitting next to `system_metrics_1m` gave the reader no way to tell
+  which one was finer.
+  The middle rungs earned nothing: every range the UI offers buckets to 1m, 2m, 5m, 10m,
+  15m, 1h, 6h or 1d, and a tier serves any bucket that is a multiple of it — so raw, 1m
+  and 1h cover all of them. `heartbeats` keeps its name on purpose: a row there is one
+  service check, not a sample on a clock, and its interval is per-monitor.
+  Kubernetes has no sub-minute rung because it cannot have one. Its samples come from
+  metrics-server, which defaults to 60s and documents 15s as the floor since that is what
+  kubelet itself computes; polling faster returns the same number repeatedly. The 60s
+  detail table therefore *is* the 1-minute tier, and it keeps pod and label detail for
+  drill-down.
+- **Retention per tier**: 8 hours raw, 2 days at 1 minute, 365 days at 1 hour — the same
+  shape for hosts and clusters.
+
+### Fixed
+- **The hourly tier can finally hold a year.** `system_metrics_1h` was a continuous
+  aggregate built on a chain of other aggregates, and a continuous aggregate cannot be
+  `ALTER`ed — so adding any metric column dropped and rebuilt the whole chain, after
+  which the hourly tier could only refill from the 45-day tier below it. It was holding
+  **43 days under a 365-day policy**, and would have silently reset again on the next
+  upgrade that touched a column. The rollups are now plain tables filled by a background
+  job, so a new column is an `ADD COLUMN` and the history stays. The migration copies the
+  existing hourly rows out *before* dropping the old chain; `scripts/check-upgrade-ladder.sh`
+  asserts that on a populated database.
+- **Compression now actually applies.** `add_compression_policy` errors when a policy
+  already exists, and every error in that startup path is swallowed, so a changed interval
+  silently never landed on an existing install. This shipped in 3.2.0 as "compress k8s raw
+  after 1 day" while the old 2-day policy stayed in force — and since that tier is only
+  *kept* 2 days, every chunk was dropped at the exact moment it became eligible. The tier
+  was 100% uncompressed while the code said otherwise.
+- `container_metrics` lost its retention policy entirely in 3.2.0 when its (unread) rollup
+  ladder was removed, leaving it to grow without limit. It is covered again.
+
+### Removed
+- The 5- and 15-minute host rungs and the 5-minute Kubernetes rung, with the continuous
+  aggregates, refresh jobs, compression policies and retention policies that came with
+  them.
+
 ## [3.2.0] — 2026-10-01
 
 ### Fixed

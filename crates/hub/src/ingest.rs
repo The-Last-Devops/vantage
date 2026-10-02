@@ -128,7 +128,7 @@ pub async fn ingest(
     // Write the sample into the data DB. system_id is the cross-DB link (no JOINs).
     sqlx::query(
         r#"
-        INSERT INTO system_metrics (
+        INSERT INTO system_metrics_5s (
             time, system_id, cpu_percent, mem_used, mem_total,
             swap_used, swap_total, disk_used, disk_total,
             net_rx, net_tx, load1, uptime, temps,
@@ -190,7 +190,7 @@ pub async fn ingest(
             tx.push(c.net_tx as i64);
         }
         if let Err(e) = sqlx::query(
-            "INSERT INTO container_metrics (time, system_id, name, cpu_percent, mem_used, net_rx, net_tx) \
+            "INSERT INTO container_metrics_5s (time, system_id, name, cpu_percent, mem_used, net_rx, net_tx) \
              SELECT $1, $2, t.name, t.cpu, t.mem, t.rx, t.tx \
              FROM unnest($3::text[], $4::float8[], $5::bigint[], $6::bigint[], $7::bigint[]) \
                   AS t(name, cpu, mem, rx, tx)",
@@ -297,7 +297,7 @@ pub async fn ingest_kube(
             labels.push(serde_json::to_string(&c.labels).unwrap_or_else(|_| "{}".into()));
         }
         if let Err(e) = sqlx::query(
-            "INSERT INTO kube_container_stats \
+            "INSERT INTO kube_metrics_1m \
              (time, system_id, namespace, pod, container, node, phase, workload, workload_kind, cpu_millicores, mem_bytes, restarts, labels) \
              SELECT $1, $2, t.ns, t.pod, t.container, t.node, t.phase, t.workload, t.workload_kind, t.cpu, t.mem, t.restarts, t.labels::jsonb \
              FROM unnest($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[], $10::bigint[], $11::bigint[], $12::int[], $13::text[]) \

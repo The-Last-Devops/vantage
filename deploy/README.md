@@ -155,10 +155,11 @@ required — the defaults give a working single-node hub with bundled databases.
 that scales badly**, because the raw tier stores a row per *container* per scrape: a few
 thousand containers at a 15-second cadence is several GB per day, which will reach any
 cap you set within days. Two knobs, both under *Settings → Data & retention*:
-the **cluster sampling cadence** (60s is the default and is already fine-grained for
-cluster-wide trends) and the **raw k8s retention** (2 days — the 5-minute and hourly
-rollups are what long ranges read from anyway). Charts past 24 hours are served from the
-rollups, so shortening raw costs drill-down detail, not history.
+the **cluster sampling cadence** (60s is the default, and metrics-server only refreshes
+every 60s anyway — polling faster just repeats the same number) and the **`kube_metrics_1m`
+retention** (2 days; the hourly rollup is what longer ranges read). Charts past 24 hours
+are served from the hourly tier, so shortening the detail tier costs pod-level drill-down,
+not history.
 
 When the cap is reached the hub evicts the oldest chunks of the largest tier, which means
 **it can delete data newer than that tier's configured window**. The *Has* column on that

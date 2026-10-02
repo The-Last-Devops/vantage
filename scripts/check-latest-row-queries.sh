@@ -47,7 +47,7 @@ M2="00000000-0000-0000-0000-0000000000b2"
 # whole-table scan is measurably different from reading only the newest chunk.
 echo "seeding 20 days of samples across 2 systems + 2 monitors…"
 docker exec -i "$CID" psql -v ON_ERROR_STOP=1 -q -U vantage -d vantage_data >/dev/null <<SQL
-INSERT INTO system_metrics (time, system_id, cpu_percent, mem_used, mem_total, swap_used,
+INSERT INTO system_metrics_5s (time, system_id, cpu_percent, mem_used, mem_total, swap_used,
   swap_total, disk_used, disk_total, net_rx, net_tx, load1, uptime, disk_util)
 SELECT g, sid, (extract(epoch FROM g)::bigint % 97)::float8, 1, 2, 0, 0, 3, 4, 0, 0, 0.1, 1, 5
 FROM generate_series(now() - interval '20 days', now(), interval '30 minutes') g,
@@ -57,7 +57,7 @@ SELECT g, mid, (extract(epoch FROM g)::bigint % 7) <> 0, 12, 'ok'
 FROM generate_series(now() - interval '20 days', now(), interval '30 minutes') g,
      unnest(ARRAY['$M1','$M2']::uuid[]) mid;
 SQL
-echo "  rows: system_metrics=$(psql -c 'SELECT count(*) FROM system_metrics;') heartbeats=$(psql -c 'SELECT count(*) FROM heartbeats;')"
+echo "  rows: system_metrics_5s=$(psql -c 'SELECT count(*) FROM system_metrics_5s;') heartbeats=$(psql -c 'SELECT count(*) FROM heartbeats;')"
 
 fail=0
 assert() { if [ "$2" = "$3" ]; then echo "  ok: $1"; else echo "  FAIL: $1 (got '$2', want '$3')"; fail=1; fi; }
@@ -75,10 +75,10 @@ cheaper() { # name, new_sql, old_sql
 echo
 echo "1) /api/systems — latest sample per system"
 NEW_SYS="SELECT s.sid, m.cpu_percent FROM unnest(ARRAY['$S1','$S2']::uuid[]) AS s(sid) \
-  JOIN LATERAL (SELECT cpu_percent FROM system_metrics WHERE system_id = s.sid \
+  JOIN LATERAL (SELECT cpu_percent FROM system_metrics_5s WHERE system_id = s.sid \
                 AND time > now() - interval '6 hours' ORDER BY time DESC LIMIT 1) m ON true \
   ORDER BY s.sid"
-OLD_SYS="SELECT DISTINCT ON (system_id) system_id, cpu_percent FROM system_metrics \
+OLD_SYS="SELECT DISTINCT ON (system_id) system_id, cpu_percent FROM system_metrics_5s \
   WHERE system_id = ANY(ARRAY['$S1','$S2']::uuid[]) ORDER BY system_id, time DESC"
 assert "same rows as DISTINCT ON" "$(psql -c "$NEW_SYS;")" "$(psql -c "$OLD_SYS;")"
 cheaper "systems latest" "$NEW_SYS;" "$OLD_SYS;"

@@ -1,4 +1,4 @@
-//! Read API for Kubernetes per-container stats (`kube_container_stats`).
+//! Read API for Kubernetes per-container stats (`kube_metrics_1m`).
 //!
 //! The agent stores the granular unit — one row per container per snapshot, with
 //! pod metadata + labels — and these endpoints **aggregate on read** by whatever
@@ -19,7 +19,7 @@ use crate::AppState;
 
 /// How far back a "latest snapshot" lookup is allowed to look.
 ///
-/// `kube_container_stats` is the biggest hypertable in the product (one row per
+/// `kube_metrics_1m` is the biggest hypertable in the product (one row per
 /// container per snapshot, 14 days retention, 2-day chunks). An unbounded
 /// `max(time)` / `time = <that max>` pair gives TimescaleDB nothing to exclude
 /// chunks on, so every "what does the cluster look like right now" query scanned
@@ -110,14 +110,14 @@ pub async fn kube_aggregate(
         ", sum(cpu_millicores)::float8 AS cpu_millicores, sum(mem_bytes)::float8 AS mem_bytes, \
          count(DISTINCT pod)::int8 AS pods, count(*)::int8 AS containers, sum(restarts)::int8 AS restarts, \
          extract(epoch FROM max(c.time))::int8 AS as_of \
-         FROM kube_container_stats c WHERE c.system_id = ",
+         FROM kube_metrics_1m c WHERE c.system_id = ",
     );
     // Scalar subquery (not a CTE) so the planner runs it as an InitPlan and can do
     // runtime chunk exclusion on `c.time`; both halves are bounded by FRESH.
     qb.push_bind(id)
         .push(format!(
             " AND c.time > now() - interval '{FRESH}' AND c.time = (SELECT max(time) FROM \
-             kube_container_stats WHERE system_id = "
+             kube_metrics_1m WHERE system_id = "
         ))
         .push_bind(id)
         .push(format!(" AND time > now() - interval '{FRESH}')"));
@@ -178,9 +178,9 @@ pub async fn kube_summary(
                 COALESCE(sum(restarts),0)::int8 AS restarts, \
                 count(DISTINCT namespace)::int8 AS namespaces, \
                 count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
-         FROM kube_container_stats c WHERE c.system_id = $1 \
+         FROM kube_metrics_1m c WHERE c.system_id = $1 \
            AND c.time > now() - interval '{FRESH}' \
-           AND c.time = (SELECT max(time) FROM kube_container_stats \
+           AND c.time = (SELECT max(time) FROM kube_metrics_1m \
                          WHERE system_id = $1 AND time > now() - interval '{FRESH}')"
     ))
     .bind(id)
@@ -239,9 +239,9 @@ pub async fn kube_summaries(
                   COALESCE(sum(restarts),0)::int8 AS restarts, \
                   count(DISTINCT namespace)::int8 AS namespaces, \
                   count(DISTINCT node) FILTER (WHERE node <> '')::int8 AS nodes \
-           FROM kube_container_stats c WHERE c.system_id = s.sid \
+           FROM kube_metrics_1m c WHERE c.system_id = s.sid \
              AND c.time > now() - interval '{FRESH}' \
-             AND c.time = (SELECT max(time) FROM kube_container_stats \
+             AND c.time = (SELECT max(time) FROM kube_metrics_1m \
                            WHERE system_id = s.sid AND time > now() - interval '{FRESH}') \
          ) agg WHERE agg.as_of IS NOT NULL"
     ))
@@ -311,12 +311,12 @@ pub async fn kube_containers(
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT namespace, pod, container, node, phase, workload, workload_kind, \
                 cpu_millicores, mem_bytes, restarts, labels \
-         FROM kube_container_stats c WHERE c.system_id = ",
+         FROM kube_metrics_1m c WHERE c.system_id = ",
     );
     qb.push_bind(id)
         .push(format!(
             " AND c.time > now() - interval '{FRESH}' AND c.time = (SELECT max(time) FROM \
-             kube_container_stats WHERE system_id = "
+             kube_metrics_1m WHERE system_id = "
         ))
         .push_bind(id)
         .push(format!(" AND time > now() - interval '{FRESH}')"));
@@ -345,27 +345,22 @@ fn kube_tier(
     range: &Option<String>,
     has_label: bool,
 ) -> (&'static str, &'static str, &'static str) {
-    const RAW: (&str, &str, &str) = ("kube_container_stats", "cpu_millicores", "mem_bytes");
-    const T5M: (&str, &str, &str) = ("kube_rollup_5m", "cpu_avg", "mem_avg");
-    const T1H: (&str, &str, &str) = ("kube_rollup_1h", "cpu_avg", "mem_avg");
+    const T1M: (&str, &str, &str) = ("kube_metrics_1m", "cpu_millicores", "mem_bytes");
+    const T1H: (&str, &str, &str) = ("kube_metrics_1h", "cpu_avg", "mem_avg");
     if has_label {
-        return RAW;
+        return T1M;
     }
     match range.as_deref() {
-        // 12h and 24h display in 10- and 15-minute buckets, so the 5-minute rollup is
-        // finer than anything that reaches the screen — and measured on the busiest
-        // cluster, reading raw for 24h took 16s against 2s for 7d and 1s for 30d, i.e.
-        // the SHORT range had become the slow one. Below 12h the display bucket drops to
-        // 5 minutes or less, where raw is both needed and cheap.
-        Some("12h") | Some("24h") | Some("7d") => T5M,
-        Some("30d") | Some("90d") | Some("1y") => T1H,
-        _ => RAW,
+        Some("7d") | Some("30d") | Some("90d") | Some("1y") => T1H,
+        _ => T1M,
     }
 }
 
 /// The rollup tiers bucket into `bucket`; the raw tier timestamps into `time`.
 fn kube_timecol(table: &str) -> &'static str {
-    if table == "kube_container_stats" {
+    // The 1m tier IS the detail table the agent writes into, so it timestamps each
+    // sample in `time`; only the rolled-up tier has `bucket`.
+    if table == "kube_metrics_1m" {
         "time"
     } else {
         "bucket"

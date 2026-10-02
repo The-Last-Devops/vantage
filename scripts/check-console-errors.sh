@@ -56,7 +56,7 @@ CID=$(docker exec -i "$CFG" psql -tAqX -U vantage -d vantage_config -c \
    FROM api_keys k LIMIT 1 RETURNING id;" 2>/dev/null | tr -d '[:space:]')
 if [ -n "$CID" ]; then
   docker exec -i "$DAT" psql -q -U vantage -d vantage_data >/dev/null 2>&1 <<SQL
-INSERT INTO kube_container_stats (time, system_id, namespace, pod, container, node, phase, workload, workload_kind, cpu_millicores, mem_bytes, restarts, labels)
+INSERT INTO kube_metrics_1m (time, system_id, namespace, pod, container, node, phase, workload, workload_kind, cpu_millicores, mem_bytes, restarts, labels)
 SELECT now(), '$CID'::uuid, t.ns, t.pod, 'app', t.node, 'Running', 'web', 'Deployment', t.cpu, t.mem, 1, '{"app":"web"}'::jsonb
 FROM unnest(ARRAY['default','kube-system','staging']::text[], ARRAY['p1','p2','p3']::text[],
             ARRAY['k8s1-cp-1','k8s1-worker-2','k8s1-worker-3']::text[],

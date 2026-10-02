@@ -83,8 +83,9 @@ Every write lands in the audit log under the token's owner. See [docs/API.md](do
 **Admin & data** — a human-readable **audit log** (action + affected object), an **About**
 page (version + update check), **data retention** tiers, and **backup / restore** —
 download/upload or scheduled to S3-compatible storage. Metrics downsample through a
-ladder so a long lookback stays cheap: host samples roll up to 1m / 5m / 15m / 1h, and
-Kubernetes per-container samples to 5m / 1h. Each tier shows both the window it is
+ladder so a long lookback stays cheap, and every family uses the same three rungs —
+`raw → 1 minute → 1 hour` — with each table named for its resolution
+(`system_metrics_5s`, `kube_metrics_1h`, …). Each tier shows both the window it is
 configured to keep **and the age of the oldest row it actually holds** — those two
 diverge whenever the storage cap has had to evict, and a page that only showed the
 intention hid real data loss for weeks.

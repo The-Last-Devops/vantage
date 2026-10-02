@@ -53,18 +53,21 @@ pub struct RangeQuery {
 pub fn chart_tier(
     range: &Option<String>,
 ) -> (&'static str, &'static str, &'static str, &'static str) {
+    // Three rungs, so each range reads the coarsest tier whose resolution still divides
+    // the display bucket: raw below 12h, the 1-minute tier for 12h-24h, the hourly tier
+    // from 7d up (7d already buckets by the hour, so nothing finer would reach the eye).
     match range.as_deref() {
-        Some("30m") => ("", "time", "30 minutes", "1 minute"),
-        Some("1h") => ("", "time", "1 hour", "1 minute"),
-        Some("3h") => ("", "time", "3 hours", "2 minutes"),
-        Some("6h") => ("", "time", "6 hours", "5 minutes"),
+        Some("30m") => ("_5s", "time", "30 minutes", "1 minute"),
+        Some("1h") => ("_5s", "time", "1 hour", "1 minute"),
+        Some("3h") => ("_5s", "time", "3 hours", "2 minutes"),
+        Some("6h") => ("_5s", "time", "6 hours", "5 minutes"),
         Some("12h") => ("_1m", "bucket", "12 hours", "10 minutes"),
         Some("24h") => ("_1m", "bucket", "24 hours", "15 minutes"),
-        Some("7d") => ("_5m", "bucket", "7 days", "1 hour"),
-        Some("30d") => ("_15m", "bucket", "30 days", "6 hours"),
+        Some("7d") => ("_1h", "bucket", "7 days", "1 hour"),
+        Some("30d") => ("_1h", "bucket", "30 days", "6 hours"),
         Some("90d") => ("_1h", "bucket", "90 days", "1 day"),
         Some("1y") => ("_1h", "bucket", "365 days", "1 day"),
-        _ => ("", "time", "1 hour", "1 minute"),
+        _ => ("_5s", "time", "1 hour", "1 minute"),
     }
 }
 pub(crate) fn internal<E: std::fmt::Display>(e: E) -> StatusCode {

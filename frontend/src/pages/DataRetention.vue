@@ -116,10 +116,10 @@ async function saveCap() {
 
 // ---- retention tiers, grouped + joined to size/rows ----
 const GROUPS = [
-  { label: 'System metrics', match: (t) => t.table.startsWith('system_metrics') },
-  { label: 'Containers', match: (t) => t.table.startsWith('container_metrics') },
-  { label: 'Health', match: (t) => t.table === 'heartbeats' },
+  { label: 'Hosts', match: (t) => t.table.startsWith('system_metrics') },
   { label: 'Kubernetes', match: (t) => t.table.startsWith('kube_') },
+  { label: 'Docker containers', match: (t) => t.table.startsWith('container_metrics') },
+  { label: 'Service checks', match: (t) => t.table === 'heartbeats' },
 ]
 const sizeByLabel = computed(() => Object.fromEntries((data.value?.tables || []).map((t) => [t.name, t])))
 // Split the config tables into two columns so the (short) list fills the width.
@@ -132,10 +132,14 @@ const tierRows = (t) => sizeByLabel.value[t.label]?.rows ?? 0
 // Order tiers by their place on the ladder, finest first — NOT by size. Sorting by size
 // rendered the chain as raw → 15m → 1m → 5m → 1h, which is unreadable precisely when you
 // are trying to reason about how data flows down it.
-const LADDER = ['', '_1m', '_5m', '_15m', '_1h']
+// Every metric table names its resolution, so the rung is just the suffix. Ordering by
+// it keeps the chain readable; ordering by size (the old behaviour) rendered it as
+// raw -> 15m -> 1m -> 5m -> 1h, which is unreadable exactly when you are trying to
+// reason about how data flows down it.
+const LADDER = ['_5s', '_1m', '_1h']
 const rungOf = (table) => {
-  const i = LADDER.findIndex((sfx) => sfx && table.endsWith(sfx))
-  return i === -1 ? 0 : i
+  const i = LADDER.findIndex((sfx) => table.endsWith(sfx))
+  return i === -1 ? LADDER.length : i
 }
 const tierGroups = computed(() => {
   const r = data.value?.retention || []

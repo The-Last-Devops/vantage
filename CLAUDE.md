@@ -196,26 +196,45 @@ docker compose up -d
   the answer must survive a long silence (a monitor's up/down state), where `LIMIT 1` stops
   early anyway. `scripts/check-latest-row-queries.sh` asserts the plan from `EXPLAIN` — extend
   it when you add such a read.
-- **K8s rollups are PLAIN TABLES filled by a job (`kube_rollup.rs`), not continuous
-  aggregates — don't "fix" that.** A CAgg can't be `ALTER`ed, so adding one metric column
-  makes `setup()` drop and rebuild the whole chain, after which the long tier can only
-  refill from the tier below it. Measured consequence on the real hub:
-  `system_metrics_1h` carried **44 days** under a 365-day policy, because 15m keeps 45.
-  A long-horizon tier that silently resets on every upgrade is not a long-horizon tier.
-  A real table takes `ADD COLUMN` and keeps its history.
-  The aggregation is two-stage everywhere (`sum` across containers **within a snapshot**,
-  then `avg` across snapshots): a chart plots cluster totals over time, so a plain
-  `avg(cpu_millicores)` yields one container's average — a smooth, believable, wrong
-  line. `scripts/check-kube-rollup.sh` asserts the exact number and that it differs from
-  the naive one.
+- **ONE LADDER, THREE RUNGS, AND EVERY TABLE NAMES ITS RESOLUTION**: `raw → 1m → 1h`
+  for both families — `system_metrics_5s/_1m/_1h`, `kube_metrics_1m/_1h`,
+  `container_metrics_5s`. Don't reintroduce a 5m or 15m rung: every range the UI offers
+  buckets to 1m, 2m, 5m, 10m, 15m, 1h, 6h or 1d, and a tier serves any bucket that is a
+  multiple of it, so these three cover all of them. `heartbeats` keeps its bare name on
+  purpose — a row is one service check, not a sample on a clock, and the interval is
+  per-monitor (60s…14h here), so a time suffix would state a number that doesn't exist.
+  K8s has no sub-minute rung because metrics-server defaults to 60s and documents 15s as
+  the floor (that's what kubelet computes); polling faster returns the same number again.
+  So `kube_metrics_1m` IS the detail table the agent writes into — it keeps `pod` and
+  `labels`, timestamps into `time` (not `bucket`), and is the only place pod-level
+  drill-down and label filtering exist.
+- **ROLLUPS ARE PLAIN TABLES FILLED BY `rollup.rs`, NOT CONTINUOUS AGGREGATES — don't
+  "fix" that.** A CAgg can't be `ALTER`ed, so adding one metric column made `setup()`
+  drop and rebuild the whole chain, after which the long tier could only refill from the
+  tier below it. Measured on the live hub: `system_metrics_1h` carried **43 days** under a
+  365-day policy, because the 15m tier below it kept 45. A long-horizon tier that silently
+  resets on every upgrade is not a long-horizon tier. A real table takes `ADD COLUMN`.
+  Any migration that touches the ladder must copy data out BEFORE dropping, and
+  `scripts/check-upgrade-ladder.sh` asserts that against a populated 3.2.x database — it
+  is the only guard on the longest history the hub has.
+  The k8s aggregation is two-stage (`sum` across containers **within a snapshot**, then
+  `avg` across snapshots): a chart plots cluster totals over time, so a plain
+  `avg(cpu_millicores)` yields one container's average — a smooth, believable, wrong line.
+  `scripts/check-rollup.sh` asserts the exact number and that it differs from the naive one.
+- **`REMOVE` A COMPRESSION POLICY BEFORE ADDING IT.** `add_compression_policy` errors when
+  one exists and every error in `setup()` is swallowed, so a changed interval silently
+  never lands on an existing install. Shipped once already: "compress k8s raw after 1 day"
+  left the old 2-day policy in force, and since that tier is only KEPT 2 days, every chunk
+  was dropped at the moment it became eligible — 100% uncompressed while the code said
+  otherwise. Same trap as `add_retention_policy`, which is why that one removes first.
+  Keep `compress_after` comfortably below `keep` or compression can never run.
 - **`kube_namespace_stats` / `kube_deployment_stats` are DELETED and must stay deleted**
   (`migrations/data/0003`). They were written every scrape and read by nothing — the
-  namespace/workload breakdowns aggregate on read from `kube_container_stats`, which has
-  those columns. 5.6 GB of a 17 GB DB, which is what kept the 20 GB cap tripping, which is
-  what made eviction delete a day of real cluster history **every night for three weeks**.
+  namespace/workload breakdowns aggregate on read from the detail tier, which has those
+  columns. 5.6 GB of a 17 GB DB, which is what kept the 20 GB cap tripping, which is what
+  made eviction delete a day of real cluster history **every night for three weeks**.
   If deployment rollout health is wanted later, add a small purpose-built table sized to an
-  actual query — not another unbounded 365-day firehose. The check script asserts they stay
-  dropped.
+  actual query — not another unbounded 365-day firehose.
 - **Eviction has a protected set (`PROTECTED_TIERS`), and largest-first is not a
   guarantee.** The long tiers were spared only because they were small; a year of hourly
   rollup eventually becomes the largest table, at which point plain largest-first starts
@@ -224,7 +243,7 @@ docker compose up -d
   weeks and nobody connected it to the charts that were visibly short.
 - **Retention policy ≠ data actually held; show both.** The Data & retention page used to
   display only the configured window, and on the live hub every long-term number was
-  fiction (k8s 14d→2.3d, host 1h 365d→44d). `RetentionTier.oldest_days` carries the real
+  fiction (k8s 14d→2.3d, host 1h 365d→43d). `RetentionTier.oldest_days` carries the real
   age and the UI flags the gap. When you touch retention, verify with the real age, not
   the policy.
 - **A rollup tier is a continuous aggregate, so TimescaleDB reports its jobs against the

@@ -391,7 +391,7 @@ async fn evaluate_server(
     let threshold = cond.get("value").and_then(Value::as_f64);
     if let (Some(metric), Some(op), Some(threshold)) = (metric, op, threshold) {
         let row: Option<(f64, f64, i64, i64)> = sqlx::query_as(
-            "SELECT cpu_percent, load1, mem_used, mem_total FROM system_metrics \
+            "SELECT cpu_percent, load1, mem_used, mem_total FROM system_metrics_5s \
              WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
         )
         .bind(system_id)

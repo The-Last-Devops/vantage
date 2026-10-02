@@ -65,7 +65,7 @@ pub async fn list_systems(
 
     // Latest sample for ALL systems in ONE query (was N+1). One LATERAL LIMIT 1 per
     // system, not `DISTINCT ON` over `= ANY($1)`: the latter had to sort every matching
-    // row in `system_metrics` — the raw tier, one row per host per 5s — just to keep the
+    // row in `system_metrics_5s` — the raw tier, one row per host per 5s — just to keep the
     // newest per host. The FRESH bound then lets TimescaleDB exclude all but the newest
     // chunk; a host silent that long is offline and shows no numbers anyway (`last_seen`
     // comes from the config DB and is unaffected). This is `/api/systems`, which the
@@ -75,7 +75,7 @@ pub async fn list_systems(
         "SELECT s.sid, m.cpu_percent, m.mem_used, m.mem_total, m.disk_used, m.disk_total, m.disk_util \
          FROM unnest($1::uuid[]) AS s(sid) \
          JOIN LATERAL (SELECT cpu_percent, mem_used, mem_total, disk_used, disk_total, disk_util \
-                       FROM system_metrics WHERE system_id = s.sid \
+                       FROM system_metrics_5s WHERE system_id = s.sid \
                          AND time > now() - interval '6 hours' \
                        ORDER BY time DESC LIMIT 1) m ON true",
     )

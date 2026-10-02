@@ -47,7 +47,7 @@ pub async fn system_containers(
     }
     let (_, _, interval, _) = chart_tier(&q.range);
     let sql = format!(
-        "SELECT time, name, cpu_percent, mem_used, net_rx, net_tx FROM container_metrics \
+        "SELECT time, name, cpu_percent, mem_used, net_rx, net_tx FROM container_metrics_5s \
          WHERE system_id = $1 AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 20000"
     );
     let rows: Vec<(chrono::DateTime<chrono::Utc>, String, f64, i64, i64, i64)> =
@@ -111,7 +111,7 @@ pub async fn system_temps(
     }
     let (_, _, interval, _) = chart_tier(&q.range);
     let sql = format!(
-        "SELECT time, temps FROM system_metrics WHERE system_id = $1 AND temps IS NOT NULL \
+        "SELECT time, temps FROM system_metrics_5s WHERE system_id = $1 AND temps IS NOT NULL \
          AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"
     );
     let rows: Vec<(
@@ -159,7 +159,7 @@ pub async fn system_gpu(
     }
     let (_, _, interval, _) = chart_tier(&q.range);
     let sql = format!(
-        "SELECT time, gpus FROM system_metrics WHERE system_id = $1 AND gpus IS NOT NULL \
+        "SELECT time, gpus FROM system_metrics_5s WHERE system_id = $1 AND gpus IS NOT NULL \
          AND gpus <> '[]'::jsonb AND time > now() - interval '{interval}' ORDER BY time ASC LIMIT 2000"
     );
     let rows: Vec<(

@@ -10,245 +10,87 @@ use serde::Serialize;
 use sqlx::PgPool;
 use std::time::Duration;
 
-/// Best-effort downsampling setup. Errors (e.g. policy already exists) are logged
-/// and ignored so startup never fails on re-run.
-// Aggregation expressions reused at every rollup level — column names match the
-// raw table, so the SAME expressions roll a finer tier up into a coarser one
-// (avg of avgs over equal-width buckets; max of cumulative counters stays a max).
-const SYS_AGG: &str = "avg(cpu_percent) AS cpu_percent, avg(mem_used) AS mem_used, \
-     avg(mem_total) AS mem_total, avg(swap_used) AS swap_used, avg(swap_total) AS swap_total, \
-     avg(disk_used) AS disk_used, avg(disk_total) AS disk_total, \
-     max(net_rx) AS net_rx, max(net_tx) AS net_tx, max(disk_read) AS disk_read, max(disk_write) AS disk_write, \
-     avg(load1) AS load1, avg(load5) AS load5, avg(load15) AS load15, \
-     avg(cpu_user) AS cpu_user, avg(cpu_system) AS cpu_system, avg(cpu_iowait) AS cpu_iowait, \
-     avg(cpu_steal) AS cpu_steal, avg(disk_util) AS disk_util, \
-     avg(mem_available) AS mem_available, avg(mem_buffers) AS mem_buffers, \
-     avg(mem_cached) AS mem_cached, avg(mem_free) AS mem_free";
+// Retention + compression for every tier, applied at startup (idempotent, best-effort).
+//
+// There is no continuous aggregate anywhere in here any more: the rollup tiers are plain
+// tables filled by `rollup.rs`. A CAgg cannot be `ALTER`ed, so adding one metric column
+// forced a drop and rebuild of the whole chain, and the long tier could then only refill
+// from the tier below — the reason `system_metrics_1h` held 43 days under a 365-day
+// policy. See `migrations/data/0004`.
 
-/// One rollup tier: (suffix, bucket, source-table, source-time-column).
-const SYS_TIERS: &[(&str, &str, &str, &str)] = &[
-    ("1m", "1 minute", "system_metrics", "time"),
-    ("5m", "5 minutes", "system_metrics_1m", "bucket"),
-    ("15m", "15 minutes", "system_metrics_5m", "bucket"),
-    ("1h", "1 hour", "system_metrics_15m", "bucket"),
+/// Every tier: (table, keep, compress_after, time column, compress segment-by).
+///
+/// `compress_after` MUST be comfortably shorter than `keep`, or chunks reach the drop
+/// age at the same moment they become eligible and nothing is ever compressed. That
+/// exact mistake shipped in 3.2.0 for the k8s detail tier. `None` means the tier is too
+/// short-lived for compression to pay for itself.
+const TIERS: &[(&str, &str, Option<&str>, &str, &str)] = &[
+    ("system_metrics_5s", "8 hours", None, "time", "system_id"),
+    (
+        "system_metrics_1m",
+        "2 days",
+        Some("1 day"),
+        "bucket",
+        "system_id",
+    ),
+    (
+        "system_metrics_1h",
+        "365 days",
+        Some("14 days"),
+        "bucket",
+        "system_id",
+    ),
+    ("container_metrics_5s", "8 hours", None, "time", "system_id"),
+    (
+        "kube_metrics_1m",
+        "2 days",
+        Some("1 day"),
+        "time",
+        "system_id, namespace",
+    ),
+    (
+        "kube_metrics_1h",
+        "365 days",
+        Some("14 days"),
+        "bucket",
+        "system_id, namespace",
+    ),
+    (
+        "heartbeats",
+        "365 days",
+        Some("7 days"),
+        "time",
+        "monitor_id",
+    ),
 ];
-/// Refresh start_offset per tier — must stay within the SOURCE tier's retention
-/// (raw 8h, 1m 2d, 5m 10d, 15m 45d) so a refresh never blanks materialized rows.
-const REFRESH_OFFSET: &[(&str, &str)] = &[
-    ("1m", "6 hours"),
-    ("5m", "1 day"),
-    ("15m", "3 days"),
-    ("1h", "14 days"),
-];
-/// drop_after per tier (raw is hours, rollups are days). Heartbeats handled separately.
-const RETENTION: &[(&str, &str)] = &[
-    ("", "8 hours"),
-    ("1m", "2 days"),
-    ("5m", "10 days"),
-    ("15m", "45 days"),
-    ("1h", "365 days"),
-];
-// Compression policies must be REMOVED before being re-added, exactly like retention
-// above. `add_compression_policy` errors when a policy already exists — and every error in
-// this function is swallowed — so on an install that already has one, a changed interval
-// here silently does nothing and the old value lives on forever. That is not theoretical:
-// shipping kube raw as "compress after 1 day" left the pre-existing 2-day policy in place,
-// and since raw is only KEPT 2 days, every chunk was dropped at the exact moment it became
-// eligible. The tier was 100% uncompressed while the code said otherwise.
-const COMPRESS_AFTER: &[(&str, &str)] = &[
-    ("1m", "1 day"),
-    ("5m", "2 days"),
-    ("15m", "7 days"),
-    ("1h", "14 days"),
+
+/// Chunk interval per tier — retention drops whole chunks, so this is the granularity at
+/// which a tier can shrink. Short tiers need small chunks or they cannot shed anything.
+const CHUNKS: &[(&str, &str)] = &[
+    ("system_metrics_5s", "1 hour"),
+    ("container_metrics_5s", "1 hour"),
+    ("system_metrics_1m", "1 day"),
+    ("system_metrics_1h", "7 days"),
+    ("kube_metrics_1m", "1 day"),
+    ("kube_metrics_1h", "7 days"),
+    ("heartbeats", "1 day"),
 ];
 
 pub async fn setup(config: &PgPool, data: &PgPool) {
-    // Tables whose retention an admin has changed from the UI — setup() must NOT reset
-    // these to the built-in default on restart, only the ones the admin never touched.
-    // (This is what lets the intended kube_container_stats default actually converge:
-    // `add_retention_policy` silently no-ops when a policy already exists, so without
-    // this an old/over-large policy would persist forever.)
+    // Tables whose retention an admin changed in the UI — setup() must not reset those on
+    // restart, only the ones nobody has touched.
     let overrides: Vec<String> =
         crate::settings::get(config, "retention_overrides", Vec::<String>::new()).await;
     let is_override = |t: &str| overrides.iter().any(|o| o == t);
-    // Pre-ladder schema had only _1m/_1h rollups (8 columns, _1h sourced from raw).
-    // If the _5m tier is absent we're upgrading (or fresh): drop the old rollup chain
-    // so it's recreated with the full column set + hierarchical sources, and reset
-    // retention so the new defaults apply. After this _5m exists → block is skipped,
-    // leaving any admin retention edits intact.
-    let has_5m = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT to_regclass('public.system_metrics_5m')::text",
-    )
-    .fetch_one(data)
-    .await
-    .ok()
-    .and_then(|(v,)| v)
-    .is_some();
-    // Also recreate the ladder when the rollups predate a new raw column (e.g. the
-    // memory breakdown) — continuous aggregates can't be ALTERed, so a column added to
-    // SYS_AGG only lands by dropping + rebuilding. Detect via the 1m view's columns.
-    let has_mem_cols = sqlx::query_as::<_, (Option<i32>,)>(
-        "SELECT 1 FROM information_schema.columns \
-         WHERE table_name = 'system_metrics_1m' AND column_name = 'mem_available'",
-    )
-    .fetch_optional(data)
-    .await
-    .ok()
-    .flatten()
-    .is_some();
-    let migrated = has_5m && has_mem_cols;
-    if !migrated {
-        let mut reset = vec![
-            "DROP MATERIALIZED VIEW IF EXISTS system_metrics_1h CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS system_metrics_15m CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS system_metrics_5m CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS system_metrics_1m CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_1h CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_15m CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_5m CASCADE".to_string(),
-            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_1m CASCADE".to_string(),
-        ];
-        for t in RETENTION_TABLES {
-            reset.push(format!(
-                "SELECT remove_retention_policy('{t}', if_exists => true)"
-            ));
-        }
-        for s in &reset {
-            let _ = sqlx::query(s).execute(data).await;
-        }
-    }
 
-    let mut stmts: Vec<String> = vec![
-        // Raw is the short hot tier (8h) → 1h chunks so retention drops at that grain.
-        "SELECT set_chunk_time_interval('system_metrics', INTERVAL '1 hour')".into(),
-        "SELECT set_chunk_time_interval('container_metrics', INTERVAL '1 hour')".into(),
-        "SELECT set_chunk_time_interval('heartbeats', INTERVAL '1 day')".into(),
-    ];
-
-    // The container rollup ladder was built and maintained but never read: the only
-    // reader of Docker stats is the system-detail page, which queries `container_metrics`
-    // raw. Four continuous aggregates, each with a refresh job, a compression policy and
-    // a retention policy, all churning over a table that is empty on every install we
-    // have. Drop them; the raw tier stays.
-    for suffix in ["1h", "15m", "5m", "1m"] {
+    let mut stmts: Vec<String> = Vec::new();
+    for (tbl, chunk) in CHUNKS {
         stmts.push(format!(
-            "DROP MATERIALIZED VIEW IF EXISTS container_metrics_{suffix} CASCADE"
+            "SELECT set_chunk_time_interval('{tbl}', INTERVAL '{chunk}')"
         ));
     }
 
-    // Hierarchical rollup chain for host metrics: raw → 1m → 5m → 15m → 1h.
-    for (chain, agg, group_extra) in [(SYS_TIERS, SYS_AGG, "")] {
-        let table_base = "system_metrics";
-        for (suffix, bucket, src, srccol) in chain {
-            stmts.push(format!(
-                "CREATE MATERIALIZED VIEW IF NOT EXISTS {table_base}_{suffix} \
-                 WITH (timescaledb.continuous) AS \
-                 SELECT system_id, {group_extra}time_bucket('{bucket}', {srccol}) AS bucket, {agg} \
-                 FROM {src} GROUP BY system_id, {group_extra}time_bucket('{bucket}', {srccol}) WITH NO DATA"
-            ));
-        }
-        for (suffix, bucket, _, _) in chain {
-            let off = REFRESH_OFFSET.iter().find(|(s, _)| s == suffix).unwrap().1;
-            stmts.push(format!(
-                "SELECT add_continuous_aggregate_policy('{table_base}_{suffix}', \
-                    start_offset => INTERVAL '{off}', end_offset => INTERVAL '{bucket}', \
-                    schedule_interval => INTERVAL '{bucket}')"
-            ));
-        }
-        // retention + compression per tier. Force the built-in default (remove + re-add)
-        // unless the admin overrode this table in the UI; then just ensure a policy
-        // exists (if_not_exists) so we never clobber their choice.
-        for (suffix, keep) in RETENTION {
-            let tbl = if suffix.is_empty() {
-                table_base.to_string()
-            } else {
-                format!("{table_base}_{suffix}")
-            };
-            if !is_override(&tbl) {
-                stmts.push(format!(
-                    "SELECT remove_retention_policy('{tbl}', if_exists => true)"
-                ));
-            }
-            stmts.push(format!(
-                "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}', if_not_exists => true)"
-            ));
-        }
-        for (suffix, after) in COMPRESS_AFTER {
-            stmts.push(format!(
-                "ALTER MATERIALIZED VIEW {table_base}_{suffix} SET (timescaledb.compress = true)"
-            ));
-            stmts.push(format!(
-                "SELECT remove_compression_policy('{table_base}_{suffix}', if_exists => true)"
-            ));
-            stmts.push(format!(
-                "SELECT add_compression_policy('{table_base}_{suffix}', INTERVAL '{after}')"
-            ));
-        }
-    }
-
-    // Docker container stats: raw only, kept the same 8 hours as host raw. Its rollup
-    // ladder was removed (nothing read it), and this policy has to be stated explicitly
-    // now that the shared loop above only walks the system-metrics chain — otherwise the
-    // table silently has NO retention at all and grows without limit.
-    if !is_override("container_metrics") {
-        stmts.push("SELECT remove_retention_policy('container_metrics', if_exists => true)".into());
-    }
-    stmts.push(
-        "SELECT add_retention_policy('container_metrics', INTERVAL '8 hours', if_not_exists => true)"
-            .into(),
-    );
-
-    // Heartbeats: kept a year so uptime history + incidents span long ranges.
-    if !is_override("heartbeats") {
-        stmts.push("SELECT remove_retention_policy('heartbeats', if_exists => true)".into());
-    }
-    stmts.push(
-        "SELECT add_retention_policy('heartbeats', INTERVAL '365 days', if_not_exists => true)"
-            .into(),
-    );
-    stmts.push(
-        "ALTER TABLE heartbeats SET (timescaledb.compress, \
-            timescaledb.compress_segmentby = 'monitor_id', timescaledb.compress_orderby = 'time DESC')"
-            .into(),
-    );
-    stmts.push("SELECT remove_compression_policy('heartbeats', if_exists => true)".into());
-    stmts.push("SELECT add_compression_policy('heartbeats', INTERVAL '7 days')".into());
-
-    // Kubernetes series, now a real ladder (see kube_rollup.rs): raw is the detail tier
-    // and is deliberately SHORT, because it is per-container and dominates the database
-    // at any cadence; 5m carries the week view; 1h is the long one worth keeping, and at
-    // ~1.3 GB/year it is affordable in a way the raw table never was at 4.7 GB/DAY.
-    //
-    // Raw dropping to 2 days is not a reduction in practice — the data cap was already
-    // evicting it down to ~2.3 days every single day. The difference is that the limit is
-    // now declared and honest instead of being an invisible side effect of running out of
-    // room. (All overridable per-table from the Data & retention UI.)
-    // The time column differs per tier (`time` on raw, `bucket` on the rollups) and
-    // compress_orderby must name the real one — a wrong name makes the ALTER fail, which
-    // this function swallows, so the table would silently never compress.
-    for (tbl, keep, compress_after, tcol, segment) in [
-        (
-            "kube_container_stats",
-            "2 days",
-            "1 day",
-            "time",
-            "system_id, namespace",
-        ),
-        (
-            "kube_rollup_5m",
-            "10 days",
-            "2 days",
-            "bucket",
-            "system_id, namespace",
-        ),
-        (
-            "kube_rollup_1h",
-            "365 days",
-            "14 days",
-            "bucket",
-            "system_id, namespace",
-        ),
-    ] {
+    for (tbl, keep, compress_after, tcol, segment) in TIERS {
         if !is_override(tbl) {
             stmts.push(format!(
                 "SELECT remove_retention_policy('{tbl}', if_exists => true)"
@@ -257,24 +99,30 @@ pub async fn setup(config: &PgPool, data: &PgPool) {
         stmts.push(format!(
             "SELECT add_retention_policy('{tbl}', INTERVAL '{keep}', if_not_exists => true)"
         ));
-        stmts.push(format!(
-            "ALTER TABLE {tbl} SET (timescaledb.compress, \
-                timescaledb.compress_segmentby = '{segment}', timescaledb.compress_orderby = '{tcol} DESC')"
-        ));
-        stmts.push(format!(
-            "SELECT remove_compression_policy('{tbl}', if_exists => true)"
-        ));
-        stmts.push(format!(
-            "SELECT add_compression_policy('{tbl}', INTERVAL '{compress_after}')"
-        ));
+        if let Some(after) = compress_after {
+            stmts.push(format!(
+                "ALTER TABLE {tbl} SET (timescaledb.compress, \
+                    timescaledb.compress_segmentby = '{segment}', \
+                    timescaledb.compress_orderby = '{tcol} DESC')"
+            ));
+            // Remove before add: `add_compression_policy` errors when one already exists
+            // and every error here is swallowed, so without this a changed interval
+            // silently never lands.
+            stmts.push(format!(
+                "SELECT remove_compression_policy('{tbl}', if_exists => true)"
+            ));
+            stmts.push(format!(
+                "SELECT add_compression_policy('{tbl}', INTERVAL '{after}')"
+            ));
+        }
     }
 
     for s in &stmts {
         if let Err(e) = sqlx::query(s).execute(data).await {
-            tracing::debug!(error = %e, "downsampling setup (ignored)");
+            tracing::debug!(error = %e, "tier setup (ignored)");
         }
     }
-    tracing::info!("downsampling ladder (1m/5m/15m/1h) + retention + compression configured");
+    tracing::info!("metric tiers (raw / 1m / 1h) + retention + compression configured");
 }
 
 #[derive(Serialize)]
@@ -313,7 +161,7 @@ pub struct RetentionTier {
 /// The raw realtime tiers (system + container) are managed in hours; the
 /// downsampled rollups + heartbeats in days.
 fn unit_for(table: &str) -> &'static str {
-    if table == "system_metrics" || table == "container_metrics" {
+    if table.ends_with("_5s") {
         "hours"
     } else {
         "days"
@@ -402,14 +250,11 @@ async fn retention_value(data: &PgPool, table: &str) -> Option<i64> {
 /// Time column of a tier: the rollup tiers bucket into `bucket`, everything else
 /// timestamps into `time`.
 fn time_col(table: &str) -> &'static str {
-    if table.ends_with("_1m")
-        || table.ends_with("_5m")
-        || table.ends_with("_15m")
-        || table.ends_with("_1h")
-    {
-        "bucket"
-    } else {
-        "time"
+    // `kube_metrics_1m` is the detail table the agent writes into, so despite its suffix
+    // it timestamps samples in `time`; only tiers this hub rolls up have `bucket`.
+    match table {
+        "system_metrics_1m" | "system_metrics_1h" | "kube_metrics_1h" => "bucket",
+        _ => "time",
     }
 }
 
@@ -440,16 +285,13 @@ pub async fn data_stats(config: &PgPool, data: &PgPool) -> DataDbStats {
 
     // (table, label) for each tier — used for both the size table and retention.
     let tiers = [
-        ("system_metrics", "Raw (realtime)"),
-        ("system_metrics_1m", "1-minute rollup"),
-        ("system_metrics_5m", "5-minute rollup"),
-        ("system_metrics_15m", "15-minute rollup"),
-        ("system_metrics_1h", "1-hour rollup"),
-        ("container_metrics", "Container (raw)"),
-        ("heartbeats", "Heartbeats"),
-        ("kube_container_stats", "K8s raw (detail)"),
-        ("kube_rollup_5m", "K8s 5-minute"),
-        ("kube_rollup_1h", "K8s 1-hour"),
+        ("system_metrics_5s", "Hosts · 5-second"),
+        ("system_metrics_1m", "Hosts · 1-minute"),
+        ("system_metrics_1h", "Hosts · 1-hour"),
+        ("kube_metrics_1m", "Kubernetes · 1-minute (detail)"),
+        ("kube_metrics_1h", "Kubernetes · 1-hour"),
+        ("container_metrics_5s", "Docker · 5-second"),
+        ("heartbeats", "Service checks"),
     ];
     let mut tables = Vec::with_capacity(tiers.len());
     for (table, label) in tiers {
@@ -695,7 +537,7 @@ pub fn spawn_enforce(config: PgPool, data: PgPool) {
 /// the small, slow, long-horizon series — the ones whose whole value is that they go back
 /// far — and they are cheap enough that evicting them buys almost no space. Everything
 /// else (raw samples, short rollups) is regenerable detail and is fair game.
-const PROTECTED_TIERS: &[&str] = &["system_metrics_1h", "kube_rollup_1h", "heartbeats"];
+const PROTECTED_TIERS: &[&str] = &["system_metrics_1h", "kube_metrics_1h", "heartbeats"];
 
 /// Oldest droppable chunk of the largest hypertable, skipping `protected`. Returns the
 /// hypertable name and the boundary to drop below. Continuous-aggregate rollups live
@@ -872,16 +714,13 @@ pub async fn enforce_cap(config: &PgPool, data: &PgPool) -> EvictionResult {
 
 /// Allowlist of tables whose retention may be changed from the UI.
 const RETENTION_TABLES: &[&str] = &[
-    "system_metrics",
+    "system_metrics_5s",
     "system_metrics_1m",
-    "system_metrics_5m",
-    "system_metrics_15m",
     "system_metrics_1h",
-    "container_metrics",
+    "container_metrics_5s",
+    "kube_metrics_1m",
+    "kube_metrics_1h",
     "heartbeats",
-    "kube_container_stats",
-    "kube_rollup_5m",
-    "kube_rollup_1h",
 ];
 
 /// `value` is interpreted in the tier's unit (hours for the raw tier, days else).

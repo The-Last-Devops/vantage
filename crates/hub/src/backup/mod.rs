@@ -50,17 +50,16 @@ pub(crate) const CONFIG_TABLES: &[&str] = &[
     "status_pages",
     "settings",
 ];
-/// Append-only metrics hypertables. Host rollups are continuous aggregates and
-/// rematerialize from the raw tier, so they are not dumped — but `kube_rollup_1h` is a
-/// real table built from raw k8s samples that are only kept days, so once those age out
-/// it is the ONLY copy of that history and nothing could rebuild it. It was missing here
-/// entirely while k8s data had no long tier at all, which meant a lost volume took every
-/// cluster metric with it.
+/// Append-only metrics tables worth dumping. The 1h tiers are included and the 1m tiers
+/// are not, on purpose: 1m can be rebuilt from raw, but the 1h tiers are built from
+/// sources kept only hours or days, so once those age out they are the ONLY copy and
+/// nothing could regenerate them. They are also the smallest tables here.
 pub(crate) const DATA_TABLES: &[&str] = &[
-    "system_metrics",
-    "container_metrics",
+    "system_metrics_5s",
+    "container_metrics_5s",
     "heartbeats",
-    "kube_rollup_1h",
+    "system_metrics_1h",
+    "kube_metrics_1h",
 ];
 
 pub(crate) fn admin(user: &CurrentUser) -> Result<(), StatusCode> {
