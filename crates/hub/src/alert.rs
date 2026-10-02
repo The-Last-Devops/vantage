@@ -390,27 +390,28 @@ async fn evaluate_server(
     let op = cond.get("op").and_then(Value::as_str);
     let threshold = cond.get("value").and_then(Value::as_f64);
     if let (Some(metric), Some(op), Some(threshold)) = (metric, op, threshold) {
-        let row: Option<(f64, f64, i64, i64)> = sqlx::query_as(
-            "SELECT cpu_percent, load1, mem_used, mem_total FROM system_metrics_5s \
-             WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
+        let row: Option<(f64, f64, i64, i64, i64, i64)> = sqlx::query_as(
+            "SELECT cpu_percent, load1, mem_used, mem_total, disk_used, disk_total \
+             FROM system_metrics_5s WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
         )
         .bind(system_id)
         .fetch_optional(&state.data)
         .await?;
-        let Some((cpu, load1, mem_used, mem_total)) = row else {
+        let Some((cpu, load1, mem_used, mem_total, disk_used, disk_total)) = row else {
             return Ok(None);
         };
-        let current = match metric {
-            "cpu_percent" => cpu,
-            "load1" => load1,
-            "mem_percent" => {
-                if mem_total > 0 {
-                    mem_used as f64 / mem_total as f64 * 100.0
-                } else {
-                    0.0
-                }
-            }
-            _ => return Ok(None),
+        let sample = Sample {
+            cpu,
+            load1,
+            mem_used,
+            mem_total,
+            disk_used,
+            disk_total,
+        };
+        // Unknown metric: unreachable for a rule created through the API, which rejects
+        // those, but a hand-edited row must not fire on a value it never read.
+        let Some(current) = sample.value(metric) else {
+            return Ok(None);
         };
         let firing = compare(current, op, threshold);
         return Ok(Some(Eval {
@@ -424,6 +425,50 @@ async fn evaluate_server(
 
     Ok(None)
 }
+
+/// The latest host sample a threshold rule is evaluated against.
+pub struct Sample {
+    pub cpu: f64,
+    pub load1: f64,
+    pub mem_used: i64,
+    pub mem_total: i64,
+    pub disk_used: i64,
+    pub disk_total: i64,
+}
+
+impl Sample {
+    fn pct(used: i64, total: i64) -> f64 {
+        if total > 0 {
+            used as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Value for a metric name, or `None` when the engine cannot evaluate it.
+    ///
+    /// Pure, so the arms can be tested — and so `HOST_METRICS` can be checked against it
+    /// directly. Those two drifting apart is exactly how a disk rule became creatable and
+    /// unfireable at the same time: the allowlist is what the API promises, this is what
+    /// the engine delivers, and nothing was comparing them.
+    pub fn value(&self, metric: &str) -> Option<f64> {
+        Some(match metric {
+            "cpu_percent" => self.cpu,
+            "load1" => self.load1,
+            "mem_percent" => Self::pct(self.mem_used, self.mem_total),
+            // A filesystem that fills takes the machine down with it and, unlike CPU or
+            // load, never recovers on its own. The agent has always collected these
+            // numbers; until 3.5.0 nothing read them.
+            "disk_percent" => Self::pct(self.disk_used, self.disk_total),
+            _ => return None,
+        })
+    }
+}
+
+/// Host metrics a threshold rule may be written against. The API validates against this
+/// list, so a typo is a 400 instead of a rule that renders perfectly and never fires —
+/// which is how a disk alert could previously be "configured" and do nothing at all.
+pub const HOST_METRICS: &[&str] = &["cpu_percent", "mem_percent", "disk_percent", "load1"];
 
 fn compare(a: f64, op: &str, b: f64) -> bool {
     match op {
@@ -554,5 +599,61 @@ fn condition_text(rule: &Rule) -> String {
     ) {
         (Some(m), Some(op), Some(v)) => format!("{m} {op} {v}"),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::*;
+
+    fn sample() -> Sample {
+        Sample {
+            cpu: 12.5,
+            load1: 3.0,
+            mem_used: 3,
+            mem_total: 4,
+            disk_used: 9,
+            disk_total: 10,
+        }
+    }
+
+    /// The allowlist the API validates against must be exactly what the engine can
+    /// evaluate. A name in one and not the other is a rule that either cannot be created
+    /// or cannot fire — and the second kind is silent.
+    #[test]
+    fn every_allowed_metric_is_evaluable() {
+        for m in HOST_METRICS {
+            assert!(
+                sample().value(m).is_some(),
+                "{m} is allowed but not evaluated"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_metric_is_not_evaluated() {
+        assert!(sample().value("disk_usage").is_none());
+        assert!(sample().value("").is_none());
+    }
+
+    #[test]
+    fn percentages_are_computed_from_used_over_total() {
+        assert_eq!(sample().value("disk_percent"), Some(90.0));
+        assert_eq!(sample().value("mem_percent"), Some(75.0));
+        assert_eq!(sample().value("cpu_percent"), Some(12.5));
+    }
+
+    /// A host that reports a zero total (no disk reported yet) must read 0, not NaN —
+    /// NaN compares false against every threshold, so the rule would never fire and
+    /// never say why.
+    #[test]
+    fn zero_total_is_zero_not_nan() {
+        let s = Sample {
+            disk_total: 0,
+            mem_total: 0,
+            ..sample()
+        };
+        assert_eq!(s.value("disk_percent"), Some(0.0));
+        assert_eq!(s.value("mem_percent"), Some(0.0));
     }
 }

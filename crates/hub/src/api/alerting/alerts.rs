@@ -408,6 +408,11 @@ pub async fn patch_alert(
             .await;
     }
 
+    if let Some(c) = req.condition.as_ref() {
+        if !valid_condition(c) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
     sqlx::query(
         "UPDATE alerts SET enabled = COALESCE($2, enabled), \
             cooldown_secs = COALESCE($3, cooldown_secs), \
@@ -587,6 +592,19 @@ pub struct CreateAlert {
 }
 
 /// POST /api/workspaces/:id/alerts — editors+ create an alert rule.
+/// Reject a threshold condition that names a metric the engine cannot evaluate.
+///
+/// `condition` is stored as raw JSON, so without this a rule like
+/// `{"metric":"disk_percent",...}` was accepted, listed, and even offered a Test button —
+/// while the engine's match fell through to "do nothing". A rule that looks configured
+/// and silently never fires is worse than no rule, because it is believed.
+fn valid_condition(cond: &Value) -> bool {
+    match cond.get("metric").and_then(Value::as_str) {
+        None => true, // service-down or offline rules carry no metric
+        Some(m) => crate::alert::HOST_METRICS.contains(&m),
+    }
+}
+
 pub async fn create_alert(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -605,6 +623,11 @@ pub async fn create_alert(
     }
     if req.channel_ids.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
+    }
+    if let Some(c) = req.condition.as_ref() {
+        if !valid_condition(c) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
     }
     // Channels are a shared resource — a rule may use any existing channel,
     // regardless of workspace; just require that every id exists.

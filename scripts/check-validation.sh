@@ -32,6 +32,34 @@ exp "reject control-char channel name" 400 "$(code POST "/api/workspaces/$WS/cha
 exp "reject empty monitor name"       400 "$(code POST "/api/workspaces/$WS/monitors" '{"name":"","kind":"http","target":"https://e.com"}')"
 exp "reject http monitor w/o target"  400 "$(code POST "/api/workspaces/$WS/monitors" '{"name":"probe","kind":"http","target":"  "}')"
 
+# --- alert rule conditions ---
+# `condition` is stored as raw JSON, so an unknown metric used to be accepted and then
+# silently never evaluated: the rule rendered perfectly, offered a Test button, and did
+# nothing. A rule that is believed and does not fire is worse than no rule. These need a
+# channel to attach to, since a rule without one is rejected first.
+VCH=$(curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/channels" -H 'content-type: application/json' \
+  -d '{"name":"cond probe","kind":"webhook","config":{"url":"https://e.com/x"}}' | python3 -c "import sys,json
+try: print(json.load(sys.stdin))
+except: print('')")
+SYS=$(curl -s -b "$JAR" "$BASE/api/systems" | python3 -c "import sys,json
+try:
+    d=json.load(sys.stdin); print(d[0]['id'] if d else '')
+except Exception: print('')")
+if [ -n "$VCH" ] && [ -n "$SYS" ]; then
+  mk() { printf '{"system_id":"%s","channel_ids":["%s"],"condition":%s}' "$SYS" "$VCH" "$1"; }
+  exp "reject unknown alert metric"     400 "$(code POST "/api/workspaces/$WS/alerts" "$(mk '{"metric":"nonsense_percent","op":">","value":9}')")"
+  exp "reject misspelled disk metric"   400 "$(code POST "/api/workspaces/$WS/alerts" "$(mk '{"metric":"disk_usage","op":">","value":9}')")"
+  AID=$(curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/alerts" -H 'content-type: application/json' \
+    -d "$(mk '{"metric":"disk_percent","op":">","value":85}')" | python3 -c "import sys,json
+try: print(json.load(sys.stdin))
+except: print('')")
+  printf '%-46s ' "accept disk_percent"
+  [ -n "$AID" ] && { echo "ok ($AID)"; curl -s -b "$JAR" -o /dev/null -X DELETE "$BASE/api/alerts/$AID"; } || { echo "FAIL"; fail=1; }
+  curl -s -b "$JAR" -o /dev/null -X DELETE "$BASE/api/channels/$VCH"
+else
+  echo "skip alert-condition checks (no channel or no system to attach to)"
+fi
+
 # --- clean input still works (then clean up) ---
 CH=$(curl -s -b "$JAR" -X POST "$BASE/api/workspaces/$WS/channels" -H 'content-type: application/json' \
   -d '{"name":"valid-name probe","kind":"webhook","config":{"url":"https://e.com/x"}}' | python3 -c "import sys,json

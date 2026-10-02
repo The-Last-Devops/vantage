@@ -7,6 +7,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.5.0] — 2026-10-02
+
+### Added
+- **Alert on disk usage.** `disk_percent` joins `cpu_percent`, `mem_percent` and `load1`
+  as a host threshold metric, in the rule editor and over the API. A filesystem that
+  fills takes the machine down with it and, unlike CPU or load, never recovers on its
+  own — it is arguably the most important host metric to be told about, and the engine
+  had no way to express it. The agent has always collected the numbers; nothing read them.
+
+### Fixed
+- **An alert rule naming a metric the engine cannot evaluate is now rejected with 400.**
+  `condition` is stored as raw JSON and was never validated, so a rule like
+  `{"metric":"disk_percent",...}` was accepted, listed, and offered a Test button — while
+  evaluation fell through to doing nothing. A rule that looks configured and silently
+  never fires is worse than no rule, because it is believed. The metric allowlist is also
+  now asserted against the engine itself, so the two cannot drift apart again.
+
 ## [3.4.0] — 2026-10-02
 
 ### Fixed

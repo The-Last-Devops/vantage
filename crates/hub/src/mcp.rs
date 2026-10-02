@@ -109,7 +109,8 @@ for what is broken now, `recent_events` for what broke recently, and
 Two kinds of alert rule. On a SERVICE, omit `condition` — the rule fires when the
 check goes down. On a HOST, pass a threshold:
 {\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}; metric is
-cpu_percent, mem_percent or load1.
+cpu_percent, mem_percent, disk_percent or load1. A metric outside that set is
+rejected with 400 rather than stored as a rule that never fires.
 
 Before `create_channel`, call `channel_types` for that provider's `config`
 fields — they differ per provider and guessing produces a channel that silently
@@ -247,7 +248,7 @@ fn tool_defs() -> Value {
                 "channel_ids": { "type": "array", "items": { "type": "string" }, "description": "channels to notify (from list_channels)" },
                 "condition": { "type": "object", "description":
                     "Metric threshold, e.g. {\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}. \
-                     metric: cpu_percent | mem_percent | load1 (host rules only); op: > >= < <=. \
+                     metric: cpu_percent | mem_percent | disk_percent | load1 (host rules only); op: > >= < <=. \
                      Omit entirely for a plain down/up rule — that is the right choice for a service check." },
                 "cooldown_secs": { "type": "integer" },
                 "renotify_secs": { "type": "integer", "description": "re-notify cadence while firing; omit for off" } } } }),
@@ -1024,7 +1025,7 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        for want in ["cpu_percent", "mem_percent", "load1", "op"] {
+        for want in ["cpu_percent", "mem_percent", "disk_percent", "load1", "op"] {
             assert!(cond.contains(want), "condition description omits `{want}`");
         }
 

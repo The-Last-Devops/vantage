@@ -45,7 +45,7 @@ const chanFg = (kind) => typeByKind(kind)?.fg || 'rgb(var(--fg))'
 const chanIcon = (kind) => typeByKind(kind)?.icon || 'chat'
 
 // ---- derived row fields ----
-const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
+const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m' }
 const isSvc = (a) => a.target_kind === 'monitor' || a.target_kind === 'all_services'
 function condText(a) {
   const c = a.condition || {}

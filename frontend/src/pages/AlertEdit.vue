@@ -41,7 +41,7 @@ const chanColor = (kind) => typeByKind(kind)?.color || 'rgb(var(--surface2))'
 const chanFg = (kind) => typeByKind(kind)?.fg || 'rgb(var(--fg))'
 const chanIcon = (kind) => typeByKind(kind)?.icon || 'chat'
 
-const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
+const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m' }
 const ed = ref({ srcType: 'monitor', targetId: '', scopeWs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, offlineSecs: 120, channels: new Set(), renotify: '' })
 
 const isScope = computed(() => ed.value.srcType === 'all_services' || ed.value.srcType === 'all_hosts')
@@ -204,7 +204,7 @@ onMounted(async () => {
               <span class="text-sm text-muted">Fires when</span>
               <UiSelect v-model="ed.condType" :options="[['metric', 'a metric'], ['offline', 'it goes offline']]" />
               <template v-if="ed.condType === 'metric'">
-                <UiSelect v-model="ed.metric" :options="[['cpu_percent', 'CPU %'], ['mem_percent', 'Memory %'], ['load1', 'Load 1m']]" />
+                <UiSelect v-model="ed.metric" :options="[['cpu_percent', 'CPU %'], ['mem_percent', 'Memory %'], ['disk_percent', 'Disk %'], ['load1', 'Load 1m']]" />
                 <UiSelect v-model="ed.op" :options="['>', '>=', '<', '<=']" />
                 <input v-model.number="ed.value" type="number" class="w-24 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
               </template>
