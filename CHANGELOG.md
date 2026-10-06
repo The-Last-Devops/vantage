@@ -7,6 +7,17 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.8.0] — 2026-10-06
+
+### Changed
+- **Fleet-wide rules pick their workspaces from a visible checklist, several at once.**
+  "All hosts" / "All services" used a bare dropdown that did not say what it was for.
+  It is now a list of every workspace you can see, each with its host or service count,
+  and more than one can be ticked: saving creates one identical rule per workspace. A
+  rule still belongs to exactly one workspace — that is where its permissions live — so
+  each created rule is listed, edited, disabled and deleted on its own, and editing an
+  existing rule keeps it to one workspace. The wiring summary names every workspace.
+
 ## [3.7.0] — 2026-10-06
 
 ### Added

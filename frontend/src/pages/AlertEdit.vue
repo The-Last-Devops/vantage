@@ -45,7 +45,7 @@ const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_perce
 // Sustain window: fire only after every sample in it breaches. 5 min is the default for a
 // new rule — a single CPU spike paging people was the complaint that added this.
 const FOR_OPTIONS = [['0', 'immediately'], ['60', 'for 1 min'], ['300', 'for 5 min'], ['600', 'for 10 min'], ['900', 'for 15 min']]
-const ed = ref({ srcType: 'monitor', targetId: '', scopeWs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, forSecs: '300', offlineSecs: 120, channels: new Set(), renotify: '' })
+const ed = ref({ srcType: 'monitor', targetId: '', scopeWss: new Set(), condType: 'down', metric: 'cpu_percent', op: '>', value: 90, forSecs: '300', offlineSecs: 120, channels: new Set(), renotify: '' })
 
 const isScope = computed(() => ed.value.srcType === 'all_services' || ed.value.srcType === 'all_hosts')
 const isServiceLike = computed(() => ed.value.srcType === 'monitor' || ed.value.srcType === 'all_services')
@@ -54,8 +54,22 @@ const targetWs = computed(() => {
   const name = list.find((x) => x.id === ed.value.targetId)?.workspace
   return workspaces.value.find((n) => n.name === name) || null
 })
-const saveWs = computed(() => (isScope.value ? workspaces.value.find((n) => n.id === ed.value.scopeWs) || null : targetWs.value))
-const candidates = computed(() => (ed.value.srcType === 'all_services' ? monitors.value : systems.value).filter((x) => x.workspace === saveWs.value?.name))
+// Workspaces a scope rule covers. A rule belongs to exactly ONE workspace (that is
+// where its RBAC lives), so picking several here creates one identical rule per
+// workspace on save — not one rule that spans them. Editing an existing rule keeps one.
+const scopeWsList = computed(() => (isScope.value ? workspaces.value.filter((n) => ed.value.scopeWss.has(n.id)) : []))
+const saveWs = computed(() => (isScope.value ? scopeWsList.value[0] || null : targetWs.value))
+const scopeWsNames = computed(() => new Set(scopeWsList.value.map((n) => n.name)))
+const candidates = computed(() => (ed.value.srcType === 'all_services' ? monitors.value : systems.value).filter((x) => (isScope.value ? scopeWsNames.value.has(x.workspace) : x.workspace === saveWs.value?.name)))
+// hosts / services per workspace, for the picker's row labels
+const perWs = (n) => (ed.value.srcType === 'all_services' ? monitors.value : systems.value).filter((x) => x.workspace === n.name).length
+function toggleWs(id) {
+  // one workspace at a time while editing — the rule cannot be split into several
+  if (editId.value) { ed.value.scopeWss = new Set([id]); return }
+  const next = new Set(ed.value.scopeWss)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  ed.value.scopeWss = next
+}
 
 function setSrcType(t) {
   ed.value.srcType = t
@@ -118,6 +132,7 @@ function backToList() { router.push({ name: 'alerts', query: route.query.ws ? { 
 function targetBody() {
   const b = {}
   if (isScope.value) { b.scope_kind = ed.value.srcType; b.scope_workspace_id = saveWs.value?.id }
+  // (create path with several workspaces overrides scope_workspace_id per request — see save())
   else if (ed.value.srcType === 'monitor') b.monitor_id = ed.value.targetId
   else b.system_id = ed.value.targetId
   return b
@@ -125,7 +140,7 @@ function targetBody() {
 async function save() {
   err.value = ''
   if (!isScope.value && !ed.value.targetId) { err.value = `Pick a ${ed.value.srcType === 'monitor' ? 'service' : 'host'}.`; return }
-  if (!saveWs.value) { err.value = 'Pick a source first.'; return }
+  if (!saveWs.value) { err.value = isScope.value ? 'Pick at least one workspace.' : 'Pick a source first.'; return }
   if (!ed.value.channels.size) { err.value = 'Pick at least one channel.'; return }
   const channel_ids = [...ed.value.channels]
   const renotify_secs = ed.value.renotify ? Number(ed.value.renotify) : null
@@ -134,6 +149,12 @@ async function save() {
     if (editId.value) {
       // Source is editable now — send the target too (re-targets the rule server-side).
       await api.patch(`/api/alerts/${editId.value}`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody() })
+    } else if (isScope.value) {
+      // One rule per selected workspace. Sequential so a failure stops the batch instead
+      // of leaving an unknown subset created.
+      for (const n of scopeWsList.value) {
+        await api.post(`/api/workspaces/${n.id}/alerts`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody(), scope_workspace_id: n.id })
+      }
     } else {
       await api.post(`/api/workspaces/${saveWs.value.id}/alerts`, { channel_ids, renotify_secs, condition: buildCondition(), ...targetBody() })
     }
@@ -159,7 +180,7 @@ onMounted(async () => {
       ed.value = {
         srcType: a.scope_kind || (a.monitor_id ? 'monitor' : 'host'),
         targetId: a.monitor_id || a.system_id || '',
-        scopeWs: a.scope_workspace_id || '',
+        scopeWss: new Set(a.scope_workspace_id ? [a.scope_workspace_id] : []),
         condType: serviceLike ? 'down' : c.offline_secs ? 'offline' : 'metric',
         metric: c.metric || 'cpu_percent', op: c.op || '>', value: c.value ?? 90, offlineSecs: c.offline_secs ?? 120,
         // an older rule without a window keeps firing on the latest sample until someone picks one
@@ -168,7 +189,7 @@ onMounted(async () => {
         renotify: a.renotify_secs ? String(a.renotify_secs) : '',
       }
     } else {
-      ed.value.scopeWs = ws[0]?.id || ''
+      ed.value.scopeWss = new Set(ws[0] ? [ws[0].id] : [])
     }
   })()
   await minLoad(work)
@@ -194,8 +215,20 @@ onMounted(async () => {
               :placeholder="`— pick a ${ed.srcType === 'monitor' ? 'service' : 'host'} —`"
               :options="(ed.srcType === 'monitor' ? monitors : systems).map((m) => ({ value: m.id, label: `${m.name} · ${m.workspace}` }))" />
             <div v-else>
-              <UiSelect v-model="ed.scopeWs" block placeholder="— pick a workspace —" :options="workspaces.map((n) => ({ value: n.id, label: n.name }))" />
-              <p class="mt-1.5 text-xs text-faint">Covers every {{ ed.srcType === 'all_services' ? 'service' : 'host' }} in this workspace — new ones included automatically.</p>
+              <div class="mb-1.5 text-xs text-faint">{{ editId ? 'Workspace' : 'Workspaces — pick one or several' }}</div>
+              <p v-if="!workspaces.length" class="text-xs text-faint">No workspaces visible to you.</p>
+              <div v-else class="space-y-2">
+                <div v-for="n in workspaces" :key="n.id" class="flex items-center gap-2 rounded-lg border px-3 py-2"
+                  :class="ed.scopeWss.has(n.id) ? 'border-accent/60 bg-accent/8' : 'border-line bg-surface2'">
+                  <button @click="toggleWs(n.id)" class="flex min-w-0 flex-1 items-center gap-2 text-left">
+                    <svg v-if="ed.scopeWss.has(n.id)" class="h-4 w-4 shrink-0 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+                    <span v-else class="h-4 w-4 shrink-0 rounded border border-line"></span>
+                    <span class="truncate text-sm text-fg">{{ n.name }}</span>
+                    <span class="shrink-0 text-[11px] text-faint">{{ perWs(n) }} {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }}</span>
+                  </button>
+                </div>
+              </div>
+              <p class="mt-1.5 text-xs text-faint">Covers every {{ ed.srcType === 'all_services' ? 'service' : 'host' }} in {{ scopeWsList.length > 1 ? 'these workspaces' : 'this workspace' }} — new ones included automatically.<template v-if="!editId && scopeWsList.length > 1"> Saving creates <b class="text-fg">{{ scopeWsList.length }} rules</b>, one per workspace, each editable on its own.</template></p>
             </div>
             <p v-if="editId" class="mt-1.5 text-xs text-faint">Changing the source re-points this rule and resets its current state.</p>
           </div>
@@ -268,7 +301,7 @@ onMounted(async () => {
         <!-- right rail: wiring -->
         <div class="rounded-2xl border border-line bg-surface p-4">
           <div class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-faint">Wiring</div>
-          <p class="text-[13px] leading-relaxed text-muted">When <b class="text-fg">{{ targetName || '<source>' }}</b><template v-if="isScope && saveWs"> in <b class="text-fg">{{ saveWs.name }}</b></template> <b class="text-fg">{{ condText }}</b>, notify
+          <p class="text-[13px] leading-relaxed text-muted">When <b class="text-fg">{{ targetName || '<source>' }}</b><template v-if="isScope && scopeWsList.length"> in <b class="text-fg">{{ scopeWsList.map((n) => n.name).join(', ') }}</b></template> <b class="text-fg">{{ condText }}</b>, notify
             <template v-if="ed.channels.size"><b v-for="(id, i) in [...ed.channels]" :key="id" class="text-fg">{{ channels.find((c) => c.id === id)?.name }}{{ i < ed.channels.size - 1 ? ', ' : '' }}</b></template>
             <b v-else class="text-down">no channel yet</b>.
           </p>
@@ -276,7 +309,7 @@ onMounted(async () => {
             <div class="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-wide text-faint">Covers {{ candidates.length }} {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }}</div>
             <div class="max-h-64 space-y-1 overflow-y-auto">
               <div v-for="t in candidates" :key="t.id" class="truncate rounded-md bg-surface2 px-2 py-1 text-xs text-fg">{{ t.name }}</div>
-              <p v-if="!candidates.length" class="text-xs text-faint">No {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }} in this workspace yet.</p>
+              <p v-if="!candidates.length" class="text-xs text-faint">No {{ ed.srcType === 'all_services' ? 'services' : 'hosts' }} in {{ scopeWsList.length > 1 ? 'these workspaces' : 'this workspace' }} yet.</p>
             </div>
           </template>
         </div>
