@@ -9,11 +9,10 @@ import Gauge from '../components/Gauge.vue'
 import { useCached } from '../lib/cache'
 import AddSystemModal from '../components/AddSystemModal.vue'
 import SystemSearch from '../components/SystemSearch.vue'
-import FleetCharts from '../components/FleetCharts.vue'
-import { encodeZoom, decodeZoom } from '../lib/zoom'
+import Sparkline from '../components/Sparkline.vue'
 import { insertGaps } from '../lib/gaps'
 import { pct, online, parseQuery, matchPred } from '../lib/hostFilter'
-import { DEFAULT_THR } from '../lib/triage'
+import { DEFAULT_THR, ago } from '../lib/triage'
 
 const showAdd = ref(false)
 
@@ -60,8 +59,7 @@ const chips = computed(() => q.value.trim().split(/\s+/).filter(Boolean))
 function addToken(tok) { const t = (tok || '').trim(); if (t) q.value = q.value.trim() ? `${q.value.trim()} ${t}` : t }
 function removeChip(i) { const a = chips.value.slice(); a.splice(i, 1); q.value = a.join(' ') }
 // reset clears both the text filters (?q) and the pinned-node selection (?fsel)
-function resetFilters() { q.value = ''; selected.clear(); router.replace({ query: { ...route.query, q: undefined, fzoom: undefined } }) }
-const shortName = (n) => (n && n.length > 12 ? n.slice(0, 12) + '…' : n)
+function resetFilters() { q.value = ''; selected.clear(); router.replace({ query: { ...route.query, q: undefined } }) }
 const preds = computed(() => parseQuery(q.value))
 // "Needs attention" sub-view (/attention) narrows everything to abnormal hosts.
 const attnMode = computed(() => route.name === 'attention')
@@ -96,9 +94,25 @@ function sortList(list, st) {
 // one flat host list (node / docker / k8s); type & cluster are row attributes
 const rows = computed(() => sortList(visible.value, sortState))
 function avg(arr, f) { const v = arr.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null }
+// Avg CPU / memory / disk follow the range picker (issue #3): the mean of every bucket
+// of every visible host over that window, from the same /api/fleet series the row
+// sparklines draw. Before the fleet data lands, fall back to the latest sample so the
+// tiles never sit empty. "Systems online" is a count, not an average — it stays "now".
+function avgSeries(list) {
+  let sum = 0, cnt = 0
+  for (const s of list) for (const v of s.data) if (v != null) { sum += v; cnt++ }
+  return cnt ? Math.round(sum / cnt) : null
+}
 const hero = computed(() => {
   const all = visible.value, on = all.filter(online).length
-  return { online: on, total: all.length, cpu: avg(all, (x) => x.cpu_percent), mem: avg(all, (x) => pct(x.mem_used, x.mem_total)), disk: avg(all, (x) => pct(x.disk_used, x.disk_total)) }
+  const f = fleet.value, names = new Set(all.map((s) => s.name))
+  const over = (k) => (f && f[k] ? avgSeries(f[k].filter((s) => names.has(s.name))) : null)
+  return {
+    online: on, total: all.length,
+    cpu: over('cpu') ?? avg(all, (x) => x.cpu_percent),
+    mem: over('mem') ?? avg(all, (x) => pct(x.mem_used, x.mem_total)),
+    disk: over('disk') ?? avg(all, (x) => pct(x.disk_used, x.disk_total)),
+  }
 })
 
 // ---- thresholds + "needs attention" triage --------------------------------
@@ -147,8 +161,8 @@ const attnHosts = computed(() => {
   return out.sort((a, b) => Number(b.crit) - Number(a.crit) || b.top - a.top)
 })
 // human-readable problem text for tooltips
-const issueText = (i) => (i.key === 'down' ? 'Offline — not reporting in' : `High ${ISSUE[i.key].label.toLowerCase()}: ${i.val}% (${i.crit ? 'critical' : 'warning'})`)
-const chipTitle = (h) => `${h.s.name} · ${h.s.workspace}\n` + h.issues.map(issueText).join('\n')
+const issueText = (i, s) => (i.key === 'down' ? `Offline for ${ago(s?.last_seen) || 'an unknown time'} — not reporting in` : `High ${ISSUE[i.key].label.toLowerCase()}: ${i.val}% (${i.crit ? 'critical' : 'warning'})`)
+const chipTitle = (h) => `${h.s.name} · ${h.s.workspace}\n` + h.issues.map((i) => issueText(i, h.s)).join('\n')
 // Picking a new column defaults to descending — we usually want the busiest
 // (near-overload) hosts at the top; click again to flip to ascending.
 function sortBy(col) { if (sortState.col === col) sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc'; else { sortState.col = col; sortState.dir = 'desc' } }
@@ -166,67 +180,33 @@ async function bulkDelete() {
   selected.clear(); await load()
 }
 
-// ---- Fleet overlay (NewRelic-style: every visible host on one chart per metric) ----
-const FRANGES = ['30m', '1h', '3h', '6h', '12h', '24h']
-const FSPAN = { '30m': 1800, '1h': 3600, '3h': 10800, '6h': 21600, '12h': 43200, '24h': 86400 }
-const frange = computed(() => route.query.frange || '30m')
-function setFrange(r) { router.replace({ query: { ...route.query, frange: r, fzoom: undefined } }) }
-// drag-zoom window persisted in the URL as a human-readable range, shared by all fleet charts
-const fviewRange = computed(() => decodeZoom(route.query.fzoom))
-function setFzoom(r) { router.replace({ query: { ...route.query, fzoom: encodeZoom(r) } }) }
-// header: hovered point → its time; zoomed → the selected range; else → "now"
-const headerTime = computed(() => fleetTime.value || (fviewRange.value ? `${fmtTs(fviewRange.value[0])} – ${fmtTs(fviewRange.value[1])}` : 'now'))
+// ---- Per-host history (issue #1): one /api/fleet call feeds a CPU and a memory
+// sparkline in every row, replacing the four overlay charts that stacked 70 lines on
+// one axis. 7d / 30d (issue #2) read the hourly tier the hub already serves.
+const FRANGES = ['30m', '1h', '3h', '6h', '12h', '24h', '7d', '30d']
+const frange = computed(() => (FRANGES.includes(route.query.frange) ? route.query.frange : '24h'))
+function setFrange(r) { router.replace({ query: { ...route.query, frange: r } }) }
 const fleet = ref(null)
 async function loadFleet() { try { fleet.value = await api.get(`/api/fleet?range=${frange.value}`) } catch {} }
-// stable host → color map (by sorted name) so chart lines and table dots match
+// stable host → color map (by sorted name) so the row dot and its sparkline match
 const colorOf = computed(() => {
   const names = [...new Set(servers.value.map((s) => s.name))].sort()
   const m = {}
   names.forEach((n, i) => { m[n] = `hsl(${(i * 47) % 360} 70% 58%)` })
   return m
 })
-// overlay only the hosts that pass the current filter + workspace
-const visibleNames = computed(() => new Set(visible.value.map((s) => s.name)))
-const fleetSeries = (arr) => (arr || []).filter((s) => visibleNames.value.has(s.name)).map((s) => ({ name: s.name, color: colorOf.value[s.name] || '#888', data: s.data }))
-// Selection is unified: the row checkbox (`selected`, by id) both marks for
-// bulk-delete AND isolates the node on the charts. Hover a row → transient highlight.
-const hoverNode = ref(null)
-// Debounce hover→isolate: only refocus the charts once the cursor settles for a
-// moment, so flicking across nodes doesn't strobe the graphs. Leaving clears now.
-let hoverTimer = null
-function onLegendHover(name) {
-  clearTimeout(hoverTimer)
-  if (!name) { hoverNode.value = null; return }
-  hoverTimer = setTimeout(() => { hoverNode.value = name }, 500)
-}
-const fleetTime = ref('') // hovered timestamp (empty when not hovering)
-const fmtTs = (ts) => new Date(ts * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
-const pinnedSystems = computed(() => servers.value.filter((s) => selected.has(s.id)))
-const selectedNames = computed(() => pinnedSystems.value.map((s) => s.name))
-const fleetFocus = computed(() => (hoverNode.value ? [hoverNode.value] : selectedNames.value.length ? selectedNames.value : null))
-function toggleByName(name) { const s = servers.value.find((x) => x.name === name); if (s) toggleRow(s.id) }
-// rebuild fleet data with null breaks inserted at timeline gaps (agents stopped)
-const gappedFleet = computed(() => {
+// fleet data with null breaks inserted at timeline gaps (agents stopped), keyed by host
+const trend = computed(() => {
   const f = fleet.value
-  if (!f || !f.t || f.t.length < 3) return f
-  const groups = ['cpu', 'mem', 'disk', 'net']
+  if (!f || !f.t || f.t.length < 3) return { t: f?.t || [], by: {} }
   const arrays = [], map = []
-  groups.forEach((g) => (f[g] || []).forEach((s) => { arrays.push(s.data); map.push([g, s.name]) }))
+  ;['cpu', 'mem'].forEach((g) => (f[g] || []).forEach((s) => { arrays.push(s.data); map.push([g, s.name]) }))
   const { t, arrays: na } = insertGaps(f.t, arrays)
-  const out = { t, cpu: [], mem: [], disk: [], net: [] }
-  map.forEach(([g, name], k) => out[g].push({ name, data: na[k] }))
-  return out
+  const by = {}
+  map.forEach(([g, name], k) => { (by[name] ||= {})[g] = na[k] })
+  return { t, by }
 })
-const fleetCharts = computed(() => {
-  const f = gappedFleet.value
-  if (!f) return []
-  return [
-    { title: 'CPU', unit: '%', series: fleetSeries(f.cpu) },
-    { title: 'Memory', unit: '%', series: fleetSeries(f.mem) },
-    { title: 'Disk', unit: '%', series: fleetSeries(f.disk) },
-    { title: 'Network', unit: 'B/s', series: fleetSeries(f.net) },
-  ]
-})
+const trendOf = (s, g) => trend.value.by[s.name]?.[g] || []
 
 // `/api/systems` is global (not workspace-scoped), so one cache key — navigating
 // back to Systems paints the last fleet instantly, then revalidates silently.
@@ -240,8 +220,12 @@ const { loaded, reload: load } = useCached({
   // error before the first successful load.
   onError: () => { if (!servers.value.length) error.value = 'Failed to load systems' },
 })
-onMounted(() => { load(); loadFleet(); loadThresholds(); timer = setInterval(() => { load(); loadFleet() }, 5000) })
-onUnmounted(() => clearInterval(timer))
+// The fleet series is one query over every host for the whole range; at 30d it is
+// not something to refetch every 5 s like the row list. Once a minute is plenty for
+// a strip 96 px wide.
+let fleetTimer = null
+onMounted(() => { load(); loadFleet(); loadThresholds(); timer = setInterval(load, 5000); fleetTimer = setInterval(loadFleet, 60000) })
+onUnmounted(() => { clearInterval(timer); clearInterval(fleetTimer) })
 watch(frange, loadFleet)
 
 // A k8s NODE row IS a node → open its node detail (with cluster breadcrumb). A
@@ -261,13 +245,13 @@ const detailLink = (s) => {
       <!-- hero -->
       <section class="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div class="rounded-xl border border-line bg-surface p-4">
-          <div class="text-xs uppercase tracking-wider text-faint">Systems online</div>
+          <div class="text-xs uppercase tracking-wider text-faint">Systems online <span class="normal-case tracking-normal">· now</span></div>
           <div class="mt-1.5 font-mono text-metric text-fg">{{ hero.online }}<span class="text-sm text-faint"> / {{ hero.total }}</span></div>
           <div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.total ? (hero.online / hero.total) * 100 : 0) + '%' }"></div></div>
         </div>
-        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg disk</div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.disk ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.disk || 0) + '%' }"></div></div></div>
-        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg CPU</div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.cpu ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.cpu || 0) + '%' }"></div></div></div>
-        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg memory</div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.mem ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.mem || 0) + '%' }"></div></div></div>
+        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg disk <span class="normal-case tracking-normal">· {{ frange }}</span></div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.disk ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.disk || 0) + '%' }"></div></div></div>
+        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg CPU <span class="normal-case tracking-normal">· {{ frange }}</span></div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.cpu ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.cpu || 0) + '%' }"></div></div></div>
+        <div class="rounded-xl border border-line bg-surface p-4"><div class="text-xs uppercase tracking-wider text-faint">Avg memory <span class="normal-case tracking-normal">· {{ frange }}</span></div><div class="mt-1.5 font-mono text-metric text-fg">{{ hero.mem ?? '—' }}%</div><div class="mt-2 h-1 overflow-hidden rounded bg-line"><div class="h-full bg-accent" :style="{ width: (hero.mem || 0) + '%' }"></div></div></div>
       </section>
 
       <!-- needs attention: a single compact list, icons show what's wrong -->
@@ -288,10 +272,10 @@ const detailLink = (s) => {
           <RouterLink v-for="h in attnHosts" :key="h.s.id" :to="{ name: 'system', params: { id: h.s.id } }"
             v-tip="chipTitle(h)" class="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-xs hover:border-accent/50">
             <span class="text-fg">{{ h.s.name }}</span>
-            <span v-for="i in h.issues" :key="i.key" v-tip="issueText(i)"
+            <span v-for="i in h.issues" :key="i.key" v-tip="issueText(i, h.s)"
               class="inline-flex items-center gap-0.5 font-mono tabular-nums" :class="i.crit ? 'text-down' : 'text-warn'">
               <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ISSUE[i.key].icon"/></svg>
-              <span v-if="i.val != null">{{ i.val }}%</span>
+              <span v-if="i.val != null">{{ i.val }}%</span><span v-else-if="ago(h.s.last_seen)">{{ ago(h.s.last_seen) }}</span>
             </span>
           </RouterLink>
         </div>
@@ -306,46 +290,23 @@ const detailLink = (s) => {
       <PageLoader v-if="!loaded && !error" />
       <p v-if="error" class="text-sm text-down">{{ error }}</p>
 
-      <!-- Fleet overlay: every visible host on one chart per metric (filter applies) -->
-      <section v-if="servers.length">
+      <!-- Hosts: one flat table; Type / Cluster / Workspace are clickable filters -->
+      <section v-if="rows.length">
         <div class="mb-2 flex flex-wrap items-center gap-2">
-          <h2 class="text-sm font-semibold text-fg">Fleet metrics</h2>
-          <span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ visible.length }} hosts</span>
+          <h2 class="text-sm font-semibold text-fg">Hosts</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ rows.length }}</span>
           <!-- active filter chips (each token in the query) + reset -->
           <span v-for="(c, i) in chips" :key="c + i" class="flex items-center gap-1 rounded-full border border-line bg-surface2 py-0.5 pl-2 pr-1 text-xs text-fg">
             <span class="font-mono tabular-nums">{{ c }}</span>
             <button @click="removeChip(i)" v-tip="`Remove filter`" class="grid h-4 w-4 place-items-center rounded-full text-faint hover:bg-down/15 hover:text-down"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </span>
-          <!-- selected nodes (row checkbox) — shown on charts, listed as chips -->
-          <span v-for="s in pinnedSystems" :key="'pin-' + s.id" v-tip="s.name" class="flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-0.5 pl-2 pr-1 text-xs text-accent">
-            <span class="h-2 w-2 rounded-full" :style="{ background: colorOf[s.name] }"></span>
-            <span class="font-mono tabular-nums">{{ shortName(s.name) }}</span>
-            <button @click="toggleRow(s.id)" v-tip="`Deselect`" class="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/25"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-          </span>
-          <button v-if="chips.length || pinnedSystems.length || fviewRange" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
-          <!-- range selector: a drag-zoom shows the custom window here as a chip -->
-          <div class="ml-auto flex items-center gap-2">
-            <span v-if="fviewRange" class="flex items-center gap-1 rounded-lg border border-accent/40 bg-accent/10 py-1 pl-2 pr-1 text-xs text-accent">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-              <span class="font-mono tabular-nums">{{ fmtTs(fviewRange[0]) }} – {{ fmtTs(fviewRange[1]) }}</span>
-              <button @click="setFzoom(null)" v-tip="`Clear zoom`" class="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/25"><svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-            </span>
-            <div v-else class="flex rounded-lg border border-line bg-surface2 p-0.5 text-xs">
-              <button v-for="rr in FRANGES" :key="rr" @click="setFrange(rr)" class="rounded-md px-2.5 py-1" :class="frange===rr?'bg-accent/15 font-medium text-accent':'text-muted hover:text-fg'">{{ rr }}</button>
-            </div>
+          <button v-if="chips.length" @click="resetFilters" class="text-xs text-muted hover:text-accent">Reset</button>
+          <!-- range: drives the row sparklines and the Avg tiles above -->
+          <div class="ml-auto flex rounded-lg border border-line bg-surface2 p-0.5 text-xs">
+            <button v-for="rr in FRANGES" :key="rr" @click="setFrange(rr)" class="rounded-md px-2.5 py-1" :class="frange===rr?'bg-accent/15 font-medium text-accent':'text-muted hover:text-fg'">{{ rr }}</button>
           </div>
         </div>
-        <p v-if="!visible.length" class="rounded-xl border border-line bg-surface p-4 text-sm text-muted">No hosts match the filter. <button @click="resetFilters" class="text-accent hover:underline">Reset</button></p>
-        <FleetCharts v-else :charts="fleetCharts" :time="gappedFleet?.t || []" :span-seconds="FSPAN[frange]" :view-range="fviewRange"
-          :focus-names="fleetFocus" :selected-names="selectedNames" sync-key="fleet"
-          @legend-hover="onLegendHover" @legend-toggle="toggleByName" @zoom="setFzoom" />
-      </section>
-
-      <!-- Hosts: one flat table; Type / Cluster / Workspace are clickable filters -->
-      <section v-if="rows.length">
-        <div class="mb-2 flex items-center gap-2"><h2 class="text-sm font-semibold text-fg">Hosts</h2><span class="rounded-full bg-surface2 px-2 py-0.5 text-xs text-muted">{{ rows.length }}</span></div>
         <div class="overflow-x-auto rounded-xl border border-line">
-          <table class="w-full min-w-[1040px] text-sm">
+          <table class="w-full min-w-[1120px] text-sm">
             <thead class="border-b border-line2 bg-head text-left text-xs uppercase tracking-wide text-fg"><tr>
               <th class="w-8 px-3 py-2.5"><input type="checkbox" :checked="rows.length && rows.every((s)=>selected.has(s.id))" @change="toggleAll(rows)" class="h-4 w-4 accent-accent" /></th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('name')">Host{{ arrow('name') }}</th>
@@ -353,16 +314,16 @@ const detailLink = (s) => {
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('type')">Type{{ arrow('type') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('cluster')">Cluster{{ arrow('cluster') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('status')">Status{{ arrow('status') }}</th>
-              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('cpu')">CPU{{ arrow('cpu') }}</th>
-              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('mem')">Memory{{ arrow('mem') }}</th>
+              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('cpu')">CPU{{ arrow('cpu') }} <span class="font-normal normal-case tracking-normal text-faint">· {{ frange }}</span></th>
+              <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('mem')">Memory{{ arrow('mem') }} <span class="font-normal normal-case tracking-normal text-faint">· {{ frange }}</span></th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('disk')">Disk{{ arrow('disk') }}</th>
               <th class="cursor-pointer select-none px-4 py-2.5 font-extrabold hover:text-fg" @click="sortBy('agent')">Agent{{ arrow('agent') }}</th>
             </tr></thead>
             <tbody>
               <template v-for="s in rows" :key="s.id">
-                <tr class="vantage-row border-b border-line border-l-2" :class="[selected.has(s.id) ? 'sel' : '', sevOf(s) === 3 || sevOf(s) === 2 ? 'border-l-down' : sevOf(s) === 1 ? 'border-l-warn' : 'border-l-transparent']" @mouseenter="onLegendHover(s.name)" @mouseleave="onLegendHover(null)">
+                <tr class="vantage-row border-b border-line border-l-2" :class="[selected.has(s.id) ? 'sel' : '', sevOf(s) === 3 || sevOf(s) === 2 ? 'border-l-down' : sevOf(s) === 1 ? 'border-l-warn' : 'border-l-transparent']">
                   <td class="px-3 py-3"><input type="checkbox" :checked="selected.has(s.id)" @change="toggleRow(s.id)" class="h-4 w-4 accent-accent" /></td>
-                  <td class="px-4 py-3">
+                  <td class="px-4 py-3 whitespace-nowrap">
                     <div class="flex items-center gap-1.5">
                       <button v-if="s.kind === 'docker'" @click="toggleDocker(s)" class="text-muted hover:text-accent"><svg class="h-4 w-4 transition-transform" :class="expanded.has(s.id) ? 'rotate-90' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg></button>
                       <span v-else class="w-4 shrink-0"></span>
@@ -373,9 +334,9 @@ const detailLink = (s) => {
                   <td class="px-4 py-3"><button @click="setFilter('ws', s.workspace)" v-tip="`Filter ws:${s.workspace}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.workspace || '—' }}</button></td>
                   <td class="px-4 py-3"><button @click="setFilter('kind', s.kind)" v-tip="`Filter kind:${s.kind}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ KIND_LABEL[s.kind] || s.kind }}</button></td>
                   <td class="px-4 py-3"><button v-if="s.cluster" @click="setFilter('cluster', s.cluster)" v-tip="`Filter cluster:${s.cluster}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.cluster }}</button><span v-else class="text-faint">—</span></td>
-                  <td class="px-4 py-3"><button @click="setFilter('status', online(s)?'online':'offline')" v-tip="`Filter status:${online(s)?'online':'offline'}`" class="text-sm hover:underline" :class="online(s)?'text-accent':'text-down'">{{ online(s)?'online':'offline' }}</button></td>
-                  <td class="px-4 py-3"><Gauge :v="online(s)?r(s.cpu_percent):null" :warn="thrOf(s).cpu_warn" :crit="thrOf(s).cpu_crit" /></td>
-                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" :warn="thrOf(s).mem_warn" :crit="thrOf(s).mem_crit" /></td>
+                  <td class="px-4 py-3 whitespace-nowrap"><button @click="setFilter('status', online(s)?'online':'offline')" v-tip="online(s) ? `Filter status:online` : `Last report ${s.last_seen ? new Date(s.last_seen).toLocaleString() : 'unknown'} · filter status:offline`" class="text-sm hover:underline" :class="online(s)?'text-accent':'text-down'">{{ online(s)?'online':'offline' }}<span v-if="!online(s) && ago(s.last_seen)" class="ml-1 font-mono text-xs tabular-nums text-down/80">{{ ago(s.last_seen) }}</span></button></td>
+                  <td class="px-4 py-3"><div class="flex items-center gap-3"><Gauge :v="online(s)?r(s.cpu_percent):null" :warn="thrOf(s).cpu_warn" :crit="thrOf(s).cpu_crit" /><Sparkline :data="trendOf(s, 'cpu')" :time="trend.t" :max="100" :width="72" :color="colorOf[s.name]" /></div></td>
+                  <td class="px-4 py-3"><div class="flex items-center gap-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" :warn="thrOf(s).mem_warn" :crit="thrOf(s).mem_crit" /><Sparkline :data="trendOf(s, 'mem')" :time="trend.t" :max="100" :width="72" :color="colorOf[s.name]" /></div></td>
                   <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.disk_used,s.disk_total):null" :warn="thrOf(s).disk_warn" :crit="thrOf(s).disk_crit" /></td>
                   <td class="px-4 py-3"><span class="rounded px-1.5 py-0.5 text-xs" :class="agentCls(s.agent_version)">{{ s.agent_version ? 'v'+s.agent_version : '—' }}</span></td>
                 </tr>

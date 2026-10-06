@@ -7,6 +7,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.9.0] — 2026-10-06
+
+### Changed
+- **Each host row carries its own CPU and memory history.** The Infrastructure page
+  opened with four charts that overlaid every host — 70 lines on one axis, nothing
+  readable, and the host table pushed below the fold. Those charts are gone; each row of
+  the Hosts table now has a small sparkline of that host's CPU and memory over the
+  selected range, next to its current gauge. Hover for the value and time. (#1)
+- **Range picker goes to 7 days and 30 days.** A day is not enough to decide whether a
+  host needs more memory or a node can be dropped. The two new ranges read the hourly
+  tier the hub already keeps for a year. (#2)
+- **The Avg CPU / memory / disk tiles follow the range.** They used to show the latest
+  sample while the picker beside them said "24h". Pick 30d and Avg CPU is the 30-day
+  mean over the visible hosts; each tile says which range it covers. Systems online is a
+  count and stays "now". (#3)
+- **Overview shows system health only.** "Operations" and "Account & system" (backup,
+  two-factor, database size, workspaces, members) belong to Settings and are no longer
+  on the Overview. What remains is in two tiers: large action tiles that tint only when
+  the number is non-zero — hosts down / critical / warning, services down, alerts
+  firing — and a compact inventory strip underneath. Overview now makes four API calls
+  per refresh instead of ten. (#4)
+- **"Down" says for how long.** The Hosts table, the Issues chips and the Overview's
+  Hosts-down tile show how long a host has been silent (from its last report); the
+  Services-down tile shows the longest outage to the hour, from the 24h trend. (#5)
+
 ## [3.8.0] — 2026-10-06
 
 ### Changed
