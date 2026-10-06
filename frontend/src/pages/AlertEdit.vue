@@ -41,8 +41,11 @@ const chanColor = (kind) => typeByKind(kind)?.color || 'rgb(var(--surface2))'
 const chanFg = (kind) => typeByKind(kind)?.fg || 'rgb(var(--fg))'
 const chanIcon = (kind) => typeByKind(kind)?.icon || 'chat'
 
-const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m' }
-const ed = ref({ srcType: 'monitor', targetId: '', scopeWs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, offlineSecs: 120, channels: new Set(), renotify: '' })
+const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m', load5: 'Load 5m', load15: 'Load 15m', load_per_core: 'Load / core' }
+// Sustain window: fire only after every sample in it breaches. 5 min is the default for a
+// new rule — a single CPU spike paging people was the complaint that added this.
+const FOR_OPTIONS = [['0', 'immediately'], ['60', 'for 1 min'], ['300', 'for 5 min'], ['600', 'for 10 min'], ['900', 'for 15 min']]
+const ed = ref({ srcType: 'monitor', targetId: '', scopeWs: '', condType: 'down', metric: 'cpu_percent', op: '>', value: 90, forSecs: '300', offlineSecs: 120, channels: new Set(), renotify: '' })
 
 const isScope = computed(() => ed.value.srcType === 'all_services' || ed.value.srcType === 'all_hosts')
 const isServiceLike = computed(() => ed.value.srcType === 'monitor' || ed.value.srcType === 'all_services')
@@ -74,7 +77,8 @@ const targetName = computed(() => {
 const condText = computed(() => {
   if (isServiceLike.value) return 'is DOWN'
   if (ed.value.condType === 'offline') return `offline > ${ed.value.offlineSecs}s`
-  return `${METRIC_LABEL[ed.value.metric]} ${ed.value.op} ${ed.value.value}`
+  const f = Number(ed.value.forSecs)
+  return `${METRIC_LABEL[ed.value.metric]} ${ed.value.op} ${ed.value.value}${f > 0 ? ` for ${f / 60} min` : ''}`
 })
 
 // ---- per-channel test (works before the rule is saved) ----
@@ -106,7 +110,7 @@ async function testChan(id) {
 function buildCondition() {
   if (isServiceLike.value) return {}
   if (ed.value.condType === 'offline') return { offline_secs: Number(ed.value.offlineSecs) || 120 }
-  return { metric: ed.value.metric, op: ed.value.op, value: Number(ed.value.value) }
+  return { metric: ed.value.metric, op: ed.value.op, value: Number(ed.value.value), for_secs: Number(ed.value.forSecs) || 0 }
 }
 function backToList() { router.push({ name: 'alerts', query: route.query.ws ? { ws: route.query.ws } : {} }) }
 
@@ -158,6 +162,8 @@ onMounted(async () => {
         scopeWs: a.scope_workspace_id || '',
         condType: serviceLike ? 'down' : c.offline_secs ? 'offline' : 'metric',
         metric: c.metric || 'cpu_percent', op: c.op || '>', value: c.value ?? 90, offlineSecs: c.offline_secs ?? 120,
+        // an older rule without a window keeps firing on the latest sample until someone picks one
+        forSecs: String(c.for_secs ?? 0),
         channels: new Set((a.channels || []).map((ch) => ch.id)),
         renotify: a.renotify_secs ? String(a.renotify_secs) : '',
       }
@@ -204,9 +210,11 @@ onMounted(async () => {
               <span class="text-sm text-muted">Fires when</span>
               <UiSelect v-model="ed.condType" :options="[['metric', 'a metric'], ['offline', 'it goes offline']]" />
               <template v-if="ed.condType === 'metric'">
-                <UiSelect v-model="ed.metric" :options="[['cpu_percent', 'CPU %'], ['mem_percent', 'Memory %'], ['disk_percent', 'Disk %'], ['load1', 'Load 1m']]" />
+                <UiSelect v-model="ed.metric" :options="Object.entries(METRIC_LABEL)" />
                 <UiSelect v-model="ed.op" :options="['>', '>=', '<', '<=']" />
-                <input v-model.number="ed.value" type="number" class="w-24 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
+                <input v-model.number="ed.value" type="number" step="any" class="w-24 rounded-lg border border-line bg-surface2 px-3 py-2.5 text-sm text-fg focus:border-accent/60 focus:outline-none" />
+                <UiSelect v-model="ed.forSecs" :options="FOR_OPTIONS" />
+                <span v-if="ed.metric === 'load_per_core'" class="basis-full text-xs text-faint">Load 1m ÷ logical cores — 1.0 means every core busy; comparable across hosts of any size.</span>
               </template>
               <template v-else>
                 <span class="text-sm text-muted">no sample for</span>

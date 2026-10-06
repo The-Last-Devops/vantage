@@ -202,10 +202,14 @@ Two shapes of rule. On a **service**, omit `condition` — it fires when the che
 goes down. On a **host**, pass a threshold:
 
 ```json
-{"metric": "cpu_percent", "op": ">", "value": 90}
+{"metric": "cpu_percent", "op": ">", "value": 90, "for_secs": 300}
 ```
 
-`metric` is `cpu_percent` | `mem_percent` | `load1`; `op` is `>` `>=` `<` `<=`.
+`metric` is `cpu_percent` | `mem_percent` | `disk_percent` | `load1` | `load5` | `load15` |
+`load_per_core` (load1 ÷ logical cores — comparable across hosts of different sizes);
+`op` is `>` `>=` `<` `<=`. `for_secs` (optional, 0–3600) makes the rule fire only once
+**every** sample in that window breaches, so a spike does not notify; 0 or absent fires on
+the latest sample.
 
 Service `kind` is one of `http` `tcp` `ping` `keyword` `postgres` `redis` `dns`
 `rabbitmq` `mysql` `mongodb` `tls` `push`. All but `push` need a `target`

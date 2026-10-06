@@ -45,13 +45,14 @@ const chanFg = (kind) => typeByKind(kind)?.fg || 'rgb(var(--fg))'
 const chanIcon = (kind) => typeByKind(kind)?.icon || 'chat'
 
 // ---- derived row fields ----
-const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m' }
+const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m', load5: 'Load 5m', load15: 'Load 15m', load_per_core: 'Load / core' }
 const isSvc = (a) => a.target_kind === 'monitor' || a.target_kind === 'all_services'
+const forText = (s) => (s > 0 ? ` for ${s % 60 === 0 ? s / 60 + ' min' : s + ' s'}` : '')
 function condText(a) {
   const c = a.condition || {}
   if (isSvc(a)) return 'is DOWN'
   if (c.offline_secs) return `offline > ${c.offline_secs}s`
-  if (c.metric) return `${METRIC_LABEL[c.metric] || c.metric} ${c.op} ${c.value}`
+  if (c.metric) return `${METRIC_LABEL[c.metric] || c.metric} ${c.op} ${c.value}${forText(c.for_secs)}`
   return '—'
 }
 function stateOf(a) {

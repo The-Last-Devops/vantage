@@ -106,11 +106,11 @@ for what is broken now, `recent_events` for what broke recently, and
 `system_metrics` (never `list_systems`) for a host's CPU/memory over time.
 `service_heartbeats` is the probe history behind one check's up/down.
 
-Two kinds of alert rule. On a SERVICE, omit `condition` — the rule fires when the
+Two kinds of alert rule. On a SERVICE, omit `condition` — it fires when the
 check goes down. On a HOST, pass a threshold:
-{\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}; metric is
-cpu_percent, mem_percent, disk_percent or load1. A metric outside that set is
-rejected with 400 rather than stored as a rule that never fires.
+{\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90,\"for_secs\":300}; metrics:
+cpu_percent, mem_percent, disk_percent, load1/5/15, load_per_core (else 400).
+for_secs: fire only once the whole window breaches (use 300).
 
 Before `create_channel`, call `channel_types` for that provider's `config`
 fields — they differ per provider and guessing produces a channel that silently
@@ -247,8 +247,9 @@ fn tool_defs() -> Value {
                 "scope_kind": { "type": "string", "enum": ["all_services", "all_hosts"], "description": "workspace-wide instead of a single target" },
                 "channel_ids": { "type": "array", "items": { "type": "string" }, "description": "channels to notify (from list_channels)" },
                 "condition": { "type": "object", "description":
-                    "Metric threshold, e.g. {\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90}. \
-                     metric: cpu_percent | mem_percent | disk_percent | load1 (host rules only); op: > >= < <=. \
+                    "Metric threshold, e.g. {\"metric\":\"cpu_percent\",\"op\":\">\",\"value\":90,\"for_secs\":300}. \
+                     metric: cpu_percent | mem_percent | disk_percent | load1 | load5 | load15 | load_per_core (host rules only); op: > >= < <=; \
+                     for_secs: 0–3600, fire only after every sample in that window breaches (300 recommended for CPU/load). \
                      Omit entirely for a plain down/up rule — that is the right choice for a service check." },
                 "cooldown_secs": { "type": "integer" },
                 "renotify_secs": { "type": "integer", "description": "re-notify cadence while firing; omit for off" } } } }),
@@ -1025,7 +1026,15 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        for want in ["cpu_percent", "mem_percent", "disk_percent", "load1", "op"] {
+        for want in [
+            "cpu_percent",
+            "mem_percent",
+            "disk_percent",
+            "load1",
+            "load_per_core",
+            "for_secs",
+            "op",
+        ] {
             assert!(cond.contains(want), "condition description omits `{want}`");
         }
 

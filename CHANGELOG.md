@@ -7,6 +7,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.7.0] — 2026-10-06
+
+### Added
+- **"For N minutes" on threshold rules.** A rule can now require the metric to stay over
+  its threshold for 1 / 5 / 10 / 15 minutes before it fires (`for_secs` over the API,
+  0–3600). Every sample in the window must breach — one dip resets the clock, as with
+  Prometheus `for:` — and the window must be at least three-quarters covered, so a host
+  that came online 20 seconds ago cannot fire a 5-minute rule. Until now the engine
+  compared the single latest 5-second sample, every 10 seconds: a CPU spike was a DOWN
+  and an UP in the channel a minute apart, all day. New rules default to 5 minutes.
+- **Load metrics: `load5`, `load15` and `load_per_core`.** Raw load is only meaningful
+  next to the core count — load 8 is a saturated 4-core box and an idle 32-core one —
+  so `load_per_core` (load1 ÷ logical cores) is the one to use for a fleet-wide rule,
+  e.g. `> 1.5`. A host that has not reported its cores is skipped, never fired on a
+  made-up number.
+
+### Changed
+- **Threshold notifications say ALERT / STILL ALERT / RECOVERED, and name the host.**
+  A fleet-wide CPU rule used to post "🔴 All hosts — DOWN" when one host was hot, which
+  readers took as an outage of every host. The headline now names the breaching host
+  ("🔴 k8s14-boston — ALERT", or "3 hosts — ALERT"), the condition reads
+  "CPU % > 90 for 5 min", and the detail lists each host with its current value.
+  Service and offline rules keep UP / DOWN, where the words are literally true.
+  Re-notifications now carry 🟠 instead of a second 🔴.
+
 ## [3.6.0] — 2026-10-06
 
 ### Added

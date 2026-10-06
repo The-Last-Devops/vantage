@@ -40,6 +40,12 @@ struct Rule {
 struct Eval {
     firing: bool,
     message: String,
+    /// Short per-target label for the workspace-wide roll-up, e.g. "k8s14 (CPU 94%)".
+    brief: String,
+    /// Targets currently breaching (names). Empty when ok. The notification headline
+    /// names them, instead of the rule's scope ("All hosts"), which read as "every host
+    /// is down" when one host had a CPU spike.
+    affected: Vec<String>,
 }
 
 pub fn spawn(state: AppState) {
@@ -95,9 +101,11 @@ async fn tick(state: &AppState, client: &reqwest::Client) -> anyhow::Result<()> 
 
         if should_notify {
             let (target, kind_label, workspace, endpoint) = target_info(state, &rule).await;
+            let target = headline_target(target, &rule, &eval);
             let n = crate::notify::Notification {
                 firing: eval.firing,
                 repeat: was_firing && eval.firing, // a re-notify while still firing
+                threshold: is_threshold(&rule),
                 target,
                 kind_label: kind_label.to_string(),
                 workspace,
@@ -183,6 +191,7 @@ pub(crate) async fn test_notification(
     Ok(crate::notify::Notification {
         firing,
         repeat: false,
+        threshold: is_threshold(&rule),
         target,
         kind_label: kind_label.to_string(),
         workspace,
@@ -308,6 +317,7 @@ async fn evaluate_scope(
     }
     let mut any_data = false;
     let mut down: Vec<String> = Vec::new();
+    let mut briefs: Vec<String> = Vec::new();
     for (id, name) in &targets {
         let e = if kind == "all_services" {
             evaluate_monitor(state, *id).await?
@@ -318,6 +328,11 @@ async fn evaluate_scope(
             any_data = true;
             if e.firing {
                 down.push(name.clone());
+                briefs.push(if e.brief.is_empty() {
+                    name.clone()
+                } else {
+                    e.brief
+                });
             }
         }
     }
@@ -327,15 +342,20 @@ async fn evaluate_scope(
     let firing = !down.is_empty();
     let message = if firing {
         format!(
-            "{} of {} {label} affected: {}",
+            "{} of {} {label}: {}",
             down.len(),
             targets.len(),
-            down.join(", ")
+            briefs.join(", ")
         )
     } else {
         format!("all {} {label} ok", targets.len())
     };
-    Ok(Some(Eval { firing, message }))
+    Ok(Some(Eval {
+        firing,
+        message,
+        brief: String::new(),
+        affected: down,
+    }))
 }
 
 async fn evaluate_monitor(state: &AppState, monitor_id: Uuid) -> anyhow::Result<Option<Eval>> {
@@ -347,6 +367,8 @@ async fn evaluate_monitor(state: &AppState, monitor_id: Uuid) -> anyhow::Result<
     .await?;
     let name = monitor_name(state, monitor_id).await.unwrap_or_default();
     Ok(latest.map(|(up, msg)| Eval {
+        brief: String::new(),
+        affected: Vec::new(),
         firing: !up,
         message: if up {
             format!("monitor '{name}' is up")
@@ -382,6 +404,8 @@ async fn evaluate_server(
             } else {
                 format!("server '{name}' is online")
             },
+            brief: String::new(),
+            affected: if firing { vec![name] } else { Vec::new() },
         }));
     }
 
@@ -390,36 +414,95 @@ async fn evaluate_server(
     let op = cond.get("op").and_then(Value::as_str);
     let threshold = cond.get("value").and_then(Value::as_f64);
     if let (Some(metric), Some(op), Some(threshold)) = (metric, op, threshold) {
-        let row: Option<(f64, f64, i64, i64, i64, i64)> = sqlx::query_as(
-            "SELECT cpu_percent, load1, mem_used, mem_total, disk_used, disk_total \
-             FROM system_metrics_5s WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
-        )
-        .bind(system_id)
-        .fetch_optional(&state.data)
-        .await?;
-        let Some((cpu, load1, mem_used, mem_total, disk_used, disk_total)) = row else {
+        let for_secs = cond.get("for_secs").and_then(Value::as_i64).unwrap_or(0);
+        // Core count lives in the config DB (the host row); the samples in the data DB.
+        // The two are never joined — fetched separately and combined here.
+        let cores: Option<(Option<i32>,)> =
+            sqlx::query_as("SELECT cpu_cores FROM systems WHERE id = $1")
+                .bind(system_id)
+                .fetch_optional(&state.config)
+                .await?;
+        let cores = cores.and_then(|(c,)| c).map(|c| c as i64);
+        // Newest first. With a sustain window, every sample inside it; otherwise just
+        // the latest one. The window query is bounded by the rule's own duration, so a
+        // 15-minute rule on the 5-second tier reads at most 180 rows.
+        type Row = (
+            chrono::DateTime<chrono::Utc>,
+            f64,
+            f64,
+            f64,
+            f64,
+            i64,
+            i64,
+            i64,
+            i64,
+        );
+        let rows: Vec<Row> = if for_secs > 0 {
+            sqlx::query_as(
+                "SELECT time, cpu_percent, load1, COALESCE(load5, 0), COALESCE(load15, 0), \
+                        mem_used, mem_total, disk_used, disk_total \
+                 FROM system_metrics_5s WHERE system_id = $1 AND time > now() - ($2 * interval '1 second') \
+                 ORDER BY time DESC",
+            )
+            .bind(system_id)
+            .bind(for_secs as f64)
+            .fetch_all(&state.data)
+            .await?
+        } else {
+            sqlx::query_as(
+                "SELECT time, cpu_percent, load1, COALESCE(load5, 0), COALESCE(load15, 0), \
+                        mem_used, mem_total, disk_used, disk_total \
+                 FROM system_metrics_5s WHERE system_id = $1 ORDER BY time DESC LIMIT 1",
+            )
+            .bind(system_id)
+            .fetch_all(&state.data)
+            .await?
+        };
+        if rows.is_empty() {
             return Ok(None);
+        }
+        let mut values = Vec::with_capacity(rows.len());
+        for (_, cpu, load1, load5, load15, mem_used, mem_total, disk_used, disk_total) in &rows {
+            let sample = Sample {
+                cpu: *cpu,
+                load1: *load1,
+                load5: *load5,
+                load15: *load15,
+                mem_used: *mem_used,
+                mem_total: *mem_total,
+                disk_used: *disk_used,
+                disk_total: *disk_total,
+                cores,
+            };
+            // Unknown metric: unreachable for a rule created through the API, which
+            // rejects those, but a hand-edited row must not fire on a value it never read.
+            let Some(v) = sample.value(metric) else {
+                return Ok(None);
+            };
+            values.push(v);
+        }
+        let current = values[0];
+        let oldest_age = (chrono::Utc::now() - rows[rows.len() - 1].0).num_seconds();
+        let firing = sustained(&values, op, threshold, for_secs, oldest_age);
+        let label = metric_label(metric);
+        let shown = if metric.ends_with("_percent") {
+            format!("{label} {current:.0}%")
+        } else {
+            format!("{label} {current:.2}")
         };
-        let sample = Sample {
-            cpu,
-            load1,
-            mem_used,
-            mem_total,
-            disk_used,
-            disk_total,
-        };
-        // Unknown metric: unreachable for a rule created through the API, which rejects
-        // those, but a hand-edited row must not fire on a value it never read.
-        let Some(current) = sample.value(metric) else {
-            return Ok(None);
-        };
-        let firing = compare(current, op, threshold);
         return Ok(Some(Eval {
             firing,
             message: format!(
-                "server '{name}' {metric}={current:.1} {op} {threshold} -> {}",
+                "server '{name}' {metric}={current:.1} {op} {threshold}{} -> {}",
+                if for_secs > 0 {
+                    format!(" for {}", for_text(for_secs))
+                } else {
+                    String::new()
+                },
                 if firing { "BREACH" } else { "ok" }
             ),
+            brief: format!("{name} ({shown})"),
+            affected: if firing { vec![name] } else { Vec::new() },
         }));
     }
 
@@ -430,10 +513,14 @@ async fn evaluate_server(
 pub struct Sample {
     pub cpu: f64,
     pub load1: f64,
+    pub load5: f64,
+    pub load15: f64,
     pub mem_used: i64,
     pub mem_total: i64,
     pub disk_used: i64,
     pub disk_total: i64,
+    /// Logical cores, from the host row; None until the agent has reported them.
+    pub cores: Option<i64>,
 }
 
 impl Sample {
@@ -455,6 +542,15 @@ impl Sample {
         Some(match metric {
             "cpu_percent" => self.cpu,
             "load1" => self.load1,
+            "load5" => self.load5,
+            "load15" => self.load15,
+            // Load is only comparable across hosts relative to core count: load 8 is a
+            // saturated 4-core box and an idle 32-core one. None (not 0) when the host
+            // has not reported its cores — a rule must not fire on a made-up number.
+            "load_per_core" => match self.cores {
+                Some(c) if c > 0 => self.load1 / c as f64,
+                _ => return None,
+            },
             "mem_percent" => Self::pct(self.mem_used, self.mem_total),
             // A filesystem that fills takes the machine down with it and, unlike CPU or
             // load, never recovers on its own. The agent has always collected these
@@ -468,7 +564,94 @@ impl Sample {
 /// Host metrics a threshold rule may be written against. The API validates against this
 /// list, so a typo is a 400 instead of a rule that renders perfectly and never fires —
 /// which is how a disk alert could previously be "configured" and do nothing at all.
-pub const HOST_METRICS: &[&str] = &["cpu_percent", "mem_percent", "disk_percent", "load1"];
+pub const HOST_METRICS: &[&str] = &[
+    "cpu_percent",
+    "mem_percent",
+    "disk_percent",
+    "load1",
+    "load5",
+    "load15",
+    "load_per_core",
+];
+
+/// Sustain windows a rule may ask for (seconds). 0 = fire on the latest sample.
+/// Bounded so a rule cannot ask the engine to scan hours of the 5-second tier each tick.
+pub const FOR_SECS_MAX: i64 = 3600;
+
+/// Whether a breach counts as firing. `values` is newest first, every sample inside the
+/// rule's window (or just the latest one when `for_secs` is 0).
+///
+/// With a window, EVERY sample must breach — one dip resets the clock, which is the
+/// Prometheus `for:` semantic and what stops a single CPU spike from paging. The window
+/// must also be reasonably covered: a host that came online 20 seconds ago has three
+/// samples, all breaching, and a 5-minute rule must not fire on those. Three quarters of
+/// the window is the bar, which forgives an agent on a slow push interval.
+fn sustained(values: &[f64], op: &str, threshold: f64, for_secs: i64, oldest_age: i64) -> bool {
+    if values.is_empty() {
+        return false;
+    }
+    if for_secs <= 0 {
+        return compare(values[0], op, threshold);
+    }
+    if oldest_age * 4 < for_secs * 3 {
+        return false;
+    }
+    values.iter().all(|v| compare(*v, op, threshold))
+}
+
+/// "5 min" / "90 s" for the human condition line.
+fn for_text(secs: i64) -> String {
+    if secs % 60 == 0 {
+        format!("{} min", secs / 60)
+    } else {
+        format!("{secs} s")
+    }
+}
+
+/// Human metric name, matching the editor's dropdown so a notification reads the same
+/// as the rule it came from.
+fn metric_label(metric: &str) -> &'static str {
+    match metric {
+        "cpu_percent" => "CPU %",
+        "mem_percent" => "Memory %",
+        "disk_percent" => "Disk %",
+        "load1" => "Load 1m",
+        "load5" => "Load 5m",
+        "load15" => "Load 15m",
+        "load_per_core" => "Load / core",
+        _ => "metric",
+    }
+}
+
+/// A rule that compares a metric (as opposed to down/up or offline). These get the
+/// ALERT / RECOVERED vocabulary in notifications instead of DOWN / UP.
+fn is_threshold(rule: &Rule) -> bool {
+    rule.monitor_id.is_none()
+        && rule.scope_kind.as_deref() != Some("all_services")
+        && rule.condition.get("metric").is_some()
+}
+
+/// What the headline names. A single-target rule names its target. A workspace-wide
+/// rule used to say "All hosts", which with "DOWN" next to it read as an outage of every
+/// host; it now names the breaching host, or counts them. On recovery there is nothing
+/// breaching to name, so the scope label stays (paired with RECOVERED, it is unambiguous).
+fn headline_target(scope_name: String, rule: &Rule, eval: &Eval) -> String {
+    if rule.scope_kind.is_none() || !eval.firing {
+        return scope_name;
+    }
+    match eval.affected.len() {
+        0 => scope_name,
+        1 => eval.affected[0].clone(),
+        n => format!(
+            "{n} {}",
+            if rule.scope_kind.as_deref() == Some("all_hosts") {
+                "hosts"
+            } else {
+                "services"
+            }
+        ),
+    }
+}
 
 fn compare(a: f64, op: &str, b: f64) -> bool {
     match op {
@@ -597,7 +780,13 @@ fn condition_text(rule: &Rule) -> String {
         c.get("op").and_then(Value::as_str),
         c.get("value"),
     ) {
-        (Some(m), Some(op), Some(v)) => format!("{m} {op} {v}"),
+        (Some(m), Some(op), Some(v)) => {
+            let mut t = format!("{} {op} {v}", metric_label(m));
+            if let Some(f) = c.get("for_secs").and_then(Value::as_i64).filter(|f| *f > 0) {
+                t.push_str(&format!(" for {}", for_text(f)));
+            }
+            t
+        }
         _ => String::new(),
     }
 }
@@ -610,11 +799,122 @@ mod metric_tests {
         Sample {
             cpu: 12.5,
             load1: 3.0,
+            load5: 2.0,
+            load15: 1.0,
             mem_used: 3,
             mem_total: 4,
             disk_used: 9,
             disk_total: 10,
+            cores: Some(4),
         }
+    }
+
+    #[test]
+    fn load_per_core_divides_by_reported_cores() {
+        assert_eq!(sample().value("load_per_core"), Some(0.75));
+        assert_eq!(sample().value("load5"), Some(2.0));
+        assert_eq!(sample().value("load15"), Some(1.0));
+    }
+
+    /// No core count (agent too old, or first report pending) must mean "cannot
+    /// evaluate", never "divide by something and fire".
+    #[test]
+    fn load_per_core_without_cores_is_not_evaluated() {
+        let s = Sample {
+            cores: None,
+            ..sample()
+        };
+        assert_eq!(s.value("load_per_core"), None);
+        let z = Sample {
+            cores: Some(0),
+            ..sample()
+        };
+        assert_eq!(z.value("load_per_core"), None);
+    }
+
+    /// The sustain window: every sample must breach, and the window must be mostly
+    /// covered. These two rules are what turn a spike into silence and a real plateau
+    /// into one alert.
+    #[test]
+    fn sustained_needs_every_sample_over_the_whole_window() {
+        // no window: latest sample decides
+        assert!(sustained(&[95.0], ">", 90.0, 0, 0));
+        assert!(!sustained(&[80.0, 95.0], ">", 90.0, 0, 0));
+        // window fully covered, all breaching
+        assert!(sustained(&[95.0, 92.0, 91.0], ">", 90.0, 300, 300));
+        // one dip inside the window resets it
+        assert!(!sustained(&[95.0, 85.0, 91.0], ">", 90.0, 300, 300));
+        // all breaching but the host only has 60s of samples for a 300s rule
+        assert!(!sustained(&[95.0, 92.0], ">", 90.0, 300, 60));
+        // three quarters covered is enough (slow push interval)
+        assert!(sustained(&[95.0, 92.0], ">", 90.0, 300, 225));
+        assert!(!sustained(&[], ">", 90.0, 300, 300));
+    }
+
+    #[test]
+    fn condition_text_names_the_window() {
+        let rule = |c: Value| Rule {
+            id: Uuid::nil(),
+            monitor_id: None,
+            system_id: None,
+            scope_kind: Some("all_hosts".into()),
+            scope_ns: None,
+            condition: c,
+            renotify_secs: None,
+            channels: Vec::new(),
+        };
+        assert_eq!(
+            condition_text(&rule(
+                serde_json::json!({"metric":"cpu_percent","op":">","value":90,"for_secs":300})
+            )),
+            "CPU % > 90 for 5 min"
+        );
+        assert_eq!(
+            condition_text(&rule(
+                serde_json::json!({"metric":"load_per_core","op":">","value":1.5})
+            )),
+            "Load / core > 1.5"
+        );
+        assert!(is_threshold(&rule(
+            serde_json::json!({"metric":"cpu_percent"})
+        )));
+        assert!(!is_threshold(&rule(
+            serde_json::json!({"offline_secs":120})
+        )));
+    }
+
+    /// The headline is what people read in Discord. "All hosts — DOWN" for one hot host
+    /// was read as a fleet outage; it must name the host.
+    #[test]
+    fn headline_names_the_breaching_host_not_the_scope() {
+        let rule = Rule {
+            id: Uuid::nil(),
+            monitor_id: None,
+            system_id: None,
+            scope_kind: Some("all_hosts".into()),
+            scope_ns: None,
+            condition: serde_json::json!({"metric":"cpu_percent","op":">","value":90}),
+            renotify_secs: None,
+            channels: Vec::new(),
+        };
+        let ev = |affected: Vec<&str>| Eval {
+            firing: !affected.is_empty(),
+            message: String::new(),
+            brief: String::new(),
+            affected: affected.into_iter().map(String::from).collect(),
+        };
+        assert_eq!(
+            headline_target("All hosts".into(), &rule, &ev(vec!["k8s14"])),
+            "k8s14"
+        );
+        assert_eq!(
+            headline_target("All hosts".into(), &rule, &ev(vec!["a", "b", "c"])),
+            "3 hosts"
+        );
+        assert_eq!(
+            headline_target("All hosts".into(), &rule, &ev(vec![])),
+            "All hosts"
+        );
     }
 
     /// The allowlist the API validates against must be exactly what the engine can

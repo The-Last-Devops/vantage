@@ -99,7 +99,7 @@ const barTone = (h) => (h.cpu >= h.thr.cpu_crit ? 'bg-down' : h.cpu >= h.thr.cpu
 const cpuText = (h) => (h.cpu >= h.thr.cpu_crit ? 'text-down' : h.cpu >= h.thr.cpu_warn ? 'text-warn' : 'text-fg')
 
 // ---- incidents (shared with Overview) ----
-const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
+const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', disk_percent: 'Disk %', load1: 'Load 1m', load5: 'Load 5m', load15: 'Load 15m', load_per_core: 'Load / core' }
 function condText(a) {
   const c = a.condition || {}
   if (a.target_kind === 'monitor' || a.target_kind === 'all_services') return 'service down'

@@ -66,7 +66,8 @@ currently failing.
 channels**. 17 channel types (Telegram, Slack, Discord, Mattermost, Teams, Google Chat,
 Matrix, ntfy, Pushover, Gotify, Bark, PagerDuty, Opsgenie, Twilio SMS, SMTP email, generic
 webhook, Apprise) with a one-click test; fire on monitor-down or a host condition (offline,
-CPU/memory/disk/load), with an optional **re-notify cadence** (15 min to 24 h) while still firing. Channels are a
+CPU/memory/disk/load, incl. load per core) sustained **for N minutes**, with an optional
+**re-notify cadence** (15 min to 24 h) while still firing. Channels are a
 shared resource any workspace can attach. An **Events** feed records every fire/recover with
 durations.
 

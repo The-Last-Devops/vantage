@@ -12,6 +12,10 @@ pub struct Notification {
     pub firing: bool,
     /// true = a re-notification while still firing (not the first alert).
     pub repeat: bool,
+    /// true = a metric-threshold rule (CPU %, disk %, load…). These say ALERT /
+    /// STILL ALERT / RECOVERED: a host at 93% CPU is not "DOWN", and "All hosts — DOWN"
+    /// for one hot host was read in Discord as a fleet outage.
+    pub threshold: bool,
     pub target: String,     // "api.shop" or "All services"
     pub kind_label: String, // "Service" / "Host"
     pub workspace: String,
@@ -31,6 +35,7 @@ impl Notification {
         Notification {
             firing: false,
             repeat: false,
+            threshold: false,
             target: "Test notification".into(),
             kind_label: String::new(),
             workspace: String::new(),
@@ -41,23 +46,27 @@ impl Notification {
         }
     }
     /// The word in the headline and in `{{status}}` / the webhook `status` field.
-    /// Deliberately UP / DOWN / STILL DOWN — the same vocabulary the UI uses for a
-    /// host or service, so a phone notification reads at a glance. (A threshold rule
-    /// like "CPU % > 90" also renders DOWN; the `Condition` field carries the nuance.)
+    /// Deliberately UP / DOWN / STILL DOWN for availability rules — the same vocabulary
+    /// the UI uses for a host or service, so a phone notification reads at a glance.
+    /// Threshold rules get ALERT / STILL ALERT / RECOVERED: nothing is down, something
+    /// is high.
     pub(crate) fn status_word(&self) -> &'static str {
-        if !self.firing {
-            "UP"
-        } else if self.repeat {
-            "STILL DOWN"
-        } else {
-            "DOWN"
+        match (self.threshold, self.firing, self.repeat) {
+            (false, false, _) => "UP",
+            (false, true, false) => "DOWN",
+            (false, true, true) => "STILL DOWN",
+            (true, false, _) => "RECOVERED",
+            (true, true, false) => "ALERT",
+            (true, true, true) => "STILL ALERT",
         }
     }
     fn emoji(&self) -> &'static str {
-        if self.firing {
-            "🔴"
-        } else {
+        if !self.firing {
             "✅"
+        } else if self.repeat {
+            "🟠"
+        } else {
+            "🔴"
         }
     }
     /// Headline, e.g. "🔴 api.shop — ALERT".
@@ -206,6 +215,7 @@ mod tests {
         Notification {
             firing,
             repeat,
+            threshold: false,
             target: "api.shop".into(),
             kind_label: "Service".into(),
             workspace: "production".into(),
@@ -231,8 +241,24 @@ mod tests {
     #[test]
     fn title_pairs_the_word_with_an_emoji() {
         assert_eq!(n(true, false).title(), "🔴 api.shop — DOWN");
-        assert_eq!(n(true, true).title(), "🔴 api.shop — STILL DOWN");
+        assert_eq!(n(true, true).title(), "🟠 api.shop — STILL DOWN");
         assert_eq!(n(false, false).title(), "✅ api.shop — UP");
+    }
+
+    /// A threshold rule never says DOWN: the host is up, a number is high. Pinned
+    /// because `{{status}}` in custom webhook templates sees the same words.
+    #[test]
+    fn threshold_rules_say_alert_and_recovered() {
+        let t = |firing, repeat| Notification {
+            threshold: true,
+            target: "k8s14-boston".into(),
+            condition: "CPU % > 90 for 5 min".into(),
+            ..n(firing, repeat)
+        };
+        assert_eq!(t(true, false).title(), "🔴 k8s14-boston — ALERT");
+        assert_eq!(t(true, true).title(), "🟠 k8s14-boston — STILL ALERT");
+        assert_eq!(t(false, false).title(), "✅ k8s14-boston — RECOVERED");
+        assert_eq!(t(false, true).status_word(), "RECOVERED");
     }
 
     #[test]

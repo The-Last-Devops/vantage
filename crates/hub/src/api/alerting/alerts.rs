@@ -599,10 +599,19 @@ pub struct CreateAlert {
 /// while the engine's match fell through to "do nothing". A rule that looks configured
 /// and silently never fires is worse than no rule, because it is believed.
 fn valid_condition(cond: &Value) -> bool {
-    match cond.get("metric").and_then(Value::as_str) {
-        None => true, // service-down or offline rules carry no metric
-        Some(m) => crate::alert::HOST_METRICS.contains(&m),
-    }
+    // A sustain window outside its bounds is rejected too: negative is meaningless and
+    // an hour is the most the engine will scan of the 5-second tier per tick.
+    let for_ok = match cond.get("for_secs") {
+        None | Some(Value::Null) => true,
+        Some(v) => v
+            .as_i64()
+            .is_some_and(|f| (0..=crate::alert::FOR_SECS_MAX).contains(&f)),
+    };
+    for_ok
+        && match cond.get("metric").and_then(Value::as_str) {
+            None => true, // service-down or offline rules carry no metric
+            Some(m) => crate::alert::HOST_METRICS.contains(&m),
+        }
 }
 
 pub async fn create_alert(
