@@ -1,7 +1,7 @@
 <script setup>
-// Utilisation bar coloured by THRESHOLD (not by host state): <70 ok · 70–90 warn ·
-// >90 critical — so 91% reads hot even on a host that's merely "Warn". Pairs a track
-// bar with a mono value. Default slot overrides the printed value (e.g. "—" / "1.2").
+// Generic bar for values with NO workspace threshold (monitor latency): <70% ok ·
+// 70–90% warn · >90% critical of `max`. Host CPU/memory/disk use <Gauge>, which takes
+// the workspace's thresholds — don't use this for those. Pairs a track bar with a mono value. Default slot overrides the printed value (e.g. "—" / "1.2").
 import { computed } from 'vue'
 
 const props = defineProps({

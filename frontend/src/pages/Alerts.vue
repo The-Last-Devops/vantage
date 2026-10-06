@@ -62,7 +62,7 @@ function stateOf(a) {
 }
 const TONE = { firing: 'down', ok: 'ok', pending: 'pending', disabled: 'muted' }
 const STATE_LABEL = { firing: 'Firing', ok: 'OK', pending: 'Pending', disabled: 'Disabled' }
-const renotifyText = (a) => (a.renotify_secs ? `every ${Math.round(a.renotify_secs / 60)}m` : 'once')
+const renotifyText = (a) => (!a.renotify_secs ? 'once' : a.renotify_secs % 3600 === 0 ? `every ${a.renotify_secs / 3600}h` : `every ${Math.round(a.renotify_secs / 60)}m`)
 
 const tableRows = computed(() =>
   alerts.value.map((a) => ({ ...a, state: STATE_LABEL[stateOf(a)], cond: condText(a) })),

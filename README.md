@@ -66,12 +66,13 @@ currently failing.
 channels**. 17 channel types (Telegram, Slack, Discord, Mattermost, Teams, Google Chat,
 Matrix, ntfy, Pushover, Gotify, Bark, PagerDuty, Opsgenie, Twilio SMS, SMTP email, generic
 webhook, Apprise) with a one-click test; fire on monitor-down or a host condition (offline,
-CPU/memory/load), with an optional **re-notify cadence** while still firing. Channels are a
+CPU/memory/disk/load), with an optional **re-notify cadence** (15 min to 24 h) while still firing. Channels are a
 shared resource any workspace can attach. An **Events** feed records every fire/recover with
 durations.
 
 **Needs attention** — triage view that surfaces only abnormal hosts (down / high
-CPU / memory / disk / disk-I/O), with per-workspace thresholds.
+CPU / memory / disk / disk-I/O), with per-workspace thresholds — the same thresholds colour
+every utilisation bar, so amber always means "over this workspace's warn line".
 
 **API & automation** — a token-authed JSON API (**personal access tokens** under Settings)
 and an **embedded MCP server** (`POST /mcp`) so AI assistants (Claude, etc.) can read and

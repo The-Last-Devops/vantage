@@ -8,6 +8,7 @@ import UplotChart from '../components/UplotChart.vue'
 import UiSelect from '../components/UiSelect.vue'
 import { api } from '../lib/api'
 import { minLoad } from '../lib/minLoad'
+import { DEFAULT_THR } from '../lib/triage'
 
 const route = useRoute()
 const router = useRouter()
@@ -87,11 +88,15 @@ const err = ref('')
 const nodeHosts = ref([])
 const nodeAgg = ref([])
 const clusterName = ref('')
+const thr = ref(DEFAULT_THR) // the cluster's workspace thresholds, for colouring the node table
 
 async function loadNodes() {
   const list = await api.get('/api/systems')
   const self = list.find((s) => s.id === id.value)
   clusterName.value = self?.cluster || route.query.name || ''
+  if (self?.workspace) {
+    try { const all = await api.get('/api/thresholds'); thr.value = all.find((t) => t.workspace === self.workspace) || DEFAULT_THR } catch { thr.value = DEFAULT_THR }
+  }
   nodeHosts.value = clusterName.value
     ? list.filter((s) => s.kind === 'k8s' && s.cluster === clusterName.value)
     : []
@@ -219,7 +224,8 @@ const nodeCols = [
 // Collapsed-state hint so the section still says something useful when closed.
 const nodeBusiest = computed(() => nodeRows.value.filter((r) => r.cpu_percent != null)
   .sort((a, b) => b.cpu_percent - a.cpu_percent)[0] || null)
-const usageCls = (p) => (p == null ? 'text-faint' : p >= 90 ? 'text-down' : p >= 75 ? 'text-warn' : 'text-fg')
+// Coloured by the workspace's thresholds (same ones the Systems table and triage use).
+const usageCls = (p, k) => (p == null ? 'text-faint' : p >= thr.value[k + '_crit'] ? 'text-down' : p >= thr.value[k + '_warn'] ? 'text-warn' : 'text-fg')
 function openNode(row) { if (row.system_id) router.push({ path: `/system/${row.system_id}`, query: { name: row.name } }) }
 
 // ---- table ----
@@ -394,12 +400,12 @@ const scopeLabel = computed(() => (sel.value ? `${by.value === 'label' ? labelKe
             <span v-if="row.cores" class="shrink-0 rounded border border-line bg-surface2 px-1.5 py-0.5 text-[10px] text-faint">{{ row.cores }} vCPU</span>
           </div>
         </template>
-        <template #cell-cpu_percent="{ row }"><span :class="usageCls(row.cpu_percent)">{{ row.cpu_percent != null ? Math.round(row.cpu_percent) + '%' : '—' }}</span></template>
+        <template #cell-cpu_percent="{ row }"><span :class="usageCls(row.cpu_percent, 'cpu')">{{ row.cpu_percent != null ? Math.round(row.cpu_percent) + '%' : '—' }}</span></template>
         <template #cell-mem_pct="{ row }">
-          <span :class="usageCls(row.mem_pct)">{{ row.mem_pct != null ? row.mem_pct + '%' : '—' }}</span>
+          <span :class="usageCls(row.mem_pct, 'mem')">{{ row.mem_pct != null ? row.mem_pct + '%' : '—' }}</span>
           <small v-if="row.mem_total" class="ml-1 text-[10px] text-faint">{{ fmtBytes(row.mem_used) }}/{{ fmtBytes(row.mem_total) }}</small>
         </template>
-        <template #cell-disk_pct="{ row }"><span :class="usageCls(row.disk_pct)">{{ row.disk_pct != null ? Math.round(row.disk_pct) + '%' : '—' }}</span></template>
+        <template #cell-disk_pct="{ row }"><span :class="usageCls(row.disk_pct, 'disk')">{{ row.disk_pct != null ? Math.round(row.disk_pct) + '%' : '—' }}</span></template>
         <template #cell-k_cpu="{ row }">{{ row.k_cpu != null ? fmtCores(row.k_cpu) + ' c' : '—' }}</template>
         <template #cell-k_mem="{ row }">{{ row.k_mem != null ? fmtBytes(row.k_mem) : '—' }}</template>
         <template #cell-restarts="{ row }"><span :class="row.restarts > 50 ? 'text-warn' : ''">{{ row.restarts ?? '—' }}</span></template>

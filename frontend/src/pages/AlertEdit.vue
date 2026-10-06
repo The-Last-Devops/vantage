@@ -240,7 +240,7 @@ onMounted(async () => {
           <div class="p-5">
             <div class="mb-2.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-faint"><span class="grid h-[18px] w-[18px] place-items-center rounded bg-surface2 text-accent">4</span>Delivery</div>
             <label class="block max-w-xs"><span class="mb-1.5 block text-xs text-faint">Re-notify while still firing</span>
-              <UiSelect v-model="ed.renotify" block :options="[['', 'Off — notify once'], ['900', 'every 15 min'], ['1800', 'every 30 min'], ['3600', 'every hour']]" />
+              <UiSelect v-model="ed.renotify" block :options="[['', 'Off — notify once'], ['900', 'every 15 min'], ['1800', 'every 30 min'], ['3600', 'every hour'], ['14400', 'every 4 h'], ['28800', 'every 8 h'], ['43200', 'every 12 h'], ['86400', 'every 24 h']]" />
             </label>
           </div>
 

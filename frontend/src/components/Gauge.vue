@@ -1,7 +1,16 @@
 <script setup>
-defineProps({ v: { default: null } })
-const cls = (x) => (x >= 90 ? 'bg-down' : x >= 70 ? 'bg-warn' : 'bg-accent')
-const tcls = (x) => (x >= 90 ? 'text-down' : x >= 70 ? 'text-warn' : 'text-fg')
+// Utilisation gauge coloured by the SAME thresholds that decide a host's Warn/Critical
+// state (per-workspace, falling back to DEFAULT_THR). It used to hard-code 70/90 while
+// triage used 80/90, so a 73% disk read amber on a host the Needs-attention view called
+// fine. Callers pass the workspace's `<metric>_warn` / `<metric>_crit`.
+import { DEFAULT_THR } from '../lib/triage'
+const props = defineProps({
+  v: { default: null },
+  warn: { type: Number, default: DEFAULT_THR.cpu_warn },
+  crit: { type: Number, default: DEFAULT_THR.cpu_crit },
+})
+const cls = (x) => (x >= props.crit ? 'bg-down' : x >= props.warn ? 'bg-warn' : 'bg-accent')
+const tcls = (x) => (x >= props.crit ? 'text-down' : x >= props.warn ? 'text-warn' : 'text-fg')
 </script>
 
 <template>

@@ -13,6 +13,7 @@ import FleetCharts from '../components/FleetCharts.vue'
 import { encodeZoom, decodeZoom } from '../lib/zoom'
 import { insertGaps } from '../lib/gaps'
 import { pct, online, parseQuery, matchPred } from '../lib/hostFilter'
+import { DEFAULT_THR } from '../lib/triage'
 
 const showAdd = ref(false)
 
@@ -101,7 +102,6 @@ const hero = computed(() => {
 })
 
 // ---- thresholds + "needs attention" triage --------------------------------
-const DEFAULT_THR = { cpu_warn: 80, cpu_crit: 90, mem_warn: 80, mem_crit: 90, disk_warn: 80, disk_crit: 90, dutil_warn: 80, dutil_crit: 95 }
 const thresholds = ref({}) // workspace name -> thresholds object
 async function loadThresholds() {
   try { const r = await api.get('/api/thresholds'); const m = {}; for (const x of r) m[x.workspace] = x; thresholds.value = m } catch {}
@@ -374,9 +374,9 @@ const detailLink = (s) => {
                   <td class="px-4 py-3"><button @click="setFilter('kind', s.kind)" v-tip="`Filter kind:${s.kind}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ KIND_LABEL[s.kind] || s.kind }}</button></td>
                   <td class="px-4 py-3"><button v-if="s.cluster" @click="setFilter('cluster', s.cluster)" v-tip="`Filter cluster:${s.cluster}`" class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-muted hover:text-accent">{{ s.cluster }}</button><span v-else class="text-faint">—</span></td>
                   <td class="px-4 py-3"><button @click="setFilter('status', online(s)?'online':'offline')" v-tip="`Filter status:${online(s)?'online':'offline'}`" class="text-sm hover:underline" :class="online(s)?'text-accent':'text-down'">{{ online(s)?'online':'offline' }}</button></td>
-                  <td class="px-4 py-3"><Gauge :v="online(s)?r(s.cpu_percent):null" /></td>
-                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" /></td>
-                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.disk_used,s.disk_total):null" /></td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?r(s.cpu_percent):null" :warn="thrOf(s).cpu_warn" :crit="thrOf(s).cpu_crit" /></td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.mem_used,s.mem_total):null" :warn="thrOf(s).mem_warn" :crit="thrOf(s).mem_crit" /></td>
+                  <td class="px-4 py-3"><Gauge :v="online(s)?pct(s.disk_used,s.disk_total):null" :warn="thrOf(s).disk_warn" :crit="thrOf(s).disk_crit" /></td>
                   <td class="px-4 py-3"><span class="rounded px-1.5 py-0.5 text-xs" :class="agentCls(s.agent_version)">{{ s.agent_version ? 'v'+s.agent_version : '—' }}</span></td>
                 </tr>
                 <tr v-for="c in (containers[s.id] || [])" v-show="s.kind === 'docker' && expanded.has(s.id)" :key="s.id + ':' + c.name" class="vantage-row border-b border-line bg-bg/40">
@@ -386,7 +386,7 @@ const detailLink = (s) => {
                   <td class="px-4 py-2"><span class="rounded bg-surface2 px-1.5 py-0.5 text-xs text-faint">container</span></td>
                   <td class="px-4 py-2 text-faint">—</td>
                   <td class="px-4 py-2 text-sm text-accent">running</td>
-                  <td class="px-4 py-2"><Gauge :v="c.cpu" /></td>
+                  <td class="px-4 py-2"><Gauge :v="c.cpu" :warn="thrOf(s).cpu_warn" :crit="thrOf(s).cpu_crit" /></td>
                   <td class="px-4 py-2 font-mono tabular-nums text-muted">{{ c.mem != null ? (c.mem / 1048576).toFixed(0) + ' MB' : '—' }}</td>
                   <td class="px-4 py-2 text-faint">—</td>
                   <td class="px-4 py-2 text-faint">—</td>

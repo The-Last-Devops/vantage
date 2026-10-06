@@ -90,12 +90,13 @@ const svcRows = computed(() =>
 const loadRows = computed(() =>
   hosts.value
     .filter(online)
-    .map((s) => ({ id: s.id, name: s.name, ws: s.workspace, cpu: Math.round(s.cpu_percent || 0) }))
+    .map((s) => ({ id: s.id, name: s.name, ws: s.workspace, cpu: Math.round(s.cpu_percent || 0), thr: thrOf(s) }))
     .sort((a, b) => b.cpu - a.cpu)
     .slice(0, 8),
 )
-const barTone = (v) => (v >= 90 ? 'bg-down' : v >= 70 ? 'bg-warn' : 'bg-ok')
-const cpuText = (v) => (v >= 90 ? 'text-down' : v >= 70 ? 'text-warn' : 'text-fg')
+// Same per-workspace thresholds as the host state, so the bar never disagrees with the pill.
+const barTone = (h) => (h.cpu >= h.thr.cpu_crit ? 'bg-down' : h.cpu >= h.thr.cpu_warn ? 'bg-warn' : 'bg-ok')
+const cpuText = (h) => (h.cpu >= h.thr.cpu_crit ? 'text-down' : h.cpu >= h.thr.cpu_warn ? 'text-warn' : 'text-fg')
 
 // ---- incidents (shared with Overview) ----
 const METRIC_LABEL = { cpu_percent: 'CPU %', mem_percent: 'Memory %', load1: 'Load 1m' }
@@ -247,10 +248,10 @@ onUnmounted(() => { clearInterval(timer); clearInterval(tick) })
               <li v-for="h in loadRows" :key="h.id" class="px-4 py-2">
                 <div class="mb-1 flex items-center gap-2">
                   <RouterLink :to="{ name: 'system', params: { id: h.id } }" class="min-w-0 flex-1 truncate font-mono text-body text-fg hover:text-accent">{{ h.name }}</RouterLink>
-                  <span class="shrink-0 font-mono text-xs font-semibold tabular-nums" :class="cpuText(h.cpu)">{{ h.cpu }}%</span>
+                  <span class="shrink-0 font-mono text-xs font-semibold tabular-nums" :class="cpuText(h)">{{ h.cpu }}%</span>
                 </div>
                 <div class="h-1.5 overflow-hidden rounded-full bg-track">
-                  <div class="h-full rounded-full" :class="barTone(h.cpu)" :style="{ width: Math.min(100, h.cpu) + '%' }"></div>
+                  <div class="h-full rounded-full" :class="barTone(h)" :style="{ width: Math.min(100, h.cpu) + '%' }"></div>
                 </div>
               </li>
             </ul>

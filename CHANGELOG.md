@@ -7,6 +7,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.6.0] — 2026-10-06
+
+### Added
+- **Re-notify every 4, 8, 12 or 24 hours.** The cadence menu stopped at one hour, which
+  is the wrong scale for a slow condition such as a filling disk: it either nags all day
+  or is switched off. The Alerts list prints hour cadences as hours (`every 4h`) instead
+  of `every 240m`.
+
+### Fixed
+- **Utilisation bars now colour by the workspace's own thresholds.** The CPU / memory /
+  disk gauges on the Hosts table, the Top-load panel and the cluster node table had
+  70% (or 75%) hard-coded as the amber line, while the Needs-attention triage used the
+  workspace's `*_warn` / `*_crit` (default 80 / 90). So a disk at 73% read amber on a host
+  the same page called fine. One set of numbers decides both now, and raising a
+  workspace's threshold is reflected in the bars.
+
 ## [3.5.0] — 2026-10-02
 
 ### Added
