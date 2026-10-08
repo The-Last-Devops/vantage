@@ -7,6 +7,14 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.10.2] — 2026-10-08
+
+### Changed
+- **Service names are set in the UI font, not monospace.** A service name is a label a
+  person typed (often with Vietnamese diacritics), not an identifier; in JetBrains Mono
+  at 14px it read heavy and wide and made every row tall. Names are now Inter 13px
+  medium, the kind icon is a step smaller, and numbers stay monospace.
+
 ## [3.10.1] — 2026-10-08
 
 ### Fixed

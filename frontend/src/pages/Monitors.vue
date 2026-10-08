@@ -256,14 +256,14 @@ onUnmounted(() => clearInterval(timer))
           </template>
           <template #cell-name="{ row }">
             <div class="flex items-center gap-3">
-              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2"
+              <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-surface2"
                 :class="row.stateKey === 'down' ? 'text-down' : row.stateKey === 'pending' ? 'text-warn' : row.stateKey === 'paused' ? 'text-faint' : 'text-accent'">
-                <VIcon :name="kindIcon(row.kind)" :size="18" />
+                <VIcon :name="kindIcon(row.kind)" :size="16" />
               </span>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <StatePill :tone="STATE[row.stateKey][0]" :label="row.state" />
-                  <span class="truncate font-mono text-sm text-fg">{{ row.name }}</span>
+                  <span class="truncate text-body font-medium text-fg">{{ row.name }}</span>
                 </div>
                 <div class="mt-0.5 truncate text-micro text-faint">{{ row.workspace }} · {{ row.typeLabel }}<span v-if="row.target"> · {{ row.target }}</span></div>
               </div>
@@ -338,7 +338,7 @@ onUnmounted(() => clearInterval(timer))
                       <div class="flex items-center gap-3">
                         <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-line bg-surface2 text-down"><VIcon :name="kindIcon(m.kind)" :size="18" /></span>
                         <div class="min-w-0">
-                          <div class="flex items-center gap-2"><StatePill tone="down" label="Down" /><span class="truncate font-mono text-sm text-fg">{{ m.name }}</span></div>
+                          <div class="flex items-center gap-2"><StatePill tone="down" label="Down" /><span class="truncate text-body font-medium text-fg">{{ m.name }}</span></div>
                           <div class="mt-0.5 truncate text-micro text-faint">{{ m.workspace }} · {{ KINDS[m.kind] || m.kind }}<span v-if="m.target"> · {{ m.target }}</span></div>
                         </div>
                       </div>
@@ -370,7 +370,7 @@ onUnmounted(() => clearInterval(timer))
                 <thead><tr class="text-left"><th :class="TH">Service</th><th :class="TH">Started</th><th :class="TH" class="text-right">Duration</th><th :class="TH">Cause</th><th :class="TH" class="text-right">Status</th></tr></thead>
                 <tbody>
                   <tr v-for="h in historyFiltered" :key="h.id" class="border-b border-line/60 last:border-b-0">
-                    <td class="px-4 py-2.5"><div class="font-mono text-fg">{{ h.name }}</div><div class="mt-0.5 text-micro text-faint">{{ h.workspace }} · {{ KINDS[h.kind] || h.kind }}</div></td>
+                    <td class="px-4 py-2.5"><div class="text-body font-medium text-fg">{{ h.name }}</div><div class="mt-0.5 text-micro text-faint">{{ h.workspace }} · {{ KINDS[h.kind] || h.kind }}</div></td>
                     <td class="px-4 py-2.5 font-mono tabular-nums text-muted">{{ evTime(h.started_at) }}</td>
                     <td class="px-4 py-2.5 text-right font-mono tabular-nums text-fg">{{ fmtDur(h.duration_s) }}</td>
                     <td class="px-4 py-2.5 text-muted">{{ h.cause }}</td>
