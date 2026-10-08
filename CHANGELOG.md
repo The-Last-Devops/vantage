@@ -7,6 +7,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.10.3] — 2026-10-08
+
+### Fixed
+- **Workspace and cluster chips in the Hosts table no longer wrap** ("senprints-\nprod",
+  "k8s-\nhanoi"); a chip is one token and stays on one line.
+
 ## [3.10.2] — 2026-10-08
 
 ### Changed
