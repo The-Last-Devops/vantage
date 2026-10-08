@@ -11,9 +11,10 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
+import OverviewIncidents from '../components/OverviewIncidents.vue'
 import { api } from '../lib/api'
 import { useCached } from '../lib/cache'
-import { online, hostState, DEFAULT_THR, ago } from '../lib/triage'
+import { online, hostState, worstReason, DEFAULT_THR, ago, STATE_RANK } from '../lib/triage'
 
 const route = useRoute()
 const selectedWs = computed(() => (route.query.ws || '').split(',').filter(Boolean))
@@ -76,6 +77,52 @@ const svc = computed(() => {
   return { total: wsMonitors.value.length, up, down, pending, longest: longestText }
 })
 const firing = computed(() => alerts.value.filter((a) => a.enabled && a.firing === true).length)
+
+// ---- incident rows (the records behind the action tiles; see OverviewIncidents) ----
+const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '')
+const hostRow = (s, st) => ({
+  id: s.id, name: s.name, ws: s.workspace, tone: st,
+  to: { name: 'system', params: { id: s.id } },
+})
+const hostsDown = computed(() => hosts.value
+  .filter((s) => hostState(s, thrOf(s)) === 'down')
+  .sort((a, b) => (a.last_seen || '') < (b.last_seen || '') ? -1 : 1)
+  .map((s) => ({ ...hostRow(s, 'down'), detail: `last seen ${fmtTs(s.last_seen) || 'never'}${s.agent_version ? ' · agent ' + s.agent_version : ''}`, right: s.last_seen ? `down ${ago(s.last_seen)}` : 'never seen' })))
+const metricLine = (s) => {
+  const mem = s.mem_total ? Math.round((s.mem_used / s.mem_total) * 100) : null
+  const disk = s.disk_total ? Math.round((s.disk_used / s.disk_total) * 100) : null
+  return [s.cpu_percent != null && `cpu ${Math.round(s.cpu_percent)}%`, mem != null && `mem ${mem}%`, disk != null && `disk ${disk}%`].filter(Boolean).join(' · ')
+}
+const hostsOver = computed(() => hosts.value
+  .map((s) => ({ s, st: hostState(s, thrOf(s)) }))
+  .filter((h) => h.st === 'crit' || h.st === 'warn')
+  .sort((a, b) => STATE_RANK[a.st] - STATE_RANK[b.st])
+  .map(({ s, st }) => ({ ...hostRow(s, st), detail: metricLine(s), right: worstReason(s, thrOf(s)) || '', sub: st === 'crit' ? 'over critical' : 'over warning' })))
+const servicesDown = computed(() => wsMonitors.value
+  .filter((m) => m.up === false)
+  .map((m) => { const h = downHours(m); return { m, h } })
+  .sort((a, b) => b.h - a.h)
+  .map(({ m, h }) => ({
+    id: m.id, name: m.name, ws: m.workspace, tone: 'down',
+    to: { name: 'monitor', params: { id: m.id } },
+    detail: [m.kind?.toUpperCase(), m.message, m.last_check && `checked ${ago(m.last_check)} ago`].filter(Boolean).join(' · '),
+    right: h >= 24 ? 'down > 24h' : h > 0 ? `down ≥ ${h}h` : 'down < 1h',
+    sub: upPct(m) == null ? '' : `uptime ${upPct(m)}%`,
+  })))
+const alertsFiring = computed(() => alerts.value
+  .filter((a) => a.enabled && a.firing === true)
+  .map((a) => ({
+    id: a.id, name: a.target_name, ws: a.workspace, tone: 'down',
+    to: { name: 'alert-edit', params: { id: a.id } },
+    detail: (a.channels || []).map((c) => c.name).join(', ') || 'no channel',
+    right: a.since ? `firing ${ago(a.since)}` : 'firing',
+  })))
+const incidentLinks = computed(() => ({
+  hostsDown: { name: 'attention', query: { ...nsq.value, status: 'down' } },
+  hostsOver: { name: 'attention', query: { ...nsq.value, status: 'crit' } },
+  servicesDown: { name: 'monitors', query: { ...nsq.value, status: 'down' } },
+  alertsFiring: { name: 'alerts', query: nsq.value },
+}))
 
 // average service uptime (SLA) over services that have recent checks
 const upPct = (m) => (m.recent && m.recent.length ? Math.round((m.recent.filter(Boolean).length / m.recent.length) * 100) : null)
@@ -165,6 +212,9 @@ onUnmounted(() => clearInterval(timer))
           </RouterLink>
         </div>
       </section>
+      <OverviewIncidents :hosts-down="hostsDown" :hosts-over="hostsOver" :services-down="servicesDown"
+        :services-pending="svc.pending" :alerts-firing="alertsFiring" :links="incidentLinks"
+        :totals="{ hosts: host.total, services: svc.total }" />
       <section>
         <h2 class="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">Inventory</h2>
         <div class="flex flex-wrap gap-2">

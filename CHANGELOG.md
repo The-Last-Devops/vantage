@@ -7,6 +7,19 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.10.0] — 2026-10-08
+
+### Added
+- **Overview lists the incidents behind the numbers.** The action tiles said
+  "2 hosts down" and stopped there; the Overview now has an Incidents block under them
+  with four cards — hosts down (since when, agent version), hosts over threshold (the
+  breaching metric and the others alongside), services down (last check message, how
+  long, recent uptime) and alert rules firing (for how long, which channels). Each row
+  opens the host, service or rule; each card shows at most five and links to the
+  filtered list for the rest, so the page stays one screen. Cards with nothing in them
+  are not shown, and when nothing is wrong the block is a single "All clear" line. No
+  new API calls — the rows are the same records the tiles were already counting.
+
 ## [3.9.0] — 2026-10-06
 
 ### Changed
