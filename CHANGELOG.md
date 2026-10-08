@@ -7,6 +7,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.10.1] — 2026-10-08
+
+### Fixed
+- **Incident cards no longer leave a hole.** One host down beside eight hosts over
+  threshold left an empty card-height gap under the shorter card; the cards now flow in
+  columns and each takes only its own height.
+
 ## [3.10.0] — 2026-10-08
 
 ### Added

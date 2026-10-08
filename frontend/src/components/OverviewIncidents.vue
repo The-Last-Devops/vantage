@@ -35,14 +35,17 @@ const DOT = { down: 'bg-down', crit: 'bg-crit', warn: 'bg-warn' }
       </div>
     </div>
 
-    <div v-else class="grid gap-3 lg:grid-cols-2">
+    <!-- CSS columns, not a grid: a grid row is as tall as its tallest card, so one
+         host down next to eight hosts over threshold left a card-sized hole (seen in
+         production). Columns let each card take its own height and the next one move up. -->
+    <div v-else class="lg:columns-2 lg:gap-3">
       <template v-for="card in [
         { key: 'hd', title: 'Hosts down', tone: 'down', rows: hostsDown, count: `${hostsDown.length} / ${totals.hosts || 0}`, to: links.hostsDown },
         { key: 'ho', title: 'Over threshold', tone: 'crit', rows: hostsOver, count: `${hostsOver.filter((r) => r.tone === 'crit').length} crit · ${hostsOver.filter((r) => r.tone === 'warn').length} warn`, to: links.hostsOver },
         { key: 'sd', title: 'Services down', tone: 'down', rows: servicesDown, count: `${servicesDown.length} / ${totals.services || 0}`, to: links.servicesDown, foot: servicesPending ? `${servicesPending} pending (no check yet)` : '' },
         { key: 'af', title: 'Alerts firing', tone: 'down', rows: alertsFiring, count: `${alertsFiring.length} rules`, to: links.alertsFiring },
       ]" :key="card.key">
-        <div v-if="card.rows.length" class="overflow-hidden rounded-xl border border-line bg-surface">
+        <div v-if="card.rows.length" class="mb-3 break-inside-avoid overflow-hidden rounded-xl border border-line bg-surface">
           <div class="flex items-center gap-2 border-b border-line bg-head px-3.5 py-2 text-xs font-semibold text-fg">
             <span class="h-2 w-2 shrink-0 rounded-full" :class="DOT[card.tone]"></span>{{ card.title }}
             <span class="ml-auto text-[11px] font-medium text-faint">{{ card.count }} ·
