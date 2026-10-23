@@ -56,6 +56,10 @@ spec:
             - { name: WEBAUTHN_ORIGIN, value: {{ printf "%s://%s" (include "vantage.scheme" .) .Values.hub.ingress.host | quote }} }
             - { name: PUBLIC_URL, value: {{ printf "%s://%s" (include "vantage.scheme" .) .Values.hub.ingress.host | quote }} }
             {{- end }}
+            {{- with .Values.hub.egressAllowCidrs }}
+            # SSRF guard exemptions (e.g. a Tailscale tailnet); metadata/loopback stay blocked.
+            - { name: EGRESS_ALLOW_CIDRS, value: {{ . | quote }} }
+            {{- end }}
             {{- if include "vantage.appSecretEnabled" . }}
             # Encrypts SSH-key master keys at rest (back it up — losing it = keys unrecoverable).
             - name: EXEC_APP_SECRET

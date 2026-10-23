@@ -7,6 +7,18 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.11.0] — 2026-10-23
+
+### Added
+- **`EGRESS_ALLOW_CIDRS` lets the hub monitor hosts on a Tailscale tailnet.** The SSRF
+  guard always blocked CGNAT (`100.64.0.0/10`), so every TCP/HTTP/DB probe to a tailnet
+  address (`100.x.y.z`) went down with "egress blocked". List the ranges to open
+  (comma-separated, e.g. `100.64.0.0/10`); IPs inside them skip the CGNAT/private checks
+  for probes, webhooks and the S3 backup endpoint, and redirects are still re-checked at
+  every hop. Loopback, link-local/cloud metadata (`169.254.0.0/16`, `fe80::/10`,
+  `100.100.100.200`), unspecified, multicast and broadcast stay blocked even inside a
+  listed range. Helm: `hub.egressAllowCidrs`. Unset = behaviour unchanged.
+
 ## [3.10.3] — 2026-10-08
 
 ### Fixed

@@ -71,6 +71,7 @@ Set on the `hub` container. Required unless noted; the rest have safe defaults.
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_ORIGIN` | — | derived from request | Pin the passkey relying-party ID / origin; optional (derived per request otherwise). |
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` cookie flag for **local http dev only**. |
 | `EGRESS_POLICY` | — | allow private | Set `strict` to also block private (RFC1918/ULA) outbound targets (SSRF hardening). |
+| `EGRESS_ALLOW_CIDRS` | — | — | Comma-separated CIDRs exempt from the CGNAT/private checks (e.g. `100.64.0.0/10` for a Tailscale tailnet). Loopback, link-local/metadata, multicast, broadcast and `100.100.100.200` stay blocked. Helm: `hub.egressAllowCidrs`. |
 | `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server with this key (lets a bundled agent report out of the box). |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing`/`env_filter`). |
 

@@ -7,18 +7,25 @@
 //! endpoint).
 //!
 //! Policy:
-//! - **Always blocked**: loopback, link-local (incl. metadata 169.254.169.254 /
-//!   fe80::), unspecified, broadcast, multicast, CGNAT (100.64/10), and
-//!   documentation ranges — plus IPv4-mapped IPv6 forms of all of these.
+//! - **Never allowed**: loopback, link-local (incl. metadata 169.254.169.254 /
+//!   fe80::), unspecified, broadcast, multicast, and the Alibaba metadata IP
+//!   100.100.100.200 — plus IPv4-mapped IPv6 forms of all of these. Nothing,
+//!   not even `EGRESS_ALLOW_CIDRS`, opens these.
+//! - **Blocked by default**: CGNAT (100.64/10) and documentation ranges.
 //! - **Private (RFC1918 / ULA)**: allowed by default, because monitoring internal
 //!   hosts is the product's whole job. Set `EGRESS_POLICY=strict` to block these
 //!   too (public destinations only) for hardened/multi-tenant deployments.
+//! - **`EGRESS_ALLOW_CIDRS`** (comma-separated, e.g. `100.64.0.0/10` for a
+//!   Tailscale tailnet): an IP inside a listed CIDR skips the default-blocked and
+//!   private checks above — but never the "never allowed" ones. Unset = the
+//!   policy above, unchanged. An unparsable entry is ignored (fails closed).
 //!
 //! We resolve the host and check **every** resolved IP (a host that resolves to
 //! any blocked address is rejected), which also defeats DNS-rebinding to an
 //! internal IP. Redirects are re-checked at each hop (see the probe HTTP client).
 
 use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+use std::sync::OnceLock;
 
 fn strict() -> bool {
     matches!(std::env::var("EGRESS_POLICY").as_deref(), Ok("strict"))
@@ -28,23 +35,26 @@ fn is_cgnat(o: [u8; 4]) -> bool {
     o[0] == 100 && (64..=127).contains(&o[1]) // 100.64.0.0/10
 }
 
-/// Reserved / internal ranges that are never a legitimate outbound target.
-fn blocked_always(ip: IpAddr) -> bool {
+/// Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) so it can't bypass the v4 checks.
+fn canonical(ip: IpAddr) -> IpAddr {
     match ip {
+        IpAddr::V6(a) => a.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+        v4 => v4,
+    }
+}
+
+/// Never a legitimate outbound target — no allowlist can open these.
+fn blocked_hard(ip: IpAddr) -> bool {
+    match canonical(ip) {
         IpAddr::V4(a) => {
             a.is_loopback()
                 || a.is_link_local() // 169.254/16, includes the 169.254.169.254 metadata IP
                 || a.is_unspecified()
                 || a.is_broadcast()
                 || a.is_multicast()
-                || a.is_documentation()
-                || is_cgnat(a.octets()) // also covers 100.100.100.200 (Alibaba metadata)
+                || a == Ipv4Addr::new(100, 100, 100, 200) // Alibaba metadata, inside CGNAT
         }
         IpAddr::V6(a) => {
-            // Unwrap IPv4-mapped (::ffff:a.b.c.d) so it can't bypass the v4 checks.
-            if let Some(v4) = a.to_ipv4_mapped() {
-                return blocked_always(IpAddr::V4(v4));
-            }
             a.is_loopback()
                 || a.is_unspecified()
                 || a.is_multicast()
@@ -53,27 +63,113 @@ fn blocked_always(ip: IpAddr) -> bool {
     }
 }
 
+/// Reserved ranges blocked unless the operator lists them in `EGRESS_ALLOW_CIDRS`.
+fn blocked_default(ip: IpAddr) -> bool {
+    match canonical(ip) {
+        IpAddr::V4(a) => a.is_documentation() || is_cgnat(a.octets()),
+        IpAddr::V6(_) => false,
+    }
+}
+
 /// RFC1918 / ULA — allowed by default, blocked only under `EGRESS_POLICY=strict`.
 fn is_private(ip: IpAddr) -> bool {
-    match ip {
+    match canonical(ip) {
         IpAddr::V4(a) => a.is_private(),
-        IpAddr::V6(a) => {
-            if let Some(v4) = a.to_ipv4_mapped() {
-                return Ipv4Addr::is_private(&v4);
+        IpAddr::V6(a) => (a.segments()[0] & 0xfe00) == 0xfc00, // ULA fc00::/7
+    }
+}
+
+/// One `EGRESS_ALLOW_CIDRS` entry, stored as (network, prefix length).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Cidr {
+    V4(u32, u8),
+    V6(u128, u8),
+}
+
+impl Cidr {
+    fn parse(s: &str) -> Option<Cidr> {
+        let (addr, len) = match s.split_once('/') {
+            Some((a, l)) => (a, Some(l.parse::<u8>().ok()?)),
+            None => (s, None),
+        };
+        match addr.parse::<IpAddr>().ok()? {
+            IpAddr::V4(a) => {
+                let len = len.unwrap_or(32);
+                (len <= 32).then(|| Cidr::V4(u32::from(a) & mask32(len), len))
             }
-            (a.segments()[0] & 0xfe00) == 0xfc00 // ULA fc00::/7
+            IpAddr::V6(a) => {
+                // A mapped v4 range (::ffff:a.b.c.d/n) is matched as plain v4.
+                if let Some(v4) = a.to_ipv4_mapped() {
+                    let len = len.unwrap_or(128).checked_sub(96)?;
+                    return Some(Cidr::V4(u32::from(v4) & mask32(len), len));
+                }
+                let len = len.unwrap_or(128);
+                (len <= 128).then(|| Cidr::V6(u128::from(a) & mask128(len), len))
+            }
+        }
+    }
+
+    fn contains(self, ip: IpAddr) -> bool {
+        match (self, canonical(ip)) {
+            (Cidr::V4(net, len), IpAddr::V4(a)) => u32::from(a) & mask32(len) == net,
+            (Cidr::V6(net, len), IpAddr::V6(a)) => u128::from(a) & mask128(len) == net,
+            _ => false,
         }
     }
 }
 
-fn check_ip(ip: IpAddr) -> anyhow::Result<()> {
-    if blocked_always(ip) {
+fn mask32(len: u8) -> u32 {
+    u32::MAX.checked_shl(32 - u32::from(len)).unwrap_or(0)
+}
+
+fn mask128(len: u8) -> u128 {
+    u128::MAX.checked_shl(128 - u32::from(len)).unwrap_or(0)
+}
+
+/// Parse a comma-separated CIDR list; unparsable entries are dropped (fail closed).
+fn parse_allow(list: &str) -> Vec<Cidr> {
+    list.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            let c = Cidr::parse(s);
+            if c.is_none() {
+                tracing::warn!("EGRESS_ALLOW_CIDRS: ignoring invalid entry {s:?}");
+            }
+            c
+        })
+        .collect()
+}
+
+/// `EGRESS_ALLOW_CIDRS`, parsed once (process env doesn't change at runtime).
+fn allow_cidrs() -> &'static [Cidr] {
+    static ALLOW: OnceLock<Vec<Cidr>> = OnceLock::new();
+    ALLOW.get_or_init(|| {
+        std::env::var("EGRESS_ALLOW_CIDRS")
+            .map(|v| parse_allow(&v))
+            .unwrap_or_default()
+    })
+}
+
+/// The policy as a pure function of its inputs (testable without env vars).
+fn check_ip_with(ip: IpAddr, strict: bool, allow: &[Cidr]) -> anyhow::Result<()> {
+    if blocked_hard(ip) {
         anyhow::bail!("egress blocked: {ip} is a reserved/internal/metadata address");
     }
-    if strict() && is_private(ip) {
+    if allow.iter().any(|c| c.contains(ip)) {
+        return Ok(());
+    }
+    if blocked_default(ip) {
+        anyhow::bail!("egress blocked: {ip} is a reserved/internal/metadata address");
+    }
+    if strict && is_private(ip) {
         anyhow::bail!("egress blocked (EGRESS_POLICY=strict): {ip} is a private address");
     }
     Ok(())
+}
+
+fn check_ip(ip: IpAddr) -> anyhow::Result<()> {
+    check_ip_with(ip, strict(), allow_cidrs())
 }
 
 /// Resolve `host`:`port` and reject if **any** resolved IP is disallowed.
@@ -147,6 +243,76 @@ mod tests {
         assert!(check_ip("192.168.1.10".parse().unwrap()).is_ok());
         // public is always fine
         assert!(check_ip("1.1.1.1".parse().unwrap()).is_ok());
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn cgnat_blocked_without_allowlist() {
+        assert!(check_ip_with(ip("100.126.99.64"), false, &[]).is_err());
+        assert!(check_ip_with(ip("::ffff:100.126.99.64"), false, &[]).is_err());
+    }
+
+    #[test]
+    fn allowlist_opens_tailnet() {
+        let allow = parse_allow("100.64.0.0/10");
+        assert_eq!(allow.len(), 1);
+        assert!(check_ip_with(ip("100.126.99.64"), false, &allow).is_ok());
+        assert!(check_ip_with(ip("100.71.247.99"), true, &allow).is_ok());
+        // IPv4-mapped IPv6 is handled exactly like the v4 address.
+        assert!(check_ip_with(ip("::ffff:100.126.99.64"), false, &allow).is_ok());
+        // Outside the listed range the default policy still applies.
+        assert!(check_ip_with(ip("192.0.2.1"), false, &allow).is_err()); // documentation
+    }
+
+    #[test]
+    fn allowlist_never_opens_dangerous_ranges() {
+        let allow = parse_allow("100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8, 0.0.0.0/0, ::/0");
+        for bad in [
+            "100.100.100.200",
+            "::ffff:100.100.100.200",
+            "169.254.169.254",
+            "::ffff:169.254.169.254",
+            "127.0.0.1",
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "ff02::1",
+        ] {
+            assert!(
+                check_ip_with(ip(bad), false, &allow).is_err(),
+                "{bad} must stay blocked"
+            );
+        }
+    }
+
+    #[test]
+    fn allowlist_overrides_strict_private() {
+        let allow = parse_allow("10.20.0.0/16");
+        assert!(check_ip_with(ip("10.20.1.1"), true, &allow).is_ok());
+        assert!(check_ip_with(ip("10.21.1.1"), true, &allow).is_err());
+        assert!(check_ip_with(ip("10.21.1.1"), false, &allow).is_ok());
+    }
+
+    #[test]
+    fn parses_cidrs_and_drops_garbage() {
+        assert_eq!(parse_allow(""), vec![]);
+        assert_eq!(parse_allow("nope, 1.2.3.4/33, 1.2.3.4/x"), vec![]);
+        assert_eq!(
+            parse_allow("100.64.0.0/10"),
+            vec![Cidr::V4(0x6440_0000, 10)]
+        );
+        assert_eq!(
+            parse_allow("100.126.99.64"),
+            vec![Cidr::V4(0x647e_6340, 32)]
+        );
+        assert!(parse_allow("fd7a:115c:a1e0::/48")[0].contains(ip("fd7a:115c:a1e0::1")));
+        assert!(parse_allow("::ffff:100.64.0.0/106")[0].contains(ip("100.126.99.64")));
     }
 
     #[test]

@@ -7,6 +7,9 @@
 //!   INSECURE_COOKIES     set to 1 to drop the Secure flag on the session cookie (local http dev)
 //!   EGRESS_POLICY        set to `strict` to also block private (RFC1918/ULA) outbound
 //!                        targets for probes/notify/backup (default allows them)
+//!   EGRESS_ALLOW_CIDRS   comma-separated CIDRs (e.g. `100.64.0.0/10` for a Tailscale tailnet)
+//!                        exempt from the CGNAT/private checks; loopback, link-local/metadata,
+//!                        multicast etc. stay blocked regardless
 #![allow(clippy::type_complexity, clippy::items_after_test_module)]
 
 mod alert;

@@ -58,6 +58,10 @@ hub:
   # HTTPS is terminated anywhere in front of the hub — Cloudflare, an external LB, or
   # ingress.tls below. Set false only for a genuinely plain-http:// hub (LAN/dev).
   publicHttps: true
+  # EGRESS_ALLOW_CIDRS: comma-separated CIDRs the hub may probe despite the SSRF guard's
+  # CGNAT/private checks, e.g. "100.64.0.0/10" to monitor hosts over a Tailscale tailnet.
+  # Loopback, link-local/metadata, multicast and 100.100.100.200 stay blocked regardless.
+  egressAllowCidrs: ""
   # Used only when timescaledb.enabled=false:
   configDatabaseUrl: ""
   dataDatabaseUrl: ""
