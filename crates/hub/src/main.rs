@@ -5,10 +5,10 @@
 //!   DATA_DATABASE_URL    Postgres URL for the data DB (metrics, TimescaleDB)
 //!   BIND_ADDR            listen address, default 0.0.0.0:8080
 //!   INSECURE_COOKIES     set to 1 to drop the Secure flag on the session cookie (local http dev)
-//!   EGRESS_POLICY        set to `strict` to also block private (RFC1918/ULA) outbound
+//!   EGRESS_POLICY        set to `strict` to also block private (RFC1918/ULA/CGNAT) outbound
 //!                        targets for probes/notify/backup (default allows them)
-//!   EGRESS_ALLOW_CIDRS   comma-separated CIDRs (e.g. `100.64.0.0/10` for a Tailscale tailnet)
-//!                        exempt from the CGNAT/private checks; loopback, link-local/metadata,
+//!   EGRESS_ALLOW_CIDRS   comma-separated CIDRs exempt from the strict/private checks (e.g.
+//!                        `100.64.0.0/10` under strict); loopback, link-local/metadata,
 //!                        multicast etc. stay blocked regardless
 #![allow(clippy::type_complexity, clippy::items_after_test_module)]
 

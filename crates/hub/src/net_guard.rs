@@ -11,14 +11,15 @@
 //!   fe80::), unspecified, broadcast, multicast, and the Alibaba metadata IP
 //!   100.100.100.200 — plus IPv4-mapped IPv6 forms of all of these. Nothing,
 //!   not even `EGRESS_ALLOW_CIDRS`, opens these.
-//! - **Blocked by default**: CGNAT (100.64/10) and documentation ranges.
-//! - **Private (RFC1918 / ULA)**: allowed by default, because monitoring internal
-//!   hosts is the product's whole job. Set `EGRESS_POLICY=strict` to block these
-//!   too (public destinations only) for hardened/multi-tenant deployments.
-//! - **`EGRESS_ALLOW_CIDRS`** (comma-separated, e.g. `100.64.0.0/10` for a
-//!   Tailscale tailnet): an IP inside a listed CIDR skips the default-blocked and
-//!   private checks above — but never the "never allowed" ones. Unset = the
-//!   policy above, unchanged. An unparsable entry is ignored (fails closed).
+//! - **Blocked by default**: documentation ranges.
+//! - **Private (RFC1918 / ULA / CGNAT 100.64/10)**: allowed by default, because
+//!   monitoring internal hosts is the product's whole job — and CGNAT is where a
+//!   Tailscale tailnet lives. Set `EGRESS_POLICY=strict` to block these too
+//!   (public destinations only) for hardened/multi-tenant deployments.
+//! - **`EGRESS_ALLOW_CIDRS`** (comma-separated, e.g. `100.64.0.0/10`): an IP
+//!   inside a listed CIDR skips the default-blocked and strict-private checks
+//!   above — but never the "never allowed" ones. Mainly for re-opening one range
+//!   under `EGRESS_POLICY=strict`. An unparsable entry is ignored (fails closed).
 //!
 //! We resolve the host and check **every** resolved IP (a host that resolves to
 //! any blocked address is rejected), which also defeats DNS-rebinding to an
@@ -66,15 +67,15 @@ fn blocked_hard(ip: IpAddr) -> bool {
 /// Reserved ranges blocked unless the operator lists them in `EGRESS_ALLOW_CIDRS`.
 fn blocked_default(ip: IpAddr) -> bool {
     match canonical(ip) {
-        IpAddr::V4(a) => a.is_documentation() || is_cgnat(a.octets()),
+        IpAddr::V4(a) => a.is_documentation(),
         IpAddr::V6(_) => false,
     }
 }
 
-/// RFC1918 / ULA — allowed by default, blocked only under `EGRESS_POLICY=strict`.
+/// RFC1918 / ULA / CGNAT — allowed by default, blocked only under `EGRESS_POLICY=strict`.
 fn is_private(ip: IpAddr) -> bool {
     match canonical(ip) {
-        IpAddr::V4(a) => a.is_private(),
+        IpAddr::V4(a) => a.is_private() || is_cgnat(a.octets()),
         IpAddr::V6(a) => (a.segments()[0] & 0xfe00) == 0xfc00, // ULA fc00::/7
     }
 }
@@ -163,7 +164,7 @@ fn check_ip_with(ip: IpAddr, strict: bool, allow: &[Cidr]) -> anyhow::Result<()>
         anyhow::bail!("egress blocked: {ip} is a reserved/internal/metadata address");
     }
     if strict && is_private(ip) {
-        anyhow::bail!("egress blocked (EGRESS_POLICY=strict): {ip} is a private address");
+        anyhow::bail!("egress blocked (EGRESS_POLICY=strict): {ip} is a private/CGNAT address");
     }
     Ok(())
 }
@@ -250,19 +251,25 @@ mod tests {
     }
 
     #[test]
-    fn cgnat_blocked_without_allowlist() {
-        assert!(check_ip_with(ip("100.126.99.64"), false, &[]).is_err());
-        assert!(check_ip_with(ip("::ffff:100.126.99.64"), false, &[]).is_err());
+    fn cgnat_allowed_by_default_blocked_in_strict() {
+        // Tailscale tailnet addresses are reachable out of the box…
+        assert!(check_ip_with(ip("100.126.99.64"), false, &[]).is_ok());
+        assert!(check_ip_with(ip("::ffff:100.126.99.64"), false, &[]).is_ok());
+        // …but not under strict, unless allow-listed.
+        assert!(check_ip_with(ip("100.126.99.64"), true, &[]).is_err());
+        assert!(check_ip_with(ip("::ffff:100.126.99.64"), true, &[]).is_err());
+        // Alibaba metadata sits inside CGNAT and is always blocked.
+        assert!(check_ip_with(ip("100.100.100.200"), false, &[]).is_err());
     }
 
     #[test]
-    fn allowlist_opens_tailnet() {
+    fn allowlist_opens_tailnet_under_strict() {
         let allow = parse_allow("100.64.0.0/10");
         assert_eq!(allow.len(), 1);
-        assert!(check_ip_with(ip("100.126.99.64"), false, &allow).is_ok());
+        assert!(check_ip_with(ip("100.126.99.64"), true, &allow).is_ok());
         assert!(check_ip_with(ip("100.71.247.99"), true, &allow).is_ok());
         // IPv4-mapped IPv6 is handled exactly like the v4 address.
-        assert!(check_ip_with(ip("::ffff:100.126.99.64"), false, &allow).is_ok());
+        assert!(check_ip_with(ip("::ffff:100.126.99.64"), true, &allow).is_ok());
         // Outside the listed range the default policy still applies.
         assert!(check_ip_with(ip("192.0.2.1"), false, &allow).is_err()); // documentation
     }

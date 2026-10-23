@@ -7,6 +7,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.12.0] — 2026-10-23
+
+### Changed
+- **Tailscale tailnets are reachable by default.** CGNAT (`100.64.0.0/10`) is now treated
+  like private ranges: allowed unless `EGRESS_POLICY=strict`, so probes to `100.x.y.z`
+  tailnet hosts work without setting `EGRESS_ALLOW_CIDRS`. The Alibaba metadata IP
+  `100.100.100.200` inside that range stays blocked, as do loopback, link-local/metadata,
+  unspecified, multicast and broadcast.
+
 ## [3.11.0] — 2026-10-23
 
 ### Added

@@ -260,8 +260,8 @@ docker run -d --restart=unless-stopped --pid=host \
 | `WEBAUTHN_ORIGIN` | — | derived from request `Origin` | Passkey origin(s) — full scheme+host the SPA is served from. **Optional** (see `WEBAUTHN_RP_ID`). Comma-separate to allow several (e.g. dev `http://localhost:5173,http://localhost:8080`). |
 | `BIND_ADDR` | — | `0.0.0.0:8080` | Listen address. |
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` flag on the session cookie (local **http** dev only). |
-| `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918/ULA) outbound targets for probes / notify / backup (SSRF hardening). |
-| `EGRESS_ALLOW_CIDRS` | — | — | Comma-separated CIDRs exempt from the CGNAT / private egress checks, e.g. `100.64.0.0/10` to monitor hosts over a **Tailscale** tailnet. Loopback, link-local / cloud metadata (`169.254.0.0/16`, `fe80::/10`, `100.100.100.200`), unspecified, multicast and broadcast stay blocked even inside a listed CIDR. Invalid entries are ignored. |
+| `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918 / ULA / CGNAT `100.64.0.0/10`) outbound targets for probes / notify / backup (SSRF hardening). By default these are reachable, so hosts on a **Tailscale** tailnet can be monitored out of the box. |
+| `EGRESS_ALLOW_CIDRS` | — | — | Comma-separated CIDRs exempt from the strict / private egress checks, e.g. `100.64.0.0/10` to keep a tailnet reachable under `EGRESS_POLICY=strict`. Loopback, link-local / cloud metadata (`169.254.0.0/16`, `fe80::/10`, `100.100.100.200`), unspecified, multicast and broadcast stay blocked even inside a listed CIDR. Invalid entries are ignored. |
 | `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server enrolled with this key (lets the bundled compose agent report out of the box). |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing` / `env_filter`). |
 
