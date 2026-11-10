@@ -63,6 +63,13 @@ hub:
   # under EGRESS_POLICY=strict (private + CGNAT are reachable by default).
   # Loopback, link-local/metadata, multicast and 100.100.100.200 stay blocked regardless.
   egressAllowCidrs: ""
+  # Cloudflare Access JWT for MCP clients (e.g. a Claude.ai connector through Access
+  # Managed OAuth). Both set = the hub accepts the `Cf-Access-Jwt-Assertion` header on
+  # /mcp only, mapped by email to an EXISTING hub user (never auto-created); the web UI
+  # keeps its own login + 2FA. Empty = off.
+  cfAccess:
+    teamDomain: ""   # e.g. myteam.cloudflareaccess.com
+    aud: ""          # Access application AUD tag(s), comma-separated
   # Used only when timescaledb.enabled=false:
   configDatabaseUrl: ""
   dataDatabaseUrl: ""

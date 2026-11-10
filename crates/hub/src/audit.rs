@@ -66,7 +66,11 @@ async fn object_name(state: &AppState, path: &str) -> Option<String> {
 /// the cookie left every token-authed write (scripts, and everything the MCP
 /// server does) out of the audit log entirely, which is precisely the traffic an
 /// admin most needs to be able to review.
-async fn caller_email(state: &AppState, headers: &axum::http::HeaderMap) -> Option<String> {
+async fn caller_email(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+    mcp_in_process: bool,
+) -> Option<String> {
     let jar = CookieJar::from_headers(headers);
     if let Some(c) = jar.get(SESSION_COOKIE) {
         let found = sqlx::query_as::<_, (String,)>(
@@ -86,8 +90,20 @@ async fn caller_email(state: &AppState, headers: &axum::http::HeaderMap) -> Opti
     let bearer = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))?;
-    crate::auth::email_from_pat(state, bearer).await
+        .and_then(|s| s.strip_prefix("Bearer "));
+    if let Some(bearer) = bearer {
+        if let Some(e) = crate::auth::email_from_pat(state, bearer).await {
+            return Some(e);
+        }
+    }
+    // MCP clients signed in via Cloudflare Access (no PAT): same scope rule as auth.
+    if mcp_in_process {
+        let jwt = headers
+            .get(crate::cf_access::JWT_HEADER)
+            .and_then(|v| v.to_str().ok())?;
+        return crate::cf_access::verify(jwt).await;
+    }
+    None
 }
 
 /// Middleware: record mutating /api calls after they run.
@@ -95,6 +111,10 @@ pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> 
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let headers = req.headers().clone();
+    let mcp_in_process = req
+        .extensions()
+        .get::<crate::cf_access::McpInProcess>()
+        .is_some();
     let mutating = matches!(method.as_str(), "POST" | "PATCH" | "PUT" | "DELETE");
     // This is a *user* action log. Skip login (would log before a session exists),
     // agent ingest (machine traffic, no session, fires constantly), and non-API paths.
@@ -107,7 +127,7 @@ pub async fn record(State(state): State<AppState>, req: Request, next: Next) -> 
     // name the row it's about to remove.
     let (email, object) = if interesting {
         (
-            caller_email(&state, &headers).await,
+            caller_email(&state, &headers, mcp_in_process).await,
             object_name(&state, &path).await,
         )
     } else {

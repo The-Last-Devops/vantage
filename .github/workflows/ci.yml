@@ -75,6 +75,19 @@ jobs:
           key: test
       - run: cargo test --workspace
 
+  # Boots the hub on throwaway Postgres/Timescale with CF Access on, then runs
+  # check-pat.sh + check-mcp.sh and the forged-JWT / scope checks.
+  smoke-auth:
+    name: Smoke (PAT · MCP · CF Access)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: smoke
+      - run: bash scripts/check-cf-access.sh
+
   build:
     name: Build (release)
     runs-on: ubuntu-latest

@@ -85,6 +85,12 @@ Cargo workspace with three crates plus a hub-served SSR frontend:
   `CurrentUser` extractor accepts cookie *or* PAT, so a PAT acts AS its user and inherits that
   user's RBAC — scope a token by issuing it to a limited service-account user. PATs live in
   `api_pats` (sha256-hashed, revocable), distinct from agent enrollment keys (`api_keys`).
+  A fourth, **MCP-only** path: with `CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD` set, the
+  Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`, Managed OAuth connectors) maps by
+  email to an existing user — tried after session and PAT, and only when the path is
+  `/mcp` or the request carries the `McpInProcess` **extension** (set by `mcp::dispatch`;
+  an extension, never a header, so it can't be spoofed). Never widen it to the UI/API
+  (`cf_access.rs`); `scripts/check-cf-access.sh` (CI "Smoke") asserts the scope.
 - **KHÔNG THAY ĐỔI NÀO XONG CHO TỚI KHI MCP THEO KỊP** (chủ dự án chốt 23.09.2026). Áp cho
   **mọi** thay đổi, không riêng tính năng mới: thêm endpoint, đổi tên trường, nới một tập
   giá trị hợp lệ, đổi luật nghiệp vụ, bỏ một tuỳ chọn — tất cả. Hub nay được điều khiển bởi

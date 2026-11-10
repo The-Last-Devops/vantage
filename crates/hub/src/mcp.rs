@@ -3,6 +3,8 @@
 //! (initialize / tools/list / tools/call). Auth is a PAT via `Authorization:
 //! Bearer …` (the `CurrentUser` extractor), so every tool runs with that user's
 //! RBAC — reads are scoped to their workspaces, writes require editor there.
+//! Behind Cloudflare Access with Managed OAuth, the signed Access JWT also works
+//! here (and only here), mapped to an existing user by email — see `cf_access.rs`.
 //!
 //! **Two layers, on purpose.** Curated tools (`list_services`, `create_service`,
 //! …) carry a real input schema, so an assistant picks them correctly without
@@ -151,7 +153,11 @@ pub async fn info(State(state): State<AppState>, headers: HeaderMap) -> Response
         "transport": "streamable-http",
         "protocolVersion": PROTOCOL,
         "method": "POST this URL with JSON-RPC 2.0",
-        "authentication": "Authorization: Bearer <personal access token>",
+        "authentication": if crate::cf_access::enabled() {
+            "Authorization: Bearer <personal access token>, or Cloudflare Access (Managed OAuth) for an existing hub user"
+        } else {
+            "Authorization: Bearer <personal access token>"
+        },
         "authenticated": user.is_some(),
     });
     match &user {
@@ -165,6 +171,7 @@ pub async fn info(State(state): State<AppState>, headers: HeaderMap) -> Response
             body["hint"] = json!(concat!(
                 "No valid token on this request. From a browser you are simply not ",
                 "logged in; from a client, check the Authorization header. If you ",
+                "came through Cloudflare Access, your email must belong to a hub user. If you ",
                 "were redirected to a login page instead of seeing this JSON, the ",
                 "block is in front of the hub, not in it."
             ));
@@ -453,11 +460,14 @@ async fn dispatch(
         .map_err(|_| format!("bad HTTP method: {method}"))?;
 
     let mut req = Request::builder().method(method).uri(path);
-    for h in ["authorization", "cookie"] {
+    for h in ["authorization", "cookie", crate::cf_access::JWT_HEADER] {
         if let Some(v) = headers.get(h) {
             req = req.header(h, v);
         }
     }
+    // Lets the re-entered handler accept the Cloudflare Access JWT (see
+    // cf_access.rs). An extension, not a header, so no outside caller can set it.
+    req = req.extension(crate::cf_access::McpInProcess);
     let req = req
         .header("content-type", "application/json")
         .header("x-vantage-mcp", "1")

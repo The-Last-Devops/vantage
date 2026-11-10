@@ -134,6 +134,19 @@ impl FromRequestParts<AppState> for CurrentUser {
                 return Ok(u);
             }
         }
+        // MCP clients signed in through Cloudflare Access Managed OAuth carry no
+        // PAT — only Access's signed JWT. Honoured for /mcp and the MCP server's
+        // in-process API calls only; see cf_access.rs.
+        let mcp_scope = parts.uri.path() == "/mcp"
+            || parts
+                .extensions
+                .get::<crate::cf_access::McpInProcess>()
+                .is_some();
+        if mcp_scope {
+            if let Some(u) = user_from_cf_access(state, &parts.headers).await? {
+                return Ok(u);
+            }
+        }
         Err(StatusCode::UNAUTHORIZED)
     }
 }
@@ -157,8 +170,53 @@ pub async fn current_user_opt(
         .and_then(|h| h.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
         .map(str::trim)
-        .filter(|s| !s.is_empty())?;
-    user_from_pat(state, tok).await.ok().flatten()
+        .filter(|s| !s.is_empty());
+    if let Some(tok) = tok {
+        if let Ok(Some(u)) = user_from_pat(state, tok).await {
+            return Some(u);
+        }
+    }
+    // Only caller is the /mcp self-check, so the Access JWT is in scope here.
+    user_from_cf_access(state, headers).await.ok().flatten()
+}
+
+/// Resolve a Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) to an existing hub
+/// user by email. Never creates users: someone Access lets in but the hub does not
+/// know stays unauthenticated.
+async fn user_from_cf_access(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<CurrentUser>, StatusCode> {
+    if !crate::cf_access::enabled() {
+        return Ok(None);
+    }
+    let Some(jwt) = headers
+        .get(crate::cf_access::JWT_HEADER)
+        .and_then(|h| h.to_str().ok())
+    else {
+        return Ok(None);
+    };
+    let Some(email) = crate::cf_access::verify(jwt).await else {
+        return Ok(None);
+    };
+    let row: Option<(Uuid, String, bool, bool)> =
+        sqlx::query_as("SELECT id, email, is_admin, read_all FROM users WHERE lower(email) = $1")
+            .bind(&email)
+            .fetch_optional(&state.config)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "cf access user lookup");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+    if row.is_none() {
+        tracing::info!(email = %email, "cf access: valid JWT but no hub user with this email");
+    }
+    Ok(row.map(|(id, email, is_admin, read_all)| CurrentUser {
+        id,
+        email,
+        is_admin,
+        read_all,
+    }))
 }
 
 async fn user_from_session(

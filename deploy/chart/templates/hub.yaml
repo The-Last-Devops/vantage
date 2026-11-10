@@ -60,6 +60,13 @@ spec:
             # SSRF guard exemptions (e.g. a Tailscale tailnet); metadata/loopback stay blocked.
             - { name: EGRESS_ALLOW_CIDRS, value: {{ . | quote }} }
             {{- end }}
+            {{- /* `default dict`: `helm upgrade --reuse-values` keeps the OLD values, which have no cfAccess key */}}
+            {{- $cfa := .Values.hub.cfAccess | default dict }}
+            {{- if and $cfa.teamDomain $cfa.aud }}
+            # MCP clients signed in via Cloudflare Access Managed OAuth (JWT honoured on /mcp only).
+            - { name: CF_ACCESS_TEAM_DOMAIN, value: {{ $cfa.teamDomain | quote }} }
+            - { name: CF_ACCESS_AUD, value: {{ $cfa.aud | quote }} }
+            {{- end }}
             {{- if include "vantage.appSecretEnabled" . }}
             # Encrypts SSH-key master keys at rest (back it up — losing it = keys unrecoverable).
             - name: EXEC_APP_SECRET

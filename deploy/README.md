@@ -72,6 +72,7 @@ Set on the `hub` container. Required unless noted; the rest have safe defaults.
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` cookie flag for **local http dev only**. |
 | `EGRESS_POLICY` | — | allow private | Set `strict` to also block private (RFC1918/ULA/CGNAT incl. Tailscale `100.64.0.0/10`) outbound targets (SSRF hardening). |
 | `EGRESS_ALLOW_CIDRS` | — | — | Comma-separated CIDRs exempt from the strict/private checks (e.g. `100.64.0.0/10` to keep a tailnet reachable under `strict`). Loopback, link-local/metadata, multicast, broadcast and `100.100.100.200` stay blocked. Helm: `hub.egressAllowCidrs`. |
+| `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | — | — | Both set = MCP clients signed in through **Cloudflare Access Managed OAuth** (e.g. a Claude.ai connector) authenticate with the `Cf-Access-Jwt-Assertion` header, on `/mcp` only. Team domain like `myteam.cloudflareaccess.com`; AUD = the Access application's AUD tag(s), comma-separated. The JWT is verified (RS256 against `https://<team>/cdn-cgi/access/certs`, `iss`, `aud`, `exp`/`nbf`) and its email must match an **existing** hub user — none is auto-created, RBAC unchanged. The web UI keeps its own login + 2FA. Helm: `hub.cfAccess.teamDomain` / `hub.cfAccess.aud`. |
 | `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server with this key (lets a bundled agent report out of the box). |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing`/`env_filter`). |
 

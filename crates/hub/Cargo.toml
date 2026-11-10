@@ -67,3 +67,7 @@ lettre = { version = "0.11", default-features = false, features = [
 qrcode = { version = "0.14.1", default-features = false }
 webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation"] }
 url = "2.5.8"
+# Cloudflare Access JWT (RS256) for MCP clients behind Access Managed OAuth —
+# both already in the tree (rustls, webauthn), so no new code is pulled in.
+ring = "0.17"
+base64 = "0.22"

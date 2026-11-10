@@ -17,6 +17,7 @@ mod api;
 mod audit;
 mod auth;
 mod backup;
+mod cf_access;
 mod console;
 mod data_admin;
 mod db;

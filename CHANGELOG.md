@@ -7,6 +7,23 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [3.13.0] — 2026-11-10
+
+### Added
+- **MCP connectors can sign in through Cloudflare Access instead of a PAT.** Behind
+  Access with **Managed OAuth** (e.g. a Claude.ai custom connector), set
+  `CF_ACCESS_TEAM_DOMAIN` (e.g. `myteam.cloudflareaccess.com`) and `CF_ACCESS_AUD` (the
+  Access application's AUD tag, comma-separated for several) and the hub accepts the
+  `Cf-Access-Jwt-Assertion` header Access adds. The JWT is verified — RS256 against the
+  team's JWKS (cached 1 h, refetched at most once a minute on an unknown key), `iss`,
+  `aud`, `exp`/`nbf` with 60 s leeway — and its email is mapped to an **existing** hub
+  user, whose RBAC applies unchanged. Nobody is auto-created; service-token JWTs (no
+  email) are ignored. Scope is MCP only: `/mcp` and the MCP server's in-process API
+  calls; the web UI and the rest of the API keep login + 2FA/passkeys. Writes made this
+  way are recorded in the audit log under the JWT's email, and the `GET /mcp`
+  self-check says Cloudflare Access is supported. Helm: `hub.cfAccess.teamDomain` /
+  `hub.cfAccess.aud`. Unset = behaviour unchanged.
+
 ## [3.12.0] — 2026-10-23
 
 ### Changed

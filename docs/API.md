@@ -153,6 +153,18 @@ scoped to their workspaces, writes requiring `editor` there. There is no
 separate permission layer for MCP: to limit what an assistant can do, issue its
 PAT to a service-account user with membership only where it belongs.
 
+**Cloudflare Access (optional).** With `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD`
+set, a client that signed in through Access **Managed OAuth** (no PAT) is
+authenticated by the `Cf-Access-Jwt-Assertion` header Access adds. The hub checks
+`alg = RS256`, the signature against `https://<team>/cdn-cgi/access/certs` (cached
+1 h, refetched at most once a minute on an unknown `kid`), `iss = https://<team>`,
+`aud` ∋ one of the configured tags and `exp`/`nbf` (60 s leeway), then maps the
+lower-cased `email` to an **existing** user — never creates one. Service-token
+JWTs carry no email and are ignored. Order is session → PAT → JWT, and the JWT is
+honoured only on `/mcp` and on `api_request`'s in-process calls (marked by a
+request extension, not a header, so no outside caller can claim it); writes made
+that way land in the audit log under the JWT's email.
+
 Methods: `initialize`, `tools/list`, `tools/call`, `ping`.
 
 **Open `<hub>/mcp` in a browser to check it works.** A `GET` answers a small JSON
@@ -163,7 +175,7 @@ different places:
 | What you see | What is wrong | Where to fix it |
 |---|---|---|
 | a login page / redirect | something in front of the hub (e.g. Cloudflare Access) blocked the request — it never arrived | your access gateway |
-| `"authenticated": false` | the hub is up; the token is missing or invalid | the `Authorization` header |
+| `"authenticated": false` | the hub is up; the token is missing or invalid — or, via Cloudflare Access, the JWT's email is not a hub user / `CF_ACCESS_*` unset or wrong | the `Authorization` header, or `CF_ACCESS_*` + the user list |
 | `"identity"` + `"tools"` | nothing — this is what an MCP client will see | — |
 
 Anonymous callers get only the server name, transport and protocol; version,

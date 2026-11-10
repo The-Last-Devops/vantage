@@ -225,6 +225,13 @@ belongs, and issue the token as that user; give it `viewer` and it can look but
 not touch. Every write is recorded in the audit log under the token's owner, so
 **Settings → Audit** shows exactly what the assistant did.
 
+**Behind Cloudflare Access? A connector can sign in without a token.** With
+Access **Managed OAuth** on the `/mcp` application (e.g. a Claude.ai custom
+connector), set `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` and the hub accepts
+Access's signed `Cf-Access-Jwt-Assertion` on `/mcp` — mapped by email to an
+**existing** hub user with that user's RBAC. Nobody is auto-created, and the JWT
+is never accepted on the web UI or the rest of the API (those keep login + 2FA).
+
 See [docs/API.md](docs/API.md) for the full tool list.
 
 ## Adding servers
@@ -262,6 +269,7 @@ docker run -d --restart=unless-stopped --pid=host \
 | `INSECURE_COOKIES` | — | `0` | Set `1` to drop the `Secure` flag on the session cookie (local **http** dev only). |
 | `EGRESS_POLICY` | — | (allow private) | Set `strict` to also block private (RFC1918 / ULA / CGNAT `100.64.0.0/10`) outbound targets for probes / notify / backup (SSRF hardening). By default these are reachable, so hosts on a **Tailscale** tailnet can be monitored out of the box. |
 | `EGRESS_ALLOW_CIDRS` | — | — | Comma-separated CIDRs exempt from the strict / private egress checks, e.g. `100.64.0.0/10` to keep a tailnet reachable under `EGRESS_POLICY=strict`. Loopback, link-local / cloud metadata (`169.254.0.0/16`, `fe80::/10`, `100.100.100.200`), unspecified, multicast and broadcast stay blocked even inside a listed CIDR. Invalid entries are ignored. |
+| `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | — | — | Both set = MCP clients signed in through **Cloudflare Access Managed OAuth** (e.g. a Claude.ai connector) authenticate with the `Cf-Access-Jwt-Assertion` header, on `/mcp` only. Team domain like `myteam.cloudflareaccess.com`; AUD = the Access application's AUD tag(s), comma-separated. The JWT is verified (RS256 against `https://<team>/cdn-cgi/access/certs`, `iss`, `aud`, `exp`/`nbf`) and its email must match an **existing** hub user — none is auto-created, RBAC unchanged. The web UI keeps its own login + 2FA. Helm: `hub.cfAccess.teamDomain` / `hub.cfAccess.aud`. |
 | `LOCAL_API_KEY` | — | — | If set, auto-creates a `default` workspace + a `local` server enrolled with this key (lets the bundled compose agent report out of the box). |
 | `RUST_LOG` | — | `info,sqlx=warn` | Log filter (`tracing` / `env_filter`). |
 
