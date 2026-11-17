@@ -14,8 +14,10 @@ pub(super) async fn probe(m: &Monitor) -> Beat {
     let start = Instant::now();
     // SSRF egress guard: reject internal/metadata targets before connecting.
     // `dns` is resolution-only (no outbound data connection), so it's exempt.
+    // `domain_expiry` never contacts its target — it guards each RDAP/WHOIS server
+    // it does contact instead.
     // Resolve off the async worker — getaddrinfo can block.
-    if m.kind != "dns" {
+    if m.kind != "dns" && m.kind != "domain_expiry" {
         let t = m.target.clone();
         match tokio::task::spawn_blocking(move || crate::net_guard::check_target(&t)).await {
             Ok(Ok(())) => {}
@@ -34,6 +36,7 @@ pub(super) async fn probe(m: &Monitor) -> Beat {
         "rabbitmq" => probe_rabbitmq(m, start).await,
         "dns" => probe_dns(m, start).await,
         "tls" => probe_tls(m, start).await,
+        "domain_expiry" => super::domain_expiry::probe_domain_expiry(m, start).await,
         other => down(&format!("unsupported monitor kind: {other}")),
     }
 }

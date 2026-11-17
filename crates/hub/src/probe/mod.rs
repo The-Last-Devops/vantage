@@ -10,6 +10,7 @@
 //!   method, headers{}, body, auth{type,username,password,token},
 //!   accepted_status ("200-299,301"), max_redirects, ignore_tls,
 //!   keyword, keyword_invert   (tags/description are metadata, ignored here)
+//!   domain_expiry: warn_days, whois_server (see [`domain_expiry`])
 //!
 //! Split into two concerns:
 //! - [`engine`] — the background scheduler ([`spawn`]), the immediate one-shot
@@ -22,8 +23,10 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 mod checks;
+mod domain_expiry;
 mod engine;
 
+pub use domain_expiry::normalize_domain;
 pub use engine::{check_once, spawn};
 
 #[derive(Clone)]

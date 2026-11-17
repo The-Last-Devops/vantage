@@ -7,6 +7,22 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
+## [Unreleased]
+
+### Added
+- **Domain expiry checks (`domain_expiry`).** A new service kind that watches when a
+  domain's *registration* runs out — the failure a TLS check cannot see: when a
+  registration lapses the registrar parks the domain, every name under it stops
+  resolving to you, and whatever your clients keep sending there goes to whoever holds
+  it now. The hub asks the registry over RDAP (found through IANA's bootstrap, cached
+  for a day) and falls back to WHOIS for TLDs without RDAP, following a thin registry
+  to the registrar's WHOIS server when needed. The check goes down once `warn_days`
+  (default 14) or fewer are left; the message says the date and which server answered.
+  Target is a bare domain; it runs every 12 h by default and never more often than
+  hourly, with at most four lookups in flight so a restart does not hammer registries.
+  Every RDAP/WHOIS server is passed through the SSRF guard before it is contacted. In
+  the UI as "Domain expiry"; over MCP as `create_service` with `kind: "domain_expiry"`.
+
 ## [3.13.0] — 2026-11-10
 
 ### Added

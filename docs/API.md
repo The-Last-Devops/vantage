@@ -224,8 +224,16 @@ goes down. On a **host**, pass a threshold:
 the latest sample.
 
 Service `kind` is one of `http` `tcp` `ping` `keyword` `postgres` `redis` `dns`
-`rabbitmq` `mysql` `mongodb` `tls` `push`. All but `push` need a `target`
+`rabbitmq` `mysql` `mongodb` `tls` `domain_expiry` `push`. All but `push` need a `target`
 (`push` is passive — the hub generates a URL and waits to be pinged).
+
+`domain_expiry` watches a domain's **registration** (not its certificate — that is
+`tls`): RDAP via IANA's bootstrap, falling back to WHOIS for TLDs without RDAP. The
+`target` is a bare domain (`example.com`; a URL, port or path is a `400`) and is stored
+lowercased. `interval_secs` defaults to `43200` and may not go below `3600`. Config:
+`warn_days` (default 14 — the check goes down with that many days left or fewer) and
+an optional `whois_server` to skip discovery. The heartbeat's status code carries the
+days left, its message the date and which server answered.
 
 Channel `kind` is one of 17 providers, each with **different** `config` fields —
 call `channel_types` for them rather than guessing, since a wrong config yields a

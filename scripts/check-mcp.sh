@@ -108,6 +108,30 @@ if [ -n "$WS" ]; then
   fi
 fi
 
+# domain_expiry: the schema promises a bare domain and an hourly floor — the hub
+# must hold to both, and store the normalised name with the 12 h default.
+if [ -n "$WS" ]; then
+  say "domain_expiry: URL target -> 400"
+  printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"https://example.com"}' "$WS")")" \
+    | text | grep -q '"status": 400' && echo "ok" || { echo "FAIL"; fail=1; }
+
+  say "domain_expiry: interval < 3600 -> 400"
+  printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"example.com","interval_secs":60}' "$WS")")" \
+    | text | grep -q '"status": 400' && echo "ok" || { echo "FAIL"; fail=1; }
+
+  say "domain_expiry: bare domain -> created"
+  DMON=$(printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"Example.COM.","config":{"warn_days":14}}' "$WS")")" \
+    | text | py "import sys,json;print(json.load(sys.stdin)['body'])")
+  [ -n "$DMON" ] && echo "ok ($DMON)" || { echo "FAIL"; fail=1; }
+  if [ -n "$DMON" ]; then
+    say "domain_expiry: normalised, 12 h default"
+    printf '%s' "$(call get_service "$(printf '{"monitor_id":"%s"}' "$DMON")")" | text \
+      | py "import sys,json;b=json.load(sys.stdin)['body'];print('ok' if b['target']=='example.com' and b['interval_secs']==43200 and b['kind']=='domain_expiry' else b)" \
+      | grep -qx ok && echo "ok" || { echo "FAIL"; fail=1; }
+    printf '%s' "$(call delete_service "$(printf '{"monitor_id":"%s"}' "$DMON")")" >/dev/null
+  fi
+fi
+
 say "bad uuid -> isError, not a 500"
 printf '%s' "$(call get_service '{"monitor_id":"not-a-uuid"}')" \
   | py "import sys,json;d=json.load(sys.stdin)['result'];print('err' if d.get('isError') else 'no')" | grep -qx err \

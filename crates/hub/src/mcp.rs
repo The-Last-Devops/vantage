@@ -233,11 +233,11 @@ fn tool_defs() -> Value {
             "type": "object", "required": ["workspace_id", "name", "kind", "target"], "properties": {
                 "workspace_id": { "type": "string" },
                 "name": { "type": "string" },
-                "kind": { "type": "string", "enum": ["http","tcp","ping","keyword","postgres","redis","dns","rabbitmq","mysql","mongodb","tls","push"],
-                    "description": "what to probe. `push` is the passive kind: the hub generates a URL and waits to be pinged." },
-                "target": { "type": "string", "description": "URL for http/keyword/tls, host:port for tcp and the database kinds, hostname for ping/dns. Leave empty for `push` — it has no target." },
-                "interval_secs": { "type": "integer" },
-                "config": { "type": "object", "description": "kind-specific settings (keyword, expected status, timeout…)" } } } }),
+                "kind": { "type": "string", "enum": ["http","tcp","ping","keyword","postgres","redis","dns","rabbitmq","mysql","mongodb","tls","domain_expiry","push"],
+                    "description": "what to probe. `push` is the passive kind: the hub generates a URL and waits to be pinged. `tls` = the certificate's expiry; `domain_expiry` = the domain REGISTRATION's expiry (RDAP, falling back to WHOIS) — down when it has `warn_days` or fewer left." },
+                "target": { "type": "string", "description": "URL for http/keyword/tls, host:port for tcp and the database kinds, hostname for ping/dns, a bare registrable domain for domain_expiry (`example.com` — no scheme, port or path; else 400). Leave empty for `push` — it has no target." },
+                "interval_secs": { "type": "integer", "description": "seconds between checks (default 60). domain_expiry: default 43200, minimum 3600 (else 400)." },
+                "config": { "type": "object", "description": "kind-specific settings. http/keyword: method, headers, accepted_status (\"200-299,301\"), keyword, timeout_secs. tls: cert_warn_days (default 14). domain_expiry: warn_days (default 14), whois_server (optional — skip discovery and ask this WHOIS server). All kinds: retries, upside_down." } } } }),
         json!({ "name": "update_service", "description": "Edit a service check (any subset of fields).", "inputSchema": {
             "type": "object", "required": ["monitor_id"], "properties": {
                 "monitor_id": { "type": "string" },
