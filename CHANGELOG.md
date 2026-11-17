@@ -7,7 +7,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 Each released version's section is used verbatim as the GitHub Release notes
 (extracted by `.github/workflows/release.yml`), so keep entries user-facing.
 
-## [Unreleased]
+## [3.14.0] — 2026-11-17
 
 ### Added
 - **Domain expiry checks (`domain_expiry`).** A new service kind that watches when a
