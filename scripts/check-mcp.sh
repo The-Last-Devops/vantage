@@ -113,11 +113,11 @@ fi
 if [ -n "$WS" ]; then
   say "domain_expiry: URL target -> 400"
   printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"https://example.com"}' "$WS")")" \
-    | text | grep -q '"status": 400' && echo "ok" || { echo "FAIL"; fail=1; }
+    | text | grep -q '^ERR Error: 400' && echo "ok" || { echo "FAIL"; fail=1; }
 
   say "domain_expiry: interval < 3600 -> 400"
   printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"example.com","interval_secs":60}' "$WS")")" \
-    | text | grep -q '"status": 400' && echo "ok" || { echo "FAIL"; fail=1; }
+    | text | grep -q '^ERR Error: 400' && echo "ok" || { echo "FAIL"; fail=1; }
 
   say "domain_expiry: bare domain -> created"
   DMON=$(printf '%s' "$(call create_service "$(printf '{"workspace_id":"%s","name":"mcp-dom","kind":"domain_expiry","target":"Example.COM.","config":{"warn_days":14}}' "$WS")")" \

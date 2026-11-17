@@ -477,7 +477,11 @@ async fn dispatch(
         })
         .map_err(|e| format!("bad request: {e}"))?;
 
-    let resp = router.oneshot(req).await.map_err(|e| e.to_string())?;
+    // The router's error type is `Infallible` — an empty match proves it.
+    let resp = match router.oneshot(req).await {
+        Ok(r) => r,
+        Err(e) => match e {},
+    };
     let status = resp.status();
     let bytes = axum::body::to_bytes(resp.into_body(), MAX_BODY)
         .await
