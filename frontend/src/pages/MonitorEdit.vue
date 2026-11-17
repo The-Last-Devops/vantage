@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import PageLoader from '../components/PageLoader.vue'
@@ -43,18 +43,28 @@ const KINDS = [
   { v: 'rabbitmq', label: 'RabbitMQ', ph: 'host:5672' },
   { v: 'dns', label: 'DNS', ph: 'example.com' },
   { v: 'tls', label: 'TLS cert', ph: 'host:443' },
+  { v: 'domain_expiry', label: 'Domain expiry', ph: 'example.com' },
   { v: 'push', label: 'Push (passive)', ph: '' },
 ]
 const isHttp = (k) => k === 'http' || k === 'keyword'
+// Mirrors the hub's normalize_domain (crates/hub/src/probe/domain_expiry.rs).
+const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*\.(?!\d+\.?$)[a-z0-9-]{1,63}(?<!-)\.?$/i
+// Registration dates barely move and RDAP/WHOIS servers rate-limit: twice a day by default.
+const DOMAIN_MIN_INTERVAL = 3600
 const isEdit = computed(() => editId.value != null)
 
 const blank = () => ({
   id: null, name: '', kind: 'http', target: '', wsId: '', interval_secs: 60, timeout_secs: 15, retries: 1, upside_down: false,
   method: 'GET', accepted_status: '', max_redirects: 10, ignore_tls: false, headersText: '', body: '',
   authType: 'none', authUser: '', authPass: '', authToken: '', keyword: '', keyword_invert: false,
-  password: '', expected_ip: '', cert_warn_days: 14, tags: '', description: '',
+  password: '', expected_ip: '', cert_warn_days: 14, warn_days: 14, tags: '', description: '',
 })
 const f = ref(blank())
+watch(() => f.value.kind, (k) => {
+  if (isEdit.value) return
+  if (k === 'domain_expiry' && f.value.interval_secs < DOMAIN_MIN_INTERVAL) f.value.interval_secs = 43200
+  else if (k !== 'domain_expiry' && f.value.interval_secs === 43200) f.value.interval_secs = 60
+})
 
 function buildConfig() {
   const v = f.value
@@ -78,6 +88,7 @@ function buildConfig() {
   if (v.kind === 'redis' && v.password) cfg.password = v.password
   if (v.kind === 'dns' && v.expected_ip.trim()) cfg.expected_ip = v.expected_ip.trim()
   if (v.kind === 'tls') cfg.cert_warn_days = Number(v.cert_warn_days) || 14
+  if (v.kind === 'domain_expiry') cfg.warn_days = Number(v.warn_days) || 14
   return cfg
 }
 
@@ -89,6 +100,8 @@ async function submit() {
   if (!v.name.trim()) { formErr.value = 'Name is required.'; return }
   if (v.kind !== 'push' && !v.target.trim()) { formErr.value = 'Target is required.'; return }
   if (v.kind === 'keyword' && !v.keyword.trim()) { formErr.value = 'Keyword is required for keyword monitors.'; return }
+  if (v.kind === 'domain_expiry' && !DOMAIN_RE.test(v.target.trim())) { formErr.value = 'Target must be a bare domain, e.g. example.com (no https://, port or path).'; return }
+  if (v.kind === 'domain_expiry' && Number(v.interval_secs) < DOMAIN_MIN_INTERVAL) { formErr.value = 'Domain expiry checks run at most hourly (interval ≥ 3600 s).'; return }
   const target = v.kind === 'push' ? 'push' : v.target.trim()
   const config = buildConfig()
   saving.value = true
@@ -139,7 +152,7 @@ onMounted(async () => {
           headersText: c.headers ? Object.entries(c.headers).map(([k, v]) => `${k}: ${v}`).join('\n') : '', body: c.body || '',
           authType: auth.type || 'none', authUser: auth.username || '', authPass: auth.password || '', authToken: auth.token || '',
           keyword: c.keyword || '', keyword_invert: !!c.keyword_invert,
-          password: c.password || '', expected_ip: c.expected_ip || '', cert_warn_days: c.cert_warn_days ?? 14, tags: (c.tags || []).join(', '), description: c.description || '',
+          password: c.password || '', expected_ip: c.expected_ip || '', cert_warn_days: c.cert_warn_days ?? 14, warn_days: c.warn_days ?? 14, tags: (c.tags || []).join(', '), description: c.description || '',
         }
       }
     } else {
@@ -179,6 +192,10 @@ onMounted(async () => {
           <label v-if="f.kind === 'redis'" class="block text-xs text-muted">Password (optional)<input v-model="f.password" type="password" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 text-sm text-fg focus:border-accent/55 focus:outline-none" /></label>
           <label v-if="f.kind === 'dns'" class="block text-xs text-muted">Expected IP (optional, substring)<input v-model="f.expected_ip" placeholder="1.2.3.4" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg placeholder:text-faint focus:border-accent/55 focus:outline-none" /></label>
           <label v-if="f.kind === 'tls'" class="block text-xs text-muted">Warn when expiring within (days)<input v-model.number="f.cert_warn_days" type="number" min="1" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" /></label>
+          <template v-if="f.kind === 'domain_expiry'">
+            <label class="block text-xs text-muted">Warn when registration expires within (days)<input v-model.number="f.warn_days" type="number" min="1" class="mt-1 block w-full rounded-lg border border-line2 bg-surface2 px-3 py-2 font-mono text-sm text-fg focus:border-accent/55 focus:outline-none" /></label>
+            <p class="rounded-lg border border-line2 bg-surface2/40 px-3 py-2 text-xs text-muted">Checks the domain's registration (RDAP, falling back to WHOIS), not its TLS certificate — use “TLS cert” for that. Runs at most hourly; 12 h is plenty.</p>
+          </template>
         </section>
 
         <!-- Schedule -->

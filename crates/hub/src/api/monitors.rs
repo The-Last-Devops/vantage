@@ -3,7 +3,7 @@ use super::*;
 #[derive(Deserialize)]
 pub struct CreateMonitor {
     pub name: String,
-    pub kind: String, // http | tcp | ping | keyword
+    pub kind: String, // see the allowlist in create_monitor
     pub target: String,
     #[serde(default)]
     pub interval_secs: Option<i32>,
@@ -32,6 +32,7 @@ pub async fn create_monitor(
             | "mysql"
             | "mongodb"
             | "tls"
+            | "domain_expiry"
             | "push"
     ) {
         return Err(StatusCode::BAD_REQUEST);
@@ -40,6 +41,18 @@ pub async fn create_monitor(
     if !super::valid_name(&req.name, 80) || (req.kind != "push" && req.target.trim().is_empty()) {
         return Err(StatusCode::BAD_REQUEST);
     }
+
+    let (target, interval) = if req.kind == "domain_expiry" {
+        (
+            crate::probe::normalize_domain(&req.target).ok_or(StatusCode::BAD_REQUEST)?,
+            domain_expiry_interval(req.interval_secs)?,
+        )
+    } else {
+        (
+            req.target.trim().to_string(),
+            req.interval_secs.unwrap_or(60).max(1),
+        )
+    };
 
     let mut config = req.config.unwrap_or_else(|| serde_json::json!({}));
     // Push monitors get a generated token; the agent/cron calls /pub/push/<token>.
@@ -57,8 +70,8 @@ pub async fn create_monitor(
     .bind(ws)
     .bind(req.name.trim())
     .bind(&req.kind)
-    .bind(req.target.trim())
-    .bind(req.interval_secs.unwrap_or(60).max(1))
+    .bind(target)
+    .bind(interval)
     .bind(sqlx::types::Json(config))
     .fetch_one(&state.config)
     .await
@@ -70,6 +83,17 @@ pub async fn create_monitor(
     tokio::spawn(async move { crate::probe::check_once(&st, id).await });
 
     Ok(Json(id))
+}
+
+/// Registration dates move once a year and RDAP/WHOIS servers rate-limit, so a
+/// domain check defaults to twice a day and refuses anything faster than hourly.
+pub const DOMAIN_EXPIRY_MIN_INTERVAL: i32 = 3600;
+fn domain_expiry_interval(req: Option<i32>) -> Result<i32, StatusCode> {
+    match req {
+        None => Ok(43_200),
+        Some(s) if s >= DOMAIN_EXPIRY_MIN_INTERVAL => Ok(s),
+        Some(_) => Err(StatusCode::BAD_REQUEST),
+    }
 }
 
 /// GET /api/monitors/:id/debug — last ok + last err request/response detail.
@@ -149,6 +173,16 @@ pub async fn patch_monitor(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    // A domain check stores the normalised name and never runs more than hourly.
+    let target = match (kind.as_str(), req.target.as_deref()) {
+        ("domain_expiry", Some(t)) => {
+            Some(crate::probe::normalize_domain(t).ok_or(StatusCode::BAD_REQUEST)?)
+        }
+        (_, t) => t.map(|t| t.trim().to_string()),
+    };
+    if kind == "domain_expiry" && req.interval_secs.is_some() {
+        domain_expiry_interval(req.interval_secs)?;
+    }
 
     // Push monitors are addressed by their token; never let an edit drop it. The
     // edit form rebuilds config from its fields and may omit push_token, so carry
@@ -181,7 +215,7 @@ pub async fn patch_monitor(
     )
     .bind(id)
     .bind(req.name.map(|n| n.trim().to_string()))
-    .bind(req.target.map(|t| t.trim().to_string()))
+    .bind(target)
     .bind(req.interval_secs)
     .bind(req.enabled)
     .bind(config.map(sqlx::types::Json))

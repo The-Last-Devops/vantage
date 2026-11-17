@@ -79,10 +79,7 @@ pub fn valid_password(s: &str) -> bool {
         "password", "passw0rd", "qwerty", "123456", "111111", "000000", "letmein", "welcome",
         "iloveyou", "abc123", "admin", "vantage", "monitor",
     ];
-    if WEAK.iter().any(|w| low.contains(w)) {
-        return false;
-    }
-    true
+    !WEAK.iter().any(|w| low.contains(w))
 }
 
 fn internal<E: std::fmt::Display>(e: E) -> StatusCode {

@@ -19,13 +19,13 @@ let timer = null
 
 const KINDS = {
   http: 'HTTP(s)', keyword: 'HTTP keyword', tcp: 'TCP port', ping: 'Ping', postgres: 'PostgreSQL',
-  mysql: 'MySQL', mongodb: 'MongoDB', redis: 'Redis', rabbitmq: 'RabbitMQ', dns: 'DNS', tls: 'TLS cert', push: 'Push',
+  mysql: 'MySQL', mongodb: 'MongoDB', redis: 'Redis', rabbitmq: 'RabbitMQ', dns: 'DNS', tls: 'TLS cert', domain_expiry: 'Domain expiry', push: 'Push',
 }
 // DS glyph per check kind (falls back to the generic service icon)
 const KIND_ICON = {
   http: 'globe', keyword: 'globe', tls: 'shield', dns: 'globe', ping: 'wifi-off',
   tcp: 'network', postgres: 'service', mysql: 'service', mongodb: 'service', redis: 'service',
-  rabbitmq: 'service', push: 'pulse',
+  rabbitmq: 'service', domain_expiry: 'clock', push: 'pulse',
 }
 const kindIcon = (k) => KIND_ICON[k] || 'service'
 
